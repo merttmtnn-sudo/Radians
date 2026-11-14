@@ -76,3 +76,11 @@ def test_bad_mask_keeps_bright_star_bits():
     for name in ("SOURCE", "OVERFLOW", "TRANSIENT", "OUTLIER"):
         bit = next(b for b, n in config.FLAG_BITS.items() if n == name)
         assert not config.BAD_MASK & (1 << bit)
+
+
+def test_coadd_fills_all_flagged_pixels():
+    a = _frame(np.full((3, 3), 2.0), flag=1 << 26)           # BLOOM everywhere
+    b = _frame(np.full((3, 3), 4.0), flag=1 << 26)
+    img, var, flg = stack.coadd([a, b])
+    assert np.allclose(img, 3.0) and np.isfinite(var).all()
+    assert (flg & (1 << 26)).all()

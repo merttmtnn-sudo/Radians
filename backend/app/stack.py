@@ -168,6 +168,16 @@ def coadd(frames: list[Frame]):
     with np.errstate(invalid="ignore", divide="ignore"):
         img = np.where(den > 0, num / den, np.nan).astype(np.float32)
         var = np.where(den > 0, 1.0 / den, np.nan).astype(np.float32)
+        # pixels where every exposure is flagged (e.g. a saturated star's core): show the plain
+        # mean of what exists rather than a hole; the flags still say it is unreliable
+        hole = ~(den > 0)
+        if hole.any():
+            stack_img = np.stack([f.image for f in frames])
+            stack_var = np.stack([f.variance for f in frames])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                img[hole] = np.nanmean(stack_img, axis=0)[hole]
+                var[hole] = (np.nanmean(stack_var, axis=0) / np.maximum(1, np.isfinite(stack_img).sum(0)))[hole]
     return img, var, flg
 
 

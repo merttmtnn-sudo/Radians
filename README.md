@@ -27,8 +27,8 @@ one environment variable (`SPHEREX_COLLECTIONS=spherex_dr2,spherex_dr1`).
 |---|---|---|
 | 0 | Data discovery: IRSA collections, file layout, byte-range access | ✅ |
 | 1 | Core backend: search, cutouts, reprojection, epochs, co-add, photometry, API | ✅ |
-| 2 | Blink player: input, playback, stretch, dates, shareable URLs | 🚧 |
-| 3 | Discovery tools: difference/sum images, per-detector co-adds, field of view, flag overlay | ⏳ |
+| 2 | Blink player: input, playback, stretch, dates, shareable URLs | ✅ |
+| 3 | Discovery tools: difference/sum images, per-detector co-adds, field of view, flag overlay | 🚧 |
 | 4 | Extras: on-the-fly spectra, Gaia / WISE overlays with Aladin Lite | ⏳ |
 | 5 | Testing on challenge targets, deployment (Hugging Face Space), demo | ⏳ |
 
@@ -54,3 +54,11 @@ Tests: `cd backend && python -m pytest -q tests`
 
 SPHEREx data from NASA/IPAC Infrared Science Archive (IRSA). Name resolution by CDS Sesame
 (Strasbourg). Built with Astropy, PyVO, NumPy, SciPy and FastAPI.
+
+## Using the viewer
+
+- **Space** play/pause, **← →** step frames, the timeline jumps to an epoch.
+- All frames share one brightness scale, so a star that brightens really is brighter.
+- Hover the image for RA/Dec, pixel value (MJy/sr) and the SPHEREx contamination flags of that pixel.
+- Every view is a URL: `/?q=RW%20Aur&fov=240&mode=epoch&frame=1&cmap=heat`. Add `&embed=1` for a
+  chrome-free player to put in an `<iframe>`.
