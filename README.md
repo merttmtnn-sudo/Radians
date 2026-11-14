@@ -6,6 +6,16 @@ moving, and variable stars changing brightness.
 
 NASA Space Apps Challenge 2026 — *Planet X and SPHEREx*.
 
+<p>
+  <img src="docs/media/barnard-s-star.gif" width="240" alt="Barnard's Star moving north between four SPHEREx visits">
+  <img src="docs/media/eps-indi-b.gif" width="240" alt="Epsilon Indi B moving between three SPHEREx visits">
+  <img src="docs/media/rw-aur.gif" width="240" alt="RW Aurigae changing brightness between two SPHEREx visits">
+</p>
+
+*Real SPHEREx DR1 frames as Radians blinks them (made by `backend/scripts/make_media.py`).*
+Slides: [`frontend/slides.html`](frontend/slides.html) (served at `/static/slides.html`) ·
+demo reel: [`docs/media/radians-demo.gif`](docs/media/radians-demo.gif) · recording script: [`docs/demo-script.md`](docs/demo-script.md)
+
 ## How it works
 
 1. You type coordinates (`08h55m10.8s -07d14m42s`, `133.795 -7.245`) or a name (`Barnard's Star`).
