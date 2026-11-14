@@ -501,7 +501,7 @@ function candVisual(c, known) {
     cuts.append(fig);
   }
   box.append(cuts);
-  const right = el('div', 'cright');
+  let right = el('div', 'cright');
   if (c.type === 'moving') {
     const tg = state.target;
     const catPm = c.is_target && tg && Number.isFinite(tg.pmra) ? Math.hypot(tg.pmra, tg.pmdec) / 1000
@@ -513,12 +513,13 @@ function candVisual(c, known) {
       const cmp = el('div', 'cmp mono');
       cmp.append(el('span', 'k', t('cmpRadians')), el('span', '', `${c.rate_arcsec_yr.toFixed(2)}″/yr`),
         el('span', 'k', c.is_target ? t('cmpCatalogue') : 'Gaia DR3'), el('span', '', `${catPm.toFixed(2)}″/yr`));
-      right.append(cmp);
+      box.append(right); right = null;
+      box.append(cmp);
     }
   } else {
     right.append(sparkline(flux, b));
   }
-  box.append(right);
+  if (right) box.append(right);
   // confidence: significance on a 0-30σ scale; doubtful pixels shown in amber
   const conf = el('div', 'conf' + (c.low_confidence ? ' low' : ''));
   const bar = el('div', 'bar'), fill = el('i', '');

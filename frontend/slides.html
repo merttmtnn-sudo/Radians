@@ -5,54 +5,76 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Radians — Space Apps 2026</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Inter:wght@400;600&display=swap">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-  :root { --night:#0B1020; --panel:#151C33; --line:#2A3456; --ink:#EEF0F6; --soft:#B7BED3; --amber:#FFB347; --sky:#6FC3FF; }
+  /* same tokens as the app (Startle base + amber) */
+  :root { --bg:#000; --panel:#0c0c0c; --panel-2:#161616; --line:#222; --line-2:#333; --fg:#fff; --fg-2:#b5b5b5; --fg-3:#7a7a7a; --accent:#FFB347; --sky:#6FC3FF; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; font-family: 'Inter', Arial, sans-serif; color: var(--ink); }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: 'Inter Tight', Arial, sans-serif; color: var(--fg); }
   #deck { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: 0 0; }
-  section { position: absolute; inset: 0; background: var(--night); padding: 128px 128px 160px; display: none; flex-direction: column; gap: 40px; }
+  section { position: absolute; inset: 0; background: var(--bg); padding: 120px 128px 150px; display: none; flex-direction: column; gap: 36px; overflow: hidden; }
   section.on { display: flex; }
-  section.alt { background: var(--panel); }
-  section.statement { background: var(--amber); color: var(--night); justify-content: center; }
-  h1, h2, h3 { font-family: 'Space Grotesk', Arial, sans-serif; margin: 0; }
-  h1 { font-size: 132px; font-weight: 700; line-height: 1; letter-spacing: -2px; }
-  h2 { font-size: 72px; font-weight: 600; line-height: 1.08; }
-  h3 { font-size: 40px; font-weight: 600; line-height: 1.15; }
-  p { margin: 0; font-size: 32px; line-height: 1.4; color: var(--soft); }
-  b { color: var(--ink); }
-  .eyebrow { font-size: 26px; font-weight: 600; letter-spacing: 3px; color: var(--amber); }
-  .lead { font-size: 40px; line-height: 1.35; color: var(--ink); }
-  .small { font-size: 26px; }
-  .foot { position: absolute; left: 128px; bottom: 64px; width: 1664px; font-size: 24px; color: #8A93AE; display: flex; justify-content: space-between; }
-  .statement .foot { color: #5A4417; }
-  .statement h2 { font-size: 88px; color: var(--night); }
-  .statement p { color: #3B2C0E; font-size: 40px; }
-  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; }
-  .card { background: var(--panel); border: 2px solid var(--line); border-radius: 20px; padding: 36px; display: flex; flex-direction: column; gap: 16px; }
-  .alt .card { background: var(--night); }
-  .num { font-family: 'Space Grotesk', Arial, sans-serif; font-size: 72px; font-weight: 700; color: var(--amber); line-height: 1; }
-  .what { font-size: 28px; color: var(--soft); line-height: 1.35; }
-  .steps { display: flex; gap: 16px; align-items: stretch; }
-  .step { flex: 1; background: var(--panel); border: 2px solid var(--line); border-radius: 20px; padding: 30px 26px; display: flex; flex-direction: column; gap: 12px; }
-  .step .k { font-size: 24px; font-weight: 600; color: var(--sky); letter-spacing: 2px; }
-  .step h3 { font-size: 34px; }
-  .step .what { font-size: 25px; }
-  .chev { align-self: center; color: var(--line); font-size: 48px; }
-  table { border-collapse: collapse; font-size: 30px; width: 100%; font-variant-numeric: tabular-nums; }
-  th { text-align: left; color: var(--soft); font-weight: 600; font-size: 26px; padding: 14px 18px; border-bottom: 2px solid var(--line); }
-  td { padding: 18px; border-bottom: 1px solid var(--line); color: var(--ink); }
-  td.ok { color: var(--amber); font-weight: 600; }
-  .pillrow { display: flex; gap: 16px; flex-wrap: wrap; }
-  .pill { background: var(--panel); border: 2px solid var(--line); border-radius: 999px; padding: 10px 26px; font-size: 26px; }
-  .link { font-family: 'Space Grotesk', Arial, sans-serif; font-size: 44px; color: var(--sky); }
+  section.statement { background: var(--accent); color: #000; justify-content: center; }
+  h1, h2, h3 { margin: 0; letter-spacing: -0.03em; }
+  h1 { font-size: 168px; font-weight: 800; line-height: .95; }
+  h2 { font-size: 76px; font-weight: 700; line-height: 1.04; }
+  h3 { font-size: 38px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; }
+  p { margin: 0; font-size: 30px; line-height: 1.42; color: var(--fg-2); }
+  b { color: var(--fg); font-weight: 600; }
+  .am { color: var(--accent); }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  .eyebrow { font-family: 'JetBrains Mono', monospace; font-size: 22px; letter-spacing: 4px; color: var(--fg-3); text-transform: uppercase; }
+  .eyebrow .am { color: var(--accent); }
+  .lead { font-size: 38px; line-height: 1.35; color: var(--fg-2); }
+  .small { font-size: 24px; color: var(--fg-3); }
+  .foot { position: absolute; left: 128px; bottom: 56px; width: 1664px; font-family: 'JetBrains Mono', monospace; font-size: 20px; color: var(--fg-3); display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 22px; }
+  .foot .logo { display: flex; align-items: center; gap: 12px; color: var(--fg-2); }
+  .statement .foot { color: #000; border-color: rgba(0,0,0,.25); }
+  .statement .foot .logo { color: #000; }
+  .statement h2 { font-size: 96px; color: #000; }
+  .statement p { color: #2b1d05; font-size: 38px; }
+  .statement .eyebrow { color: #000; }
+  .card { background: var(--panel); border: 1px solid var(--line-2); border-radius: 28px; padding: 34px; display: flex; flex-direction: column; gap: 14px; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  .num { font-family: 'JetBrains Mono', monospace; font-size: 26px; color: var(--accent); }
+  .what { font-size: 26px; color: var(--fg-2); line-height: 1.38; }
+  .shot { border-radius: 28px; border: 1px solid var(--line-2); display: block; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+  .row { display: flex; gap: 56px; align-items: center; }
+  .list { display: flex; flex-direction: column; gap: 26px; }
+  .li { display: grid; grid-template-columns: 64px 1fr; gap: 8px 18px; }
+  .li .n { grid-row: span 2; width: 56px; height: 56px; border-radius: 50%; border: 1px solid var(--line-2); display: grid; place-items: center; font-family: 'JetBrains Mono', monospace; font-size: 22px; color: var(--accent); }
+  .li h3 { font-size: 34px; }
+  .li .what { font-size: 24px; }
+  .steps { display: flex; gap: 14px; align-items: stretch; }
+  .step { flex: 1; background: var(--panel); border: 1px solid var(--line-2); border-radius: 24px; padding: 26px 24px; display: flex; flex-direction: column; gap: 10px; }
+  .step .k { font-family: 'JetBrains Mono', monospace; font-size: 18px; color: var(--accent); letter-spacing: 2px; }
+  .step h3 { font-size: 30px; }
+  .step .what { font-size: 22px; }
+  .chev { align-self: center; color: var(--line-2); font-size: 40px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th { text-align: left; color: var(--fg-3); font-family: 'JetBrains Mono', monospace; font-weight: 400; font-size: 19px; letter-spacing: 2px; text-transform: uppercase; padding: 12px 16px; border-bottom: 1px solid var(--line-2); }
+  td { padding: 17px 16px; border-bottom: 1px solid var(--line); color: var(--fg); font-size: 28px; }
+  td.ok { color: var(--accent); font-weight: 600; }
+  td .mono { font-size: 25px; }
+  .inj td, .inj th { font-size: 22px; padding: 10px 14px; text-align: center; }
+  .inj td:first-child, .inj th:first-child { text-align: left; }
+  .meter { display: inline-block; width: 90px; height: 8px; border-radius: 4px; background: var(--panel-2); vertical-align: middle; margin-right: 10px; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+  .pill { display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line-2); border-radius: 999px; padding: 10px 22px; font-size: 22px; color: var(--fg-2); }
+  .pill::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  .link { font-family: 'JetBrains Mono', monospace; font-size: 28px; color: var(--fg); }
+  .gifs { display: flex; gap: 22px; }
+  .gifs figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .gifs img { width: 300px; height: 300px; border-radius: 22px; border: 1px solid var(--line-2); image-rendering: pixelated; object-fit: cover; }
+  .gifs figcaption { font-size: 22px; color: var(--fg-2); }
+  .gifs figcaption b { display: block; font-size: 24px; }
   .on > * { animation: rise 500ms ease-out both; }
-  .on > *:nth-child(2) { animation-delay: 80ms; } .on > *:nth-child(3) { animation-delay: 160ms; } .on > *:nth-child(4) { animation-delay: 240ms; } .on > *:nth-child(5) { animation-delay: 320ms; }
-  .on > svg.bg, .on > .foot { animation: none; }
-  @keyframes rise { from { opacity: 0; transform: translateY(20px); } }
+  .on > *:nth-child(2) { animation-delay: 70ms; } .on > *:nth-child(3) { animation-delay: 140ms; } .on > *:nth-child(4) { animation-delay: 210ms; } .on > *:nth-child(5) { animation-delay: 280ms; }
+  .on > .foot, .on > .bgshot { animation: none; }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } }
   @media (prefers-reduced-motion: reduce) { .on > * { animation: none !important; } }
-  #hint { position: fixed; right: 16px; bottom: 12px; font: 13px system-ui; color: #6b7491; }
-  aside { display: none; }
+  #hint { position: fixed; right: 16px; bottom: 12px; font: 13px 'JetBrains Mono', monospace; color: #555; }
   .print { display: none; }
   @page { size: 1920px 1080px; margin: 0; }
   @media print {
@@ -69,98 +91,121 @@
 <body>
 <div id="deck">
 
+<!-- 1 · title -->
 <section>
-  <svg class="bg" aria-hidden="true" width="1920" height="1080" viewBox="0 0 1920 1080" style="position:absolute;left:0;top:0"><g fill="#EEF0F6"><circle cx="1380" cy="190" r="3" opacity=".7"/><circle cx="1520" cy="320" r="2" opacity=".5"/><circle cx="1690" cy="240" r="4" opacity=".8"/><circle cx="1610" cy="560" r="2.5" opacity=".6"/><circle cx="1450" cy="660" r="3.5" opacity=".7"/><circle cx="1760" cy="720" r="2" opacity=".5"/><circle cx="1300" cy="820" r="2.5" opacity=".6"/><circle cx="1820" cy="420" r="3" opacity=".6"/><circle cx="1230" cy="430" r="2" opacity=".4"/></g><g fill="#FFB347"><circle cx="1520" cy="470" r="9" opacity=".25"/><circle cx="1560" cy="455" r="9" opacity=".5"/><circle cx="1600" cy="440" r="11"/></g><path d="M1600 380v28M1600 472v28M1540 440h28M1632 440h28" stroke="#FFB347" stroke-width="4"/></svg>
+  <img class="shot bgshot" src="media/app-landing.png" alt="" aria-hidden="true" style="position:absolute;right:-420px;top:150px;width:1180px;opacity:.5;transform:perspective(2400px) rotateY(-14deg)">
   <div style="flex:1"></div>
-  <p class="eyebrow">NASA SPACE APPS CHALLENGE 2026 · PLANET X AND SPHEREX</p>
+  <p class="eyebrow">NASA Space Apps 2026 · <span class="am">Planet X and SPHEREx</span></p>
   <h1>Radians</h1>
-  <p class="lead" style="width:1100px">Blink NASA SPHEREx infrared images of any patch of sky, and watch what moves.</p>
-  <p class="link" style="font-size:36px">radians.onrender.com · github.com/merttmtnn-sudo/Radians</p>
-  <p class="small">Mert Metin · Efe Gönderen · Bora Hısım · Emre Bozkaya</p>
+  <p class="lead" style="width:980px;font-size:46px;color:var(--fg)">Watch the infrared sky <span class="am">move.</span></p>
+  <p class="lead" style="width:960px">Blink every NASA SPHEREx visit of any patch of sky and see what moved, changed or appeared.</p>
+  <p class="link">radians.onrender.com <span style="color:var(--fg-3)">·</span> github.com/merttmtnn-sudo/Radians</p>
   <div style="flex:1"></div>
+  <div class="foot"><span>Mert Metin · Efe Gönderen · Bora Hısım · Emre Bozkaya</span><span>1</span></div>
 </section>
 
-<section class="alt">
-  <p class="eyebrow">THE IDEA</p>
-  <h2>A blink comparator for the infrared sky</h2>
-  <p class="lead" style="width:1600px">SPHEREx images the whole sky every six months in 102 infrared colours: 300+ exposures of any spot, in an archive built for astronomers. In 1930 Tombaugh found Pluto by flipping between two plates. Radians flips through every SPHEREx visit, in a browser.</p>
-  <div class="screen" style="display:flex;gap:40px;align-items:flex-end">
-    <img src="media/barnard-s-star.gif" alt="Barnard's Star moving north between SPHEREx visits" style="height:300px;border-radius:12px">
-    <img src="media/eps-indi-b.gif" alt="Epsilon Indi B moving between SPHEREx visits" style="height:300px;border-radius:12px">
-    <img src="media/rw-aur.gif" alt="RW Aurigae changing brightness between SPHEREx visits" style="height:300px;border-radius:12px">
-    <p class="small" style="flex:1">Real SPHEREx frames as Radians shows them: two stars on the move, one young star changing brightness.</p>
+<!-- 2 · idea -->
+<section>
+  <p class="eyebrow">The idea</p>
+  <h2>A blink comparator<br>for the infrared sky</h2>
+  <p class="lead" style="width:1640px">SPHEREx images the whole sky every six months in 102 infrared colours: hundreds of exposures of any spot, in an archive built for astronomers. In 1930 Tombaugh found Pluto by flipping between two plates. <b>Radians flips through every SPHEREx visit, in a browser.</b></p>
+  <div class="gifs screen">
+    <figure><img src="media/barnard-s-star.gif" alt="Barnard's Star moving north between SPHEREx visits"><figcaption><b>Barnard’s Star</b>moves north</figcaption></figure>
+    <figure><img src="media/eps-indi-b.gif" alt="Epsilon Indi B moving between SPHEREx visits"><figcaption><b>ε Indi B</b>brown-dwarf pair on the move</figcaption></figure>
+    <figure><img src="media/wise-0855.gif" alt="WISE 0855 moving between SPHEREx visits at 4–5 µm"><figcaption><b>WISE 0855</b>coldest brown dwarf, 4–5 µm</figcaption></figure>
+    <figure><img src="media/rw-aur.gif" alt="RW Aurigae changing brightness between SPHEREx visits"><figcaption><b>RW Aurigae</b>young star, flickers</figcaption></figure>
+    <figure><img src="media/r-dra.gif" alt="R Draconis, a saturated Mira variable"><figcaption><b>R Draconis</b>Mira variable</figcaption></figure>
   </div>
-  <div class="print" style="gap:40px;align-items:flex-end">
-    <img src="media/barnard-s-star-pair.png" alt="Barnard's Star in its first and last SPHEREx visits: it has moved north" style="height:300px;border-radius:12px">
-    <img src="media/rw-aur-pair.png" alt="RW Aurigae in two SPHEREx visits: its brightness changed" style="height:300px;border-radius:12px">
+  <div class="print" style="gap:28px;align-items:flex-end">
+    <img src="media/barnard-s-star-pair.png" alt="Barnard's Star in its first and last SPHEREx visits: it has moved north" style="height:300px;border-radius:22px;border:1px solid #333">
+    <img src="media/rw-aur-pair.png" alt="RW Aurigae in two SPHEREx visits: its brightness changed" style="height:300px;border-radius:22px;border:1px solid #333">
     <p class="small" style="flex:1">First and last SPHEREx visit as Radians blinks them: Barnard’s Star has moved north (marker), RW Aurigae has changed brightness.</p>
   </div>
-  <div class="foot"><span>Radians</span><span>2</span></div>
+  <div class="foot"><span class="logo">Radians</span><span>2</span></div>
 </section>
 
+<!-- 3 · how to use -->
 <section>
-  <p class="eyebrow">HOW TO USE IT</p>
+  <p class="eyebrow">How to use it</p>
   <h2>Four steps, no installation</h2>
-  <div class="cards" style="grid-template-columns:repeat(4,1fr)">
-    <div class="card"><p class="num">1</p><h3>Pick a target</h3><p class="what">Type a star name or RA/Dec, or press one of the five challenge targets.</p></div>
-    <div class="card"><p class="num">2</p><h3>Watch it blink</h3><p class="what">Each frame is one SPHEREx visit. Play, step, pick detectors and field of view.</p></div>
-    <div class="card"><p class="num">3</p><h3>Let it point</h3><p class="what">Difference views and an automatic finder mark what moved, changed or appeared.</p></div>
-    <div class="card"><p class="num">4</p><h3>Dig deeper</h3><p class="what">Click any star for its spectrum and light curve; copy a report; download CSV or a GIF.</p></div>
+  <div class="row" style="align-items:flex-start">
+    <img class="shot" src="media/app-viewer.png" alt="The Radians viewer on Barnard's Star: blinking image, timeline and a candidate card that compares the measured motion with the catalogue" style="width:1040px">
+    <div class="list" style="flex:1">
+      <div class="li"><span class="n">1</span><h3>Pick a target</h3><p class="what">A star name, RA/Dec, or one of the five challenge targets.</p></div>
+      <div class="li"><span class="n">2</span><h3>Watch it blink</h3><p class="what">Each frame is one SPHEREx visit. Play, step, zoom, export a GIF.</p></div>
+      <div class="li"><span class="n">3</span><h3>Let it point</h3><p class="what">Difference views and an automatic finder mark what moved, changed or appeared, with before/after cut-outs.</p></div>
+      <div class="li"><span class="n">4</span><h3>Dig deeper</h3><p class="what">Click any star for its spectrum and light curve; share a link, download CSV.</p></div>
+    </div>
   </div>
-  <p>Every view is a shareable, embeddable link. Interface in English and Turkish.</p>
-  <div class="foot"><span>Radians</span><span>3</span></div>
+  <div class="foot"><span class="logo">Radians · English and Turkish interface · light and dark</span><span>3</span></div>
 </section>
 
-<section class="alt">
-  <p class="eyebrow">HOW IT WORKS</p>
+<!-- 4 · how it works -->
+<section>
+  <p class="eyebrow">How it works</p>
   <h2>From a star name to an aligned flip-book</h2>
   <div class="steps">
     <div class="step"><p class="k">1 · RESOLVE</p><h3>CDS Sesame</h3><p class="what">Name → position and proper motion.</p></div>
     <p class="chev">›</p>
-    <div class="step"><p class="k">2 · FIND</p><h3>NASA IRSA</h3><p class="what">Every SPHEREx exposure covering it, all public releases.</p></div>
+    <div class="step"><p class="k">2 · FIND</p><h3>NASA IRSA</h3><p class="what">Every SPHEREx exposure covering it.</p></div>
     <p class="chev">›</p>
-    <div class="step"><p class="k">3 · READ</p><h3>Byte ranges</h3><p class="what">Only the rows needed: ~0.5 MB of each 65 MB file.</p></div>
+    <div class="step"><p class="k">3 · READ</p><h3>Byte ranges</h3><p class="what">~0.5 MB of each 65 MB file.</p></div>
     <p class="chev">›</p>
     <div class="step"><p class="k">4 · ALIGN</p><h3>One sky grid</h3><p class="what">Reprojected, flag-masked, co-added per visit at matched wavelengths.</p></div>
     <p class="chev">›</p>
-    <div class="step"><p class="k">5 · CHECK</p><h3>Known sky</h3><p class="what">Gaia DR3, SkyBoT asteroids, NEOSSat archive.</p></div>
+    <div class="step"><p class="k">5 · CHECK</p><h3>Known sky</h3><p class="what">Gaia DR3, SkyBoT, NEOSSat.</p></div>
   </div>
-  <p>Because SPHEREx’s filters change wavelength across the detector, one position measured in all 300 exposures is a 0.75–5 µm spectrum: Radians makes it on the fly for any star you click.</p>
-  <div class="foot"><span>Radians</span><span>4</span></div>
+  <div class="row" style="gap:48px">
+    <img class="shot" src="media/app-spectrum.png" alt="RW Aurigae spectrum from 0.75 to 5 µm, each point one SPHEREx exposure coloured by wavelength, with water, methane, CO2 and CO bands marked" style="width:1060px">
+    <p style="flex:1;font-size:28px">SPHEREx’s filters change wavelength across the detector, so one position measured in every exposure is a <b>0.75–5 µm spectrum</b>. Radians builds it on the fly for any star you click, with the water, methane, CO₂ and CO bands marked.</p>
+  </div>
+  <div class="foot"><span class="logo">Radians</span><span>4</span></div>
 </section>
 
+<!-- 5 · results -->
 <section>
-  <p class="eyebrow">RESULTS ON THE CHALLENGE TARGETS</p>
+  <p class="eyebrow">Results on the challenge targets</p>
   <h2>It finds what the challenge hid</h2>
   <table>
-    <tr><th style="width:26%">Target</th><th style="width:40%">Radians measured</th><th style="width:34%">Known value</th></tr>
-    <tr><td>Barnard’s Star</td><td class="ok">moves 10.38″/yr toward PA 354°</td><td>10.39″/yr, PA 356°</td></tr>
-    <tr><td>ε Indi B</td><td class="ok">moves 4.65″/yr toward PA 125°</td><td>4.68″/yr, PA 123°</td></tr>
-    <tr><td>WISE 0855−0714</td><td class="ok">moves 8.16″/yr (detectors 5+6, 4–5 µm)</td><td>8.15″/yr; coldest known brown dwarf</td></tr>
-    <tr><td>RW Aurigae</td><td class="ok">brightness changes ×1.7 between visits</td><td>known variable young star</td></tr>
-    <tr><td>R Draconis</td><td>saturated: tracked with PSF-wing light curve</td><td>Mira variable</td></tr>
+    <tr><th style="width:24%">Target</th><th style="width:42%">Radians measured</th><th style="width:34%">Known value</th></tr>
+    <tr><td>Barnard’s Star</td><td class="ok">moves <span class="mono">10.38″/yr</span>, PA 354°</td><td><span class="mono">10.39″/yr</span>, PA 356°</td></tr>
+    <tr><td>ε Indi B</td><td class="ok">moves <span class="mono">4.65″/yr</span>, PA 125°</td><td><span class="mono">4.68″/yr</span>, PA 123°</td></tr>
+    <tr><td>WISE 0855−0714</td><td class="ok">moves <span class="mono">8.16″/yr</span> (D5+D6, 4–5 µm)</td><td><span class="mono">8.15″/yr</span>, coldest brown dwarf</td></tr>
+    <tr><td>RW Aurigae</td><td class="ok">brightness changes ×1.7</td><td>known variable young star</td></tr>
+    <tr><td>R Draconis</td><td>saturated: PSF-wing light curve</td><td>Mira variable</td></tr>
   </table>
-  <p class="small">Automatic finder on public SPHEREx data, compared with catalogue values. Tested by injecting 600 fake objects into real SPHEREx frames: movers and new sources at S/N 20 found every time, no false alarms in the five fields.</p>
-  <div class="foot"><span>Radians</span><span>5</span></div>
-</section>
-
-<section class="alt">
-  <p class="eyebrow">CONTEXT FROM PARTNER AGENCIES</p>
-  <h2>Every candidate is checked against what is already known</h2>
-  <div class="cards">
-    <div class="card"><h3>ESA Gaia DR3</h3><p class="what">Stars moved to each frame’s date with their proper motions; each find labelled known or possibly new.</p></div>
-    <div class="card"><h3>IMCCE SkyBoT</h3><p class="what">Known asteroids and comets marked at the exact time of each frame.</p></div>
-    <div class="card"><h3>CSA NEOSSat</h3><p class="what">Archived images of the field from Canada’s asteroid-hunting microsatellite (CADC).</p></div>
+  <div class="row" style="gap:56px;align-items:flex-start">
+    <table class="inj" style="width:980px">
+      <tr><th>Injected fakes, found</th><th>S/N 8</th><th>S/N 12</th><th>S/N 20</th></tr>
+      <tr><td>Mover</td><td><span class="meter"><i style="width:50%"></i></span>50%</td><td><span class="meter"><i style="width:85%"></i></span>85%</td><td><span class="meter"><i style="width:100%"></i></span>100%</td></tr>
+      <tr><td>New source</td><td><span class="meter"><i style="width:42%"></i></span>42%</td><td><span class="meter"><i style="width:85%"></i></span>85%</td><td><span class="meter"><i style="width:100%"></i></span>100%</td></tr>
+    </table>
+    <p class="small" style="flex:1;font-size:24px">600 fake objects injected into real SPHEREx frames of the five fields. <b>No false alarms.</b> Details in docs/VALIDATION.md.</p>
   </div>
-  <p>Plus a wider view in Aladin Lite with 2MASS, AllWISE, DSS2 and SPHEREx all-sky maps served by NASA IRSA, and per-pixel SPHEREx quality flags.</p>
-  <div class="foot"><span>Radians</span><span>6</span></div>
+  <div class="foot"><span class="logo">Radians</span><span>5</span></div>
 </section>
 
+<!-- 6 · context -->
+<section>
+  <p class="eyebrow">Context from partner agencies</p>
+  <h2>Every candidate is checked<br>against what is already known</h2>
+  <div class="cards">
+    <div class="card"><p class="num">ESA</p><h3>Gaia DR3</h3><p class="what">Stars moved to each frame’s date with their proper motions; each find labelled known or possibly new.</p></div>
+    <div class="card"><p class="num">IMCCE</p><h3>SkyBoT</h3><p class="what">Known asteroids and comets marked at the exact time of each frame.</p></div>
+    <div class="card"><p class="num">CSA</p><h3>NEOSSat</h3><p class="what">Archived images of the field from Canada’s asteroid-hunting microsatellite (CADC).</p></div>
+  </div>
+  <div style="display:flex;gap:16px;flex-wrap:wrap">
+    <span class="pill">Aladin Lite: 2MASS, AllWISE, DSS2</span><span class="pill">SPHEREx all-sky maps (IRSA)</span><span class="pill">per-pixel quality flags</span>
+  </div>
+  <div class="foot"><span class="logo">Radians</span><span>6</span></div>
+</section>
+
+<!-- 7 · planet x -->
 <section class="statement">
-  <p class="eyebrow" style="color:#5A4417">PLANET X</p>
-  <h2>A distant planet is a faint dot that is somewhere else at the next visit</h2>
+  <p class="eyebrow">Planet X</p>
+  <h2>A distant planet is a faint dot that is somewhere else at the next visit.</h2>
   <p style="width:1560px">Radians makes that comparison available for any spot SPHEREx has seen twice, to anyone, with known stars and asteroids already accounted for. Open source (MIT), running at radians.onrender.com.</p>
-  <div class="foot"><span>Radians · Mert Metin, Efe Gönderen, Bora Hısım, Emre Bozkaya</span><span>7</span></div>
+  <div class="foot"><span class="logo">Radians · Mert Metin, Efe Gönderen, Bora Hısım, Emre Bozkaya</span><span>7</span></div>
 </section>
 
 </div>

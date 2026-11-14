@@ -331,7 +331,7 @@ body.embed .stage { max-height: calc(100vh - 70px); }
 .track circle { fill: var(--fg-2); stroke: none; }
 .track circle.last { fill: var(--accent); }
 .track .cat { stroke: var(--fg-3); stroke-dasharray: 3 3; stroke-width: 1; }
-.cmp { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 1px 8px; font-size: 11px; white-space: nowrap; }
+.cmp { grid-column: 1 / -1; display: grid; grid-template-columns: auto auto auto auto; justify-content: start; gap: 2px 8px; font-size: 11px; white-space: nowrap; }
 .cmp .k { color: var(--fg-3); }
 .conf { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
 .conf .bar { height: 5px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
