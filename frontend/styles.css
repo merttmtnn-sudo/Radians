@@ -408,6 +408,40 @@ body.embed .stage { max-height: calc(100vh - 70px); }
 [hidden] { display: none !important; }      /* a component's own display rule must never beat [hidden] */
 .map-only { display: none !important; }
 .in-map .map-only { display: block !important; }
+.sky-only { display: none; }
+.in-sky .sky-only { display: block !important; }
+#skyPage { width: 100%; box-sizing: border-box; }
+.in-sky .landing-only, .in-sky .app-only, .in-sky .map-only { display: none !important; }
+.skywrap #skyFrame, .skywrap iframe { width: 100%; height: min(70vh, 740px); min-height: 420px; border: 0; display: block; }
+.skywrap:fullscreen #skyFrame, .skywrap:fullscreen iframe { height: 100vh; }
+.skyfull { position: absolute; right: 12px; top: 12px; z-index: 5; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, .16); background: rgba(0, 0, 0, .6); color: #fff; cursor: pointer; backdrop-filter: blur(8px); }
+.skyfull svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.skyfull:hover { border-color: rgba(255, 255, 255, .4); }
+.mapchip.togg::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--fg-3); }
+.mapchip.togg[aria-pressed="true"] { color: var(--fg); border-color: #ffb347; background: rgba(255, 179, 71, .1); }
+.mapchip.togg[aria-pressed="true"]::before { background: #ffb347; border-color: #ffb347; }
+#skyAdv[aria-pressed="true"] { color: #ffb347; border-color: #ffb347; }
+.roundplay { width: 46px; height: 46px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; cursor: pointer;
+  background: var(--fg); color: var(--bg, #000); transition: transform .12s; }
+.roundplay:hover { transform: scale(1.05); }
+.roundplay svg { width: 18px; height: 18px; fill: currentColor; }
+.roundplay .ic-pause, .roundplay.on .ic-play { display: none; }
+.roundplay.on .ic-pause { display: block; }
+.roundplay.on { background: #ffb347; color: #1a1205; }
+#skyTime { accent-color: #ffb347; }
+.wlticks.skyticks { display: flex; justify-content: space-between; }
+.wlticks.skyticks span { position: static; transform: none !important; }
+#skyNow.on { color: var(--fg); border-color: #ffb347; background: rgba(255, 179, 71, .1); }
+.in-sky .maptools .btn { margin-left: auto; }
+@media (max-width: 700px) {
+  .in-sky .palchips, .in-sky .chips { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+  .in-sky .palchips button, .in-sky .mapchip { flex: none; }
+  .in-sky .maplabel { min-width: 0; }
+  .in-sky .skywrap iframe, .in-sky .skywrap #skyFrame { height: 62vh; min-height: 360px; }
+  .nav { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; max-width: 100%; }
+  .nav a { white-space: nowrap; }
+}
 .in-map .landing-only, .in-map .app-only { display: none !important; }
 .in-app .nav .navl { display: none; }
 .nav a[aria-current="page"] { color: var(--fg); background: var(--panel-2); }

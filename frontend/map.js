@@ -41,7 +41,7 @@ const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 // ---------------------------------------------------------------- open / close
 function openMap(push = true) {
-  root.classList.remove('in-app');
+  root.classList.remove('in-app', 'in-sky');
   root.classList.add('in-map');
   if (push) {
     const u = new URL(location.href);
@@ -71,6 +71,7 @@ for (const a of document.querySelectorAll('.nav .navl')) {
   });
 }
 document.addEventListener('radians:run', closeMap);
+document.addEventListener('radians:sky', closeMap);
 addEventListener('popstate', () => { if (new URLSearchParams(location.search).get('map') === '1') openMap(false); else closeMap(); });
 
 // ---------------------------------------------------------------- the map

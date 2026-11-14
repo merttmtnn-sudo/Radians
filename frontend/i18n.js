@@ -3,7 +3,12 @@
 
 const STRINGS = {
   en: {
-    mapBtn: "Map", planetBtn: "Planetarium", mapEyebrow: "102 infrared colours", mapTitle: "The whole sky, as SPHEREx sees it",
+    mapBtn: "Map", planetBtn: "Planetarium", skyEyebrow: "Planetarium", skyTitle: "Tonight’s sky, through SPHEREx’s infrared eyes",
+    skySub: "The real sky above you: stars, planets and constellations drawn over SPHEREx’s infrared image of the whole sky. Drag to look around, scroll to zoom, click anything.",
+    skyCons: "Constellations", skyAdv: "Advanced", skyFull: "Full screen", skyFast: "Let the sky turn (15 minutes per second)", skyNow: "Now", skyLive: "live",
+    skyPlace: "Place", skyMyLoc: "My location", skyFamous: "Famous sights", skyPlanets: "Planets",
+    skyHint: "Daytime? The sky opens at 21:00 tonight. Drag the time bar through the night, or press the round button to let the sky turn. Click a star or a nebula: the card can blink it in Radians or open the full science tool.",
+    skyCredit: "Planetarium engine: Emre Bozkaya (SPHEREx Sky Explorer). Sky: NASA SPHEREx DR1 (IRSA). Stars and constellations: d3-celestial.", mapEyebrow: "102 infrared colours", mapTitle: "The whole sky, as SPHEREx sees it",
     mapSub: "NASA SPHEREx photographed the entire sky in 102 colours of infrared light. Slide through them: stars fade as you go redder, while warm dust and gas light up. Click anywhere to blink that spot.",
     mapIrsa: "IRSA SPHEREx tools ↗", mapGo: "Blink this spot", mapHere: "A spot in the sky", mapPlay: "Play the wavelength tour", mapPause: "Pause",
     mapHint: "Drag to pan, scroll to zoom, click any spot to blink it. Esc or a click on empty sky closes the card. The sky is tinted in the colour of the chosen wavelength. Map: SPHEREx DR1 all-sky cube (NASA/IPAC IRSA), shown with Aladin Lite (CDS).",
@@ -195,7 +200,12 @@ const STRINGS = {
     contextHelp: 'The orange box is the Radians field. Switch surveys to compare SPHEREx with 2MASS, WISE and optical images.',
   },
   tr: {
-    mapBtn: "Harita", planetBtn: "Planetaryum", mapEyebrow: "102 kızılötesi renk", mapTitle: "Tüm gökyüzü, SPHEREx’in gözünden",
+    mapBtn: "Harita", planetBtn: "Planetaryum", skyEyebrow: "Planetaryum", skyTitle: "Bu gece gökyüzü, SPHEREx’in kızılötesi gözüyle",
+    skySub: "Başınızın üstündeki gerçek gökyüzü: yıldızlar, gezegenler ve takımyıldızlar, SPHEREx’in tüm gökyüzünün kızılötesi görüntüsü üzerinde. Sürükleyerek etrafa bakın, tekerlekle yakınlaşın, istediğiniz şeye tıklayın.",
+    skyCons: "Takımyıldızlar", skyAdv: "Gelişmiş", skyFull: "Tam ekran", skyFast: "Gökyüzü dönsün (saniyede 15 dakika)", skyNow: "Şimdi", skyLive: "canlı",
+    skyPlace: "Konum", skyMyLoc: "Konumum", skyFamous: "Ünlü nesneler", skyPlanets: "Gezegenler",
+    skyHint: "Gündüz mü? Gökyüzü bu gece 21:00 ile açılır. Zaman çubuğunu gece boyunca sürükleyin ya da yuvarlak düğmeye basıp gökyüzünü döndürün. Bir yıldıza ya da bulutsuya tıklayın: karttan Radians’ta blink’leyebilir ya da tam bilimsel aracı açabilirsiniz.",
+    skyCredit: "Planetaryum motoru: Emre Bozkaya (SPHEREx Sky Explorer). Gökyüzü: NASA SPHEREx DR1 (IRSA). Yıldızlar ve takımyıldızlar: d3-celestial.", mapEyebrow: "102 kızılötesi renk", mapTitle: "Tüm gökyüzü, SPHEREx’in gözünden",
     mapSub: "NASA SPHEREx tüm gökyüzünü 102 farklı kızılötesi renkte fotoğrafladı. Aralarında gezinin: kırmızıya gittikçe yıldızlar söner, ılık toz ve gaz parlar. Herhangi bir noktaya tıklayıp orayı blink edin.",
     mapIrsa: "IRSA SPHEREx araçları ↗", mapGo: "Burada blink yap", mapHere: "Gökyüzünde bir nokta", mapPlay: "Dalga boyu turunu oynat", mapPause: "Duraklat",
     mapHint: "Sürükleyerek kaydırın, tekerlekle yakınlaştırın, blink için herhangi bir noktaya tıklayın. Esc ya da boş gökyüzüne tıklamak kartı kapatır. Gökyüzü seçilen dalga boyunun rengine boyanır. Harita: SPHEREx DR1 tüm gökyüzü küpü (NASA/IPAC IRSA), Aladin Lite (CDS) ile.",

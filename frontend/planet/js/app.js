@@ -8,11 +8,15 @@ import { Spectro } from './spectro.js';
 import { aboutHtml } from './about.js';
 import { lut } from './imaging.js';
 import { spherexSource, urlSource } from './hips.js';
+import { pageLang } from './tr.js';
 
 const sky = new Sky($('#skyCanvas'), $('#skyGL'));
 const blink = new Blink();
 const spectro = new Spectro();
 window.spx = { sky, blink, spectro, state }; // handy for debugging from the console
+// embed=1: shown inside the Radians page, which draws its own simple controls (see bottom of this file)
+const EMBED = new URLSearchParams(location.search).get('embed') === '1';
+if (EMBED) document.body.classList.add('embed');
 
 // ------------------------------------------------------------------ tabs
 let view = 'sky';
@@ -241,6 +245,7 @@ bus.on('skyframe', () => { hud(); const now = performance.now(); if (sky.selecti
 const fmtLocal = jd => { if (!jd) return '—'; const d = new Date((jd - 2440587.5) * 86400000); return d.toTimeString().slice(0, 5); };
 function bodyFn(id) { return jd => A.solarSystem(jd).find(b => b.id === id); }
 function renderInfo(o) {
+  if (EMBED) return renderCard(o);
   const box = $('#skyInfo');
   if (!o) { box.classList.add('hidden'); return; }
   const pos = sky.objectPos(o);
@@ -481,8 +486,102 @@ function loop(t) { sky.tick(t); requestAnimationFrame(loop); }
       toast(`${state.target.name} is below your horizon right now — press G to hide the ground, or drag the sky to explore.`, false, 7000);
     }
   }
+  if (EMBED) embedBoot();
   if (p.get('auto') === '1' && state.target && view === 'blink') { if (wantSpec) spectro.run(); else blink.load(); }
   bus.emit('skytime');
   requestAnimationFrame(loop);
   api('/api/sx/status').catch(() => toast('Radians server not reachable', true, 8000));
 })();
+
+// ------------------------------------------------------------------ embedded in the Radians page
+// The page around the iframe draws the controls (time, constellations, colour, place, targets) and calls
+// window.radiansSky; the sky reports its time back with postMessage. A click shows a small card instead
+// of the full info panel.
+let cardFor = null;
+function cardTitle(o) {
+  if (o.type === 'star') return [sky.starName(o.i)[0], 'Star'];
+  if (o.type === 'body') { const b = sky.objectPos(o) || o.b; return [document.documentElement.lang === 'tr' ? b.tr : b.name, b.kind === 'planet' ? (b.id === 'pluto' ? 'Dwarf planet' : 'Planet') : b.kind === 'moon' ? 'Natural satellite' : 'Star']; }
+  if (o.type === 'dso') return [o.d.id + (o.d.alt ? ' — ' + o.d.alt : ''), DSO_TYPES[o.d.type] || 'Deep-sky object'];
+  if (o.type === 'cat' || o.type === 'target') return [o.t.name, o.t.type || 'SPHEREx target'];
+  return ['Sky position', 'Selected point'];
+}
+function renderCard(o) {
+  const box = $('#skyInfo');
+  if (!o) { cardFor = null; box.classList.add('hidden'); return; }
+  if (o === cardFor) return;
+  cardFor = o;
+  const pos = sky.objectPos(o);
+  if (!pos) return;
+  const [title, type] = cardTitle(o);
+  const moving = o.type === 'body';
+  const alt = altOf(pos);
+  const note = alt < 0 ? 'Below the horizon right now' : alt < 12 ? 'Low above the horizon' : '';
+  box.className = 'panel info card';
+  box.innerHTML = `<button class="x" data-a="close" aria-label="Close">×</button><div class="type">${esc(type)}</div><h2>${esc(title)}</h2>` +
+    (note ? `<p class="note">${note}</p>` : '') +
+    (moving ? '' : `<div class="actions"><button class="btn small primary" data-a="blink">Blink this</button><button class="btn small" data-a="science">Science tool ↗</button></div>`);
+  box.querySelectorAll('[data-a]').forEach(b => (b.onclick = () => {
+    const a = b.dataset.a;
+    if (a === 'close') { sky.select(null); return renderCard(null); }
+    const tr = document.documentElement.lang === 'tr' ? '&lang=tr' : '';
+    if (a === 'blink') parent.postMessage({ type: 'sky-blink', ra: pos.ra, dec: pos.dec, name: title }, location.origin);
+    if (a === 'science') window.open(`/planet/?view=blink&ra=${pos.ra.toFixed(6)}&dec=${pos.dec.toFixed(6)}&name=${encodeURIComponent(title)}&auto=1${tr}`, '_blank', 'noopener');
+  }));
+}
+function altOf(pos) {
+  const h = sky.refract(A.mulv(sky.M, A.radec2v(pos.ra, pos.dec)));
+  return A.hor2altaz(h)[0];
+}
+function setPal(p) {
+  if (p === 'rgb') { $('#hxMode').value = 'rgb'; $('#hxR').value = 96; $('#hxG').value = 60; $('#hxB').value = 20; }
+  else { $('#hxMode').value = 'mono'; $('#hxFrame').value = 46; $('#hxCmap').value = p === 'gray' ? 'gray' : p; }
+  sky.layers.spherex = true;
+  applySpx();
+}
+function tonightAt21() { const d = new Date(); d.setHours(21, 0, 0, 0); return d; }
+function report() {
+  parent.postMessage({ type: 'sky-state', ms: sky.date.getTime(), rate: sky.rate, cons: !!sky.layers.constLines, loc: sky.loc.name,
+    sunAlt: sky.ss ? sky.ss.sunAlt : null }, location.origin);
+}
+function embedBoot() {
+  // look south-east, a little above the horizon, with a wide field
+  if (sky.view.mount === 'altaz') { sky.view.az = 170; sky.view.alt = 48; }
+  sky.view.fov = 100;
+  sky.opt.lang = pageLang() === 'tr' ? 'tr' : 'en';
+  sky.layers.stars = true; sky.layers.atmosphere = false;
+  sky.dirty = true;
+  // daytime: jump to 21:00 tonight (the "Now" button still goes to the real time)
+  let checked = false;
+  bus.on('skyframe', () => {
+    if (!checked && sky.ss) { checked = true; if (sky.ss.sunAlt > -8 && new Date().getHours() >= 6) sky.setDate(tonightAt21()); report(); }
+  });
+  bus.on('skytime', report);
+  setInterval(report, 1000);
+}
+window.radiansSky = {
+  setTime(ms) { sky.setDate(new Date(ms)); },
+  now() { sky.setDate(new Date()); sky.setRate(1); },
+  setRate(r) { sky.setRate(r); },
+  setCons(on) { sky.layers.constLines = on; sky.layers.constNames = on; sky.dirty = true; saveOpts(); report(); },
+  setPalette: setPal,
+  setPlace(i) {
+    if (i === 'geo') return $('#locGeo').click();
+    const l = LOCATIONS[i]; if (l) { setLocation(...l); locSel.value = i; }
+    report();
+  },
+  async goto(kind, x) {
+    cardFor = null;
+    if (kind === 'test') { const t = TEST_TARGETS.find(t => t.id === x); if (t) await choose({ kind: 'test', data: t }); }
+    else if (kind === 'body') await choose({ kind: 'body', data: x });
+    else if (kind === 'point') await choose({ kind: 'test', data: x });
+    else { const r = searchLocal(x).find(r => r.kind !== 'coord' && r.kind !== 'sesame'); await choose(r || { kind: 'sesame', data: x }); }
+    // below the horizon: hide the ground so the object can still be seen (the card says so)
+    const pos = sky.selection && sky.objectPos(sky.selection);
+    sky.layers.ground = !(pos && altOf(pos) < 3);
+    sky.dirty = true;
+  },
+  advanced(on) {
+    document.body.classList.toggle('adv', on);
+    $$('#sidePanels .panel').forEach(p => p.classList.toggle('hidden', !on));
+  },
+};

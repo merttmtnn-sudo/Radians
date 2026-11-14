@@ -89,6 +89,17 @@ const TR = {
   'Az/Alt (apparent)': 'Az/Yük (görünür)', 'RA/Dec (of date)': 'RA/Dec (tarihin)', 'Does not rise today': 'Bugün doğmuyor',
   'Survey epoch': 'Tarama dönemi', 'Date': 'Tarih', 'Detectors': 'Dedektörler', 'λ range': 'λ aralığı',
   'Flagged at target': 'Hedefte işaretli', 'Predicted pos.': 'Beklenen konum',
+  'Blink this': 'Bunu blink’le', 'Science tool ↗': 'Bilimsel araç ↗', 'Star': 'Yıldız', 'Planet': 'Gezegen',
+  'Dwarf planet': 'Cüce gezegen', 'Natural satellite': 'Doğal uydu', 'Sky position': 'Gökte bir nokta', 'Selected point': 'Seçilen nokta',
+  'Deep-sky object': 'Derin gök nesnesi', 'SPHEREx target': 'SPHEREx hedefi', 'Galaxy': 'Gökada', 'Spiral galaxy': 'Sarmal gökada',
+  'Lenticular galaxy': 'Mercek gökada', 'Dwarf spheroidal galaxy': 'Cüce küresel gökada', 'Elliptical galaxy': 'Eliptik gökada',
+  'Irregular galaxy': 'Düzensiz gökada', 'Open cluster': 'Açık yıldız kümesi', 'Globular cluster': 'Küresel yıldız kümesi',
+  'Emission nebula': 'Salma bulutsusu', 'Bright nebula': 'Parlak bulutsu', 'Star-forming region': 'Yıldız oluşum bölgesi',
+  'Reflection nebula': 'Yansıma bulutsusu', 'Planetary nebula': 'Gezegenimsi bulutsu', 'Supernova remnant': 'Süpernova kalıntısı',
+  'Dark nebula': 'Karanlık bulutsu', 'Asterism': 'Yıldız dizilimi', 'Double star': 'Çift yıldız', 'Nebula': 'Bulutsu',
+  'Nearby M dwarf · fastest proper motion': 'Yakın M cücesi · en hızlı öz hareket', 'Binary brown dwarf': 'Çift kahverengi cüce',
+  'Coldest known brown dwarf (Y dwarf)': 'Bilinen en soğuk kahverengi cüce (Y cücesi)', 'Variable young star (T Tauri)': 'Değişken genç yıldız (T Tauri)',
+  'Mira variable (red giant)': 'Mira değişkeni (kırmızı dev)', 'Below the horizon right now': 'Şu an ufkun altında', 'Low above the horizon': 'Ufka çok yakın', 'Galactic centre': 'Samanyolu’nun merkezi',
 };
 
 export function pageLang() {

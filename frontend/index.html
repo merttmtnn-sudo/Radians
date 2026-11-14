@@ -17,6 +17,7 @@
     if (/[?&]tour=0/.test(location.search)) try { localStorage.setItem('radians-tour', 'done'); } catch (e) { /* private mode */ }
     // a shared link opens straight in the viewer
     if (/[?&]map=1/.test(location.search)) document.documentElement.classList.add('in-map');
+    else if (/[?&]sky=1/.test(location.search)) document.documentElement.classList.add('in-sky');
     else if (/[?&](q|ra)=/.test(location.search)) document.documentElement.classList.add('in-app');
   </script>
 </head>
@@ -31,7 +32,7 @@
     <a class="navl" href="#results" data-i18n="navResults"></a>
     <a class="navl" href="#team" data-i18n="navTeam"></a>
     <a class="navmap" href="?map=1" data-map data-i18n="mapBtn"></a>
-    <a class="navl navplanet" href="planet/" id="navPlanet" data-i18n="planetBtn"></a>
+    <a class="navsky" href="?sky=1" data-sky data-i18n="planetBtn"></a>
   </nav>
   <div class="appsearch app-only" id="appSearchSlot"></div>
   <div class="topright">
@@ -227,6 +228,70 @@
 
   <p class="small dim maphint" data-i18n="mapHint"></p>
   <p class="small dim" id="mapStatus"></p>
+</main>
+
+<!-- ================================================================ planetarium -->
+<main class="mappage sky-only" id="skyPage">
+  <div class="maphead">
+    <div>
+      <p class="eyebrow mono">NASA SPHEREx DR1 · <span data-i18n="skyEyebrow"></span></p>
+      <h1 data-i18n="skyTitle"></h1>
+      <p class="dim" data-i18n="skySub"></p>
+    </div>
+  </div>
+
+  <div class="maptools" role="toolbar">
+    <span class="maptoolslabel" data-i18n="mapPal"></span>
+    <div class="palchips" id="skyPals"></div>
+    <button type="button" class="mapchip togg" id="skyCons" aria-pressed="true"><span data-i18n="skyCons"></span></button>
+    <button type="button" class="btn sm ghost" id="skyAdv" aria-pressed="false"><span aria-hidden="true">⚙</span> <span data-i18n="skyAdv"></span></button>
+  </div>
+
+  <div class="mapwrap skywrap" id="skyWrap">
+    <div id="skyFrame"></div>
+    <button type="button" class="skyfull" id="skyFull" data-i18n-title="skyFull" aria-label="Full screen">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M17 8V3h-5M3 12v5h5M17 12v5h-5"/></svg>
+    </button>
+  </div>
+
+  <section class="mapcard">
+    <div class="mapbar">
+      <button type="button" id="skyPlay" class="roundplay" data-i18n-title="skyFast" aria-label="Speed up">
+        <svg class="ic-play" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4l10 6-10 6z"/></svg>
+        <svg class="ic-pause" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h3v12H6zM11 4h3v12h-3z"/></svg>
+      </button>
+      <div class="wlslider">
+        <input type="range" id="skyTime" min="0" max="720" step="5" value="180" aria-label="Time">
+        <div class="wlticks skyticks mono" id="skyTicks"></div>
+      </div>
+      <div class="wlread">
+        <div><span class="mono wlnum" id="skyClock">--:--</span><span class="mono wlband" id="skyWhen"></span></div>
+        <button type="button" class="mapchip" id="skyNow"><span data-i18n="skyNow"></span></button>
+      </div>
+    </div>
+    <div class="maprow">
+      <span class="maplabel mono" data-i18n="skyPlace"></span>
+      <div class="chips" id="skyPlaces"></div>
+    </div>
+  </section>
+
+  <section class="mapcard">
+    <div class="maprow">
+      <span class="maplabel mono" data-i18n="skyFamous"></span>
+      <div class="chips" id="skyFamous"></div>
+    </div>
+    <div class="maprow">
+      <span class="maplabel mono"><i class="ring c"></i><span data-i18n="mapChallenge"></span></span>
+      <div class="chips" id="skyChallenge"></div>
+    </div>
+    <div class="maprow">
+      <span class="maplabel mono" data-i18n="skyPlanets"></span>
+      <div class="chips" id="skyPlanets"></div>
+    </div>
+  </section>
+
+  <p class="small dim maphint" data-i18n="skyHint"></p>
+  <p class="small dim" data-i18n="skyCredit"></p>
 </main>
 
 <!-- ================================================================ app -->
@@ -519,6 +584,7 @@
 <script src="static/ui.js" type="module"></script>
 <script src="static/about.js" type="module"></script>
 <script src="static/map.js" type="module"></script>
+<script src="static/planetsec.js" type="module"></script>
 <script src="static/funfacts.js" type="module"></script>
 </body>
 </html>
