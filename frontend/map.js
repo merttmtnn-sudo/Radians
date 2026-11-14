@@ -81,8 +81,14 @@ async function initMap() {
     });
     map.aladin.gotoRaDec(HOME.ra, HOME.dec);
     // a slice set before the layer is added is stored but not applied: set it again once the layer is ready
+    // Pixels with no data are transparent in IRSA's tiles, and they sit where one detector is masked. Underneath
+    // the chosen plane sits the same channel from a neighbouring band (another detector, see fillOf), so a hole
+    // shows SPHEREx sky at a nearby wavelength instead of black.
+    // (A second id for the same cube keeps Aladin from treating the two layers as one.)
+    map.base = window.A.imageHiPS(CUBE_URL + '/', { name: 'SPHEREx DR1 (fill)', successCallback: () => setFill(true) });
+    map.aladin.setImageSurvey(map.base);
     map.hips = window.A.imageHiPS(CUBE_URL, { name: 'SPHEREx DR1', successCallback: () => setSlice(map.slice) });
-    map.aladin.setImageSurvey(map.hips);
+    map.aladin.setOverlayImageLayer(map.hips, 'spherex');
     // tint layer between the sky image and the markers, in the colour of the wavelength
     const div = $('skymapAladin');
     map.tint = document.createElement('div');
@@ -116,6 +122,24 @@ function setSlice(i) {
   if (map.tint) map.tint.style.background = `color-mix(in srgb, ${wlColor(w)} 72%, #fff)`;
   for (const b of $('mapPresets').children) b.classList.toggle('on', Number(b.dataset.slice) === i);
   try { map.hips?.setSliceNumber(i); } catch { /* older Aladin: one plane only */ }
+  setFill();
+}
+
+// The fill plane: the same channel on the neighbouring band whose detector has (almost) no holes.
+// Measured over all 12 order-0 tiles: D1, D3, D4 and D6 each have ~2,100 empty pixels, D2 and D5 ~50;
+// D2 fills every hole of D1 and D3, D5 every hole of D4 and D6, and D3 / D4 fill D2 / D5.
+const FILL_BAND = { 1: 2, 2: 3, 3: 2, 4: 5, 5: 4, 6: 5 };
+function fillOf(i) {
+  const band = FILL_BAND[bandOf(i)];
+  let j = (band - 1) * 17 + (i % 17);
+  if (BLANK.has(j)) j = band === 3 ? 49 : 52;            // the two dichroic channels are empty
+  return j;
+}
+function setFill(now = false) {
+  clearTimeout(map.fillTimer);
+  map.fillTimer = setTimeout(() => {
+    try { map.base?.setSliceNumber(fillOf(map.slice)); } catch { /* single plane */ }
+  }, now ? 0 : (map.timer ? 1500 : 300));
 }
 
 // coloured strip under the slider, same colours as the spectrum chart; ticks at the plane of each wavelength
