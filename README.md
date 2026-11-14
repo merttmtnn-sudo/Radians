@@ -99,6 +99,14 @@ read. The cache lives in the container, and Render's free plan starts a fresh co
 and wake-up, so only the five challenge targets, built into the image by `scripts/bake_demo.py`, are
 always instant.
 
+**Quick first look.** For a position nobody has read yet, the page first asks for a *quick look*: at most
+`QUICK_PER_EPOCH` (6) exposures per epoch and detector, spread evenly in time, so every visit and detector is
+still in the blink. It plays as soon as that subset is read; the rest is read in the background and the
+view switches to all exposures without interrupting playback. The candidate finder waits for the full read.
+Nothing is read twice: the full read reuses the quick look's cut-outs. IRSA slows down a client that
+has many requests in flight (measured: 12 in flight gave 1.3 exposures/s, 64 gave 0.3/s), so the whole
+server keeps at most `IRSA_MAX_INFLIGHT` (8) range requests open, whatever the number of visitors.
+
 **Deploying to Render** does not happen on `git push`: the live service was created by hand, so use
 Manual Deploy → Deploy latest commit in the dashboard.
 
@@ -143,8 +151,9 @@ S/N 5 is below the finder's detection threshold (8) on purpose.
 
 Each visitor may ask for 20 views and 90 spectra a minute (HTTP 429 with `Retry-After` beyond that);
 at most two new positions are read from IRSA at the same time; IRSA's own `Retry-After` is honoured;
-the cut-out cache is trimmed to 4 GB, oldest first. All four are environment settings
-(`RATE_FRAMES`, `RATE_PHOT`, `MAX_COLD_BUILDS`, `CACHE_MAX_MB`).
+the cut-out cache is trimmed to 4 GB, oldest first; at most 8 IRSA requests are in flight for the whole
+server. All are environment settings (`RATE_FRAMES`, `RATE_PHOT`, `MAX_COLD_BUILDS`, `CACHE_MAX_MB`,
+`IRSA_MAX_INFLIGHT`, `QUICK_PER_EPOCH`).
 
 ## Limitations
 
