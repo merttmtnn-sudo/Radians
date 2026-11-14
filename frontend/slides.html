@@ -53,6 +53,17 @@
   @media (prefers-reduced-motion: reduce) { .on > * { animation: none !important; } }
   #hint { position: fixed; right: 16px; bottom: 12px; font: 13px system-ui; color: #6b7491; }
   aside { display: none; }
+  .print { display: none; }
+  @page { size: 1920px 1080px; margin: 0; }
+  @media print {
+    html, body { height: auto; overflow: visible; background: none; }
+    #deck { position: static; transform: none !important; width: 1920px; height: auto; }
+    section, section.on { display: flex !important; position: relative; width: 1920px; height: 1080px; break-after: page; }
+    section *, .on > * { animation: none !important; }
+    #hint, .screen { display: none !important; }
+    .print { display: flex !important; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
 </style>
 </head>
 <body>
@@ -85,13 +96,31 @@
   <p class="eyebrow">THE IDEA</p>
   <h2>A blink comparator for the infrared sky</h2>
   <p class="lead" style="width:1500px">In 1930 Clyde Tombaugh found Pluto by flipping between two photographic plates. Radians does the same with every SPHEREx visit of a position, in a browser, in seconds once cached.</p>
-  <div style="display:flex;gap:40px;align-items:flex-end">
+  <div class="screen" style="display:flex;gap:40px;align-items:flex-end">
     <img src="media/barnard-s-star.gif" alt="Barnard's Star moving north between four SPHEREx visits" style="height:300px;border-radius:12px">
     <img src="media/eps-indi-b.gif" alt="Epsilon Indi B moving between three SPHEREx visits" style="height:300px;border-radius:12px">
     <img src="media/rw-aur.gif" alt="RW Aurigae changing brightness between two SPHEREx visits" style="height:300px;border-radius:12px">
     <p class="small" style="flex:1">Real SPHEREx DR1 frames as Radians shows them: two stars on the move, one young star changing brightness.</p>
   </div>
+  <div class="print" style="gap:40px;align-items:flex-end">
+    <img src="media/barnard-s-star-pair.png" alt="Barnard's Star in its first and last SPHEREx visits: it has moved north" style="height:300px;border-radius:12px">
+    <img src="media/rw-aur-pair.png" alt="RW Aurigae in two SPHEREx visits: its brightness changed" style="height:300px;border-radius:12px">
+    <p class="small" style="flex:1">First and last SPHEREx visit, as Radians blinks them: Barnard’s Star has moved north (marker), RW Aurigae has changed brightness.</p>
+  </div>
   <div class="foot"><span>Radians</span><span>3</span></div>
+</section>
+
+<section>
+  <p class="eyebrow">HOW TO USE IT</p>
+  <h2>Four steps, no installation</h2>
+  <div class="cards" style="grid-template-columns:repeat(4,1fr)">
+    <div class="card"><p class="num">1</p><h3>Pick a target</h3><p class="what">Type a star name or coordinates, or press one of the example buttons.</p></div>
+    <div class="card"><p class="num">2</p><h3>Watch it blink</h3><p class="what">Each frame is one SPHEREx visit. Play, pause, step, change speed.</p></div>
+    <div class="card"><p class="num">3</p><h3>Let it point</h3><p class="what">Difference views and the candidate list mark what moved or changed.</p></div>
+    <div class="card"><p class="num">4</p><h3>Dig deeper</h3><p class="what">Click any star for its spectrum and light curve; check Gaia, asteroids and NEOSSat.</p></div>
+  </div>
+  <p>Every view is a shareable link. Interface in English and Turkish.</p>
+  <div class="foot"><span>Radians</span><span>4</span></div>
 </section>
 
 <section class="alt">
@@ -109,7 +138,7 @@
     <div class="step"><p class="k">5 · SHOW</p><h3>Blink + finder</h3><p class="what">Frames, differences, candidates, spectra.</p></div>
   </div>
   <p>Python + Astropy on the server, plain JavaScript in the browser. Results are cached, so a second look is instant.</p>
-  <div class="foot"><span>Radians</span><span>4</span></div>
+  <div class="foot"><span>Radians</span><span>5</span></div>
 </section>
 
 <section>
@@ -121,7 +150,7 @@
     <div class="card"><h3>Honest data</h3><p class="what">SPHEREx quality flags shown per pixel: cosmic rays, persistence, ghosts and saturation are labelled, not hidden.</p></div>
   </div>
   <p>English and Turkish interface · shareable links that reproduce the exact view · embeddable.</p>
-  <div class="foot"><span>Radians</span><span>5</span></div>
+  <div class="foot"><span>Radians</span><span>6</span></div>
 </section>
 
 <section class="alt">
@@ -136,7 +165,7 @@
     <tr><td>R Draconis</td><td>saturated: tracked with PSF-wing light curve</td><td>Mira variable</td></tr>
   </table>
   <p class="small">Measured by the automatic finder on SPHEREx DR1, compared with SIMBAD catalogue values.</p>
-  <div class="foot"><span>Radians</span><span>6</span></div>
+  <div class="foot"><span>Radians</span><span>7</span></div>
 </section>
 
 <section>
@@ -148,7 +177,7 @@
     <div class="card"><h3>Light curve</h3><p class="what">Each detector against its own median: real variability moves all six together.</p></div>
     <div class="card"><h3>Saturated stars</h3><p class="what">Measured in a ring around the burnt-out core, which still follows the star.</p></div>
   </div>
-  <div class="foot"><span>Radians</span><span>7</span></div>
+  <div class="foot"><span>Radians</span><span>8</span></div>
 </section>
 
 <section class="alt">
@@ -160,24 +189,24 @@
     <div class="card"><h3>CSA NEOSSat</h3><p class="what">Archived images of the field from Canada’s asteroid-hunting microsatellite (CADC).</p></div>
   </div>
   <p>Plus a wider view in Aladin Lite with 2MASS, AllWISE, DSS2 and SPHEREx all-sky maps served by NASA IRSA.</p>
-  <div class="foot"><span>Radians</span><span>8</span></div>
+  <div class="foot"><span>Radians</span><span>9</span></div>
 </section>
 
 <section class="statement">
   <p class="eyebrow" style="color:#5A4417">PLANET X</p>
   <h2>A distant planet is a faint dot that moves a little between visits</h2>
   <p style="width:1500px">Radians makes that comparison available for any spot SPHEREx has seen twice, to anyone, with the known stars and asteroids already accounted for.</p>
-  <div class="foot"><span>Radians</span><span>9</span></div>
+  <div class="foot"><span>Radians</span><span>10</span></div>
 </section>
 
 <section>
   <p class="eyebrow">TRY IT</p>
-  <h2>Open source, running on Hugging Face</h2>
-  <p class="link">[Hugging Face Space link]</p>
+  <h2>Open source, running online</h2>
+  <p class="link">radians.onrender.com</p>
   <p class="link">github.com/merttmtnn-sudo/Radians</p>
   <p>Data: NASA SPHEREx via IRSA · ESA Gaia DR3 · IMCCE SkyBoT · CSA NEOSSat via CADC · CDS Sesame and Aladin Lite.</p>
   <p class="small">Team: Mert Metin, Efe Gönderen, Bora Hısım, Emre Bozkaya</p>
-  <div class="foot"><span>Radians</span><span>10</span></div>
+  <div class="foot"><span>Radians</span><span>11</span></div>
 </section>
 
 </div>

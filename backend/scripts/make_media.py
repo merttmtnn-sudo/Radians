@@ -64,6 +64,17 @@ def render(q, dets, fov=240):
     return frames
 
 
+def pair(frames, path):
+    """First and last visit side by side (for print, where a GIF shows only its first frame)."""
+    a, b = frames[0], frames[-1]
+    gap = 16
+    out = Image.new("RGB", (a.width * 2 + gap, a.height), NIGHT)
+    out.paste(a, (0, 0))
+    out.paste(b, (a.width + gap, 0))
+    out.save(path, optimize=True)
+    print(path.name, f"{path.stat().st_size / 1024:.0f} kB")
+
+
 def save(frames, path, ms=700):
     frames[0].save(path, save_all=True, append_images=frames[1:], duration=ms, loop=0, optimize=True)
     print(path.name, f"{path.stat().st_size / 1024:.0f} kB", len(frames), "frames")
@@ -76,5 +87,6 @@ if __name__ == "__main__":
         fr = render(q, dets)
         slug = "".join(c if c.isalnum() else "-" for c in q.lower()).strip("-")
         save(fr, OUT / f"{slug}.gif")
+        pair(fr, OUT / f"{slug}-pair.png")
         reel += fr * 3                                               # each target blinks three times in the reel
     save(reel, OUT / "radians-demo.gif")

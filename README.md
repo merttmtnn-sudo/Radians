@@ -6,6 +6,9 @@ moving, and variable stars changing brightness.
 
 NASA Space Apps Challenge 2026 — *Planet X and SPHEREx*.
 
+**Live:** https://radians.onrender.com (free instance: the first visit after a quiet spell wakes it up, about a minute) ·
+**Slides (PDF):** [`docs/Radians-slides.pdf`](docs/Radians-slides.pdf)
+
 <p>
   <img src="docs/media/barnard-s-star.gif" width="240" alt="Barnard's Star moving north between four SPHEREx visits">
   <img src="docs/media/eps-indi-b.gif" width="240" alt="Epsilon Indi B moving between three SPHEREx visits">
@@ -54,10 +57,12 @@ Tests: `cd backend && python -m pytest -q tests` and `node --test frontend/tests
 
 Fill the caches for the five demo targets (a few minutes, once): `cd backend && python scripts/warm.py`
 
-## Deploy (Hugging Face Space)
+## Deploy
 
-The `Dockerfile` runs everything in one container on port 7860. Create a **Docker** Space on
-Hugging Face, then:
+The `Dockerfile` runs everything in one container. **Render** (what the live site uses): New → Web
+Service → public repository URL, Docker, Free plan, `MAX_WORKERS=16`; or use the `render.yaml` Blueprint.
+
+**Hugging Face** Docker Spaces now need a paid plan. With one, create a Docker Space, then:
 
 ```bash
 deploy/push_hf.sh <hf-user>/<space-name>
