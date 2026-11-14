@@ -180,19 +180,22 @@ async function run(opts) {
 async function fillIn(params, quickData, ctl) {
   const job = Math.random().toString(36).slice(2, 12);
   const n = quickData.n_exposures_read, total = quickData.n_exposures_total;
-  const note = (done, left) => { els.quickNote.textContent = t('quickNote', { n, total, done, left }); };
-  note(0, total - n);
+  // the server counts every exposure of the full read (cached ones included), so show done/total of all
+  const note = (done) => { els.quickNote.textContent = t('quickNote', { n, total, done }); };
+  note(0);
   const poll = setInterval(async () => {
     try {
       const p = await api('api/progress', { job }, ctl.signal);
-      if (p.stage === 'read' && p.total) note(p.done, p.total);
+      if (p.stage === 'read' && p.total) note(p.done);
     } catch { /* progress is cosmetic */ }
   }, 1500);
   try {
     const full = await api('api/frames', { ...params, job }, ctl.signal);
     if (state.abort !== ctl || !full.frames || !full.frames.length) return;   // the visitor moved on
     const wasPlaying = state.playing, idx = Math.min(state.idx, full.frames.length - 1);
-    load(full, idx);
+    const click = ex.click;                        // a star the visitor clicked during the quick look
+    load(full, idx);                               // load() → onLoaded() resets the analysis to the target…
+    if (click && !ex.click) photAt(click.x, click.y);   // …so measure their star again, now on every exposure
     if (wasPlaying) play();
     els.quickNote.textContent = t('quickFull', { total: full.n_exposures_read });
     setTimeout(() => { if (state.data === full) els.quickNote.textContent = ''; }, 5000);
@@ -433,7 +436,7 @@ function renderCandidates() {
   const cands = state.data?.candidates || [];
   els.candCount.textContent = state.data ? `(${cands.length})` : '';
   if (!state.data) { els.cands.replaceChildren(); return; }
-  if (state.data.quick) { els.cands.replaceChildren(el('li', 'muted small', t('candsPending'))); return; }
+  if (state.data.quick) { els.candCount.textContent = '(…)'; els.cands.replaceChildren(el('li', 'muted small', t('candsPending'))); return; }
   if (!cands.length) { els.cands.replaceChildren(el('li', 'muted small', t('noCands'))); return; }
   els.cands.replaceChildren(...cands.map((c, i) => {
     const li = el('li', 'cand' + (i === state.selected ? ' on' : ''));
