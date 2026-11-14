@@ -343,12 +343,97 @@ function showPop(ra, dec, q, at) {
   $('mapPopPos').textContent = `RA ${(+ra).toFixed(4)}°   Dec ${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(4)}°`;
   pop.dataset.q = q || `${(+ra).toFixed(5)} ${d.toFixed(5)}`;
   pop.hidden = false;
+  showCoverage(+ra, d);
   const r = $('skymapAladin').getBoundingClientRect();
   const [x, y] = at || (() => { try { return map.aladin.world2pix(ra, dec) || [r.width / 2, r.height / 2]; } catch { return [r.width / 2, r.height / 2]; } })();
+  map.popAt = [x, y];
+  placePop();
+}
+// keep the card inside the map (again once the coverage answer has made it taller)
+function placePop() {
+  const pop = $('mapPop');
+  if (pop.hidden || !map.popAt) return;
+  const r = $('skymapAladin').getBoundingClientRect();
+  const [x, y] = map.popAt;
   pop.style.left = `${Math.min(r.width - pop.offsetWidth - 12, Math.max(12, x + 16))}px`;
   pop.style.top = `${Math.min(r.height - pop.offsetHeight - 12, Math.max(12, y + 16))}px`;
 }
+// ---------------------------------------------------------------- the card: has SPHEREx seen this spot?
+const DET_UM = { 1: [0.75, 1.09], 2: [1.10, 1.62], 3: [1.63, 2.42], 4: [2.42, 3.82], 5: [3.83, 4.41], 6: [4.42, 5.00] };
+const cov = { seq: 0, ctl: null, seen: new Map() };
+
+function covMonth(iso) {
+  const dt = new Date(iso + 'T00:00:00Z');
+  return Number.isNaN(dt.getTime()) ? iso
+    : dt.toLocaleDateString(getLang() === 'tr' ? 'tr-TR' : 'en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
+/** The sentence for a coverage answer: [i18n key, vars]. */
+function coverageWords(c) {
+  if (!c || !c.count) return ['covNone', {}];
+  const n = c.count.toLocaleString(getLang() === 'tr' ? 'tr-TR' : 'en-GB');
+  const p = c.passes?.length || 1;
+  if (p > 1) return ['covMany', { n, p, first: covMonth(c.first) }];
+  // one unbroken run that lasts for months is a deep field, not a single visit
+  return [c.span_days > 60 ? 'covDeep' : 'covOne', { n, first: covMonth(c.first) }];
+}
+
+function drawCoverage(c) {
+  const box = $('mapPopCov');
+  const [key, vars] = coverageWords(c);
+  box.className = 'mappopcov';
+  box.replaceChildren(document.createTextNode(t(key, vars)));
+  if (!c.count) { placePop(); return; }
+  const max = Math.max(1, ...Object.values(c.detectors));
+  const bands = document.createElement('div');
+  bands.className = 'covbands';
+  for (const d of Object.keys(DET_UM)) {
+    const n = c.detectors[d] || 0;
+    const fig = document.createElement('figure');
+    if (!n) fig.className = 'none';
+    fig.title = t('covBand', { d, lo: DET_UM[d][0], hi: DET_UM[d][1], n });
+    const bar = document.createElement('span');
+    bar.className = 'cb';
+    const fill = document.createElement('i');
+    fill.style.height = `${Math.round(n / max * 100)}%`;
+    bar.append(fill);
+    const num = document.createElement('b');
+    num.textContent = n;
+    fig.append(bar, num, document.createTextNode(d));
+    bands.append(fig);
+  }
+  const cap = document.createElement('span');
+  cap.className = 'covcap';
+  cap.textContent = t('covBands');
+  box.append(cap, bands);
+  placePop();
+}
+
+async function showCoverage(ra, dec) {
+  const box = $('mapPopCov');
+  const key = `${ra.toFixed(5)},${dec.toFixed(5)}`;       // the card's own coordinates, as the blink will ask for them
+  const seq = ++cov.seq;
+  cov.ctl?.abort();
+  if (cov.seen.has(key)) { drawCoverage(cov.seen.get(key)); return; }
+  box.className = 'mappopcov wait';
+  box.textContent = t('covAsking');
+  cov.ctl = new AbortController();
+  try {
+    const r = await fetch(new URL(`api/coverage?ra=${ra.toFixed(5)}&dec=${dec.toFixed(5)}`, location.href), { signal: cov.ctl.signal });
+    if (!r.ok) throw new Error(String(r.status));
+    const c = await r.json();
+    cov.seen.set(key, c);
+    if (seq === cov.seq) drawCoverage(c);
+  } catch (err) {
+    if (seq !== cov.seq || err.name === 'AbortError') return;
+    box.className = 'mappopcov down';
+    box.textContent = t('covDown');
+  }
+}
+
 function hidePop() {
+  cov.seq++;
+  cov.ctl?.abort();
   $('mapPop').hidden = true;
   try { map.aladin?.unselectObjects?.(); } catch { /* older Aladin */ }
 }
