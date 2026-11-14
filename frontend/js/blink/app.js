@@ -8,6 +8,7 @@ import { encodeGif } from './gif.js';
 import { CUBE_URL, nearestSlice } from '../core/cube.js';
 import { depthStart, depthLive, depthLoad, depthHide } from './depth.js';
 import { getPalette, setPalette, viewerCmap } from '../core/palette.js';
+import { curated } from '../content/facts.js';
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
@@ -961,6 +962,10 @@ function gridParams() {
 
 function onLoaded() {
   ex.deep = stackImage(state.images, state.variances);
+  // targets that change brightness instead of moving (R Dra): open on the light curve and say why
+  const cur = state.target ? curated(state.target.ra, state.target.dec) : null;
+  $('lookNote').hidden = cur?.look !== 'brightness';
+  if (cur?.look === 'brightness') ex.tab = 'lightcurve';
   setPhot(state.data.exposures || [], null);
   loadCatalogues();
   loadNeossat();
@@ -1089,6 +1094,7 @@ function renderAnalysis() {
 }
 
 for (const b of e4.analysis.querySelectorAll('[data-tab]')) b.onclick = () => { ex.tab = b.dataset.tab; renderAnalysis(); };
+$('lookLc').onclick = () => { ex.tab = 'lightcurve'; renderAnalysis(); e4.analysis.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
 e4.photMode.onchange = renderAnalysis;
 $('photCsv').onclick = () => {
   if (!ex.phot) return;

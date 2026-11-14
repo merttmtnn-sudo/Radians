@@ -635,3 +635,8 @@ i.ring.e { border-color: #fff; }
 .facttag[data-kind="factTagReg"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .factbody p { font-size: 14px; line-height: 1.55; color: var(--fg-2); margin: 0; }
 body.embed .depth { display: none !important; }
+
+/* target that changes brightness instead of moving (R Dra) */
+.looknote { margin: 10px 0 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent, #ffb347) 55%, transparent);
+  border-radius: 14px; background: color-mix(in srgb, var(--accent, #ffb347) 9%, transparent); }
+.looknote p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.45; }

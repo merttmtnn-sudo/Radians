@@ -104,6 +104,7 @@ export const TARGETS = [
   },
   {
     key: 'rdra', ra: 248.1676, dec: 66.7550, q: 'R Dra', temp: '≈ 2,500–3,000 K', distLy: 2600,
+    look: 'brightness',   // does not move: the viewer opens on its light curve and says so
     en: {
       kind: 'Mira variable (pulsating red giant)',
       summary: 'An old red giant that swells and shrinks every 245 days or so. In visible light its brightness swings by hundreds of times; in the infrared the swing is far smaller, because the star mostly changes temperature, not total power.',
