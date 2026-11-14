@@ -237,7 +237,7 @@ def build_frame(exp: Exposure, ra, dec, n, wout, target) -> Frame | None:
     return f
 
 
-def build_frames(exps: list[Exposure], ra, dec, n, target, progress=None) -> list[Frame]:
+def build_frames(exps: list[Exposure], ra, dec, n, target, progress=None, on_frame=None) -> list[Frame]:
     wout = output_wcs(ra, dec, n)
     out: list[Frame | None] = [None] * len(exps)
     with ThreadPoolExecutor(config.MAX_WORKERS) as pool:
@@ -246,6 +246,8 @@ def build_frames(exps: list[Exposure], ra, dec, n, target, progress=None) -> lis
             i = futs[fu]
             try:
                 out[i] = fu.result()
+                if on_frame and out[i] is not None:
+                    on_frame(out[i])
             except Exception as ex:      # one bad file must not sink the whole request
                 print("skip", exps[i].obs_id, exps[i].detector, repr(ex)[:200])
             if progress:
@@ -424,3 +426,81 @@ def encode(groups):
 
 def group_frames(frames: list[Frame], mode: str):
     return encode(group_raw(frames, mode))
+
+
+# ---------------------------------------------------------------- depth (how the image sharpens with more exposures)
+class Accumulator:
+    """Running inverse-variance co-add, one exposure at a time (same weighting as coadd())."""
+
+    def __init__(self, n):
+        self.num = np.zeros((n, n))
+        self.den = np.zeros((n, n))
+        self.cov = np.zeros((n, n), np.uint16)
+        self.count = 0
+
+    def add(self, f: Frame):
+        good = np.isfinite(f.image) & np.isfinite(f.variance) & (f.variance > 0) & ((f.flags & config.BAD_MASK) == 0)
+        a = np.where(good, 1.0 / np.where(good, f.variance, 1.0), 0.0)
+        self.num += np.where(good, f.image, 0.0) * a
+        self.den += a
+        self.cov += good.astype(np.uint16)
+        self.count += 1
+
+    def image(self):
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(self.den > 0, self.num / self.den, np.nan).astype(np.float32)
+
+    def sigma(self):
+        """Pipeline (propagated) noise of the co-add: median of sqrt(1 / sum of weights)."""
+        d = self.den[self.den > 0]
+        return float(np.median(1.0 / np.sqrt(d))) if d.size else None
+
+
+class DepthAccumulator(Accumulator):
+    """Co-add for the sharpening view. The noise is SPHEREx's own: the per-pixel uncertainty maps of the exposures,
+    propagated through the co-add. (Measuring the scatter of the image itself does not work here: in a crowded
+    Milky Way field it is set by the stars, and alternate exposures come from different detectors, i.e. different
+    wavelengths, so even a half-difference keeps the stars' colours.)"""
+
+    def stats(self):
+        """(image, noise, stars): stars are local maxima more than 5 noise above the local sky."""
+        img = self.image()
+        noise = self.sigma()
+        return img, noise, count_stars(img, noise)
+
+
+def count_stars(img, noise):
+    from scipy.ndimage import maximum_filter, median_filter
+    if not noise or not np.isfinite(img).any():
+        return 0
+    a = np.where(np.isfinite(img), img, np.nanmedian(img))
+    sky = median_filter(a, size=9, mode="nearest")
+    peak = (a == maximum_filter(a, size=3, mode="nearest")) & (a - sky > 5 * noise) & np.isfinite(img)
+    peak[:2, :] = peak[-2:, :] = peak[:, :2] = peak[:, -2:] = False
+    return int(peak.sum())
+
+
+def quantize(img, scale):
+    """float image -> int16 in units of `scale` (NaN = -32768): half the bytes of float32 for the depth series."""
+    q = np.where(np.isfinite(img), np.clip(np.round(img / scale), -32767, 32767), -32768)
+    return q.astype(np.int16)
+
+
+def depth_series(frames: list[Frame], n: int, max_steps: int = 12):
+    """Co-adds of the first 1, 2, 4 ... all exposures in time order, with noise and star counts at every step."""
+    frames = sorted(frames, key=lambda f: f.exp.mjd)
+    total = len(frames)
+    ks = sorted({int(k) for k in np.unique(np.round(np.geomspace(1, total, min(max_steps, total))))} | {total})
+    acc, steps = DepthAccumulator(n), []
+    for i, f in enumerate(frames, 1):
+        acc.add(f)
+        if i in ks:
+            img, noise, stars = acc.stats()
+            steps.append({"n_exposures": i, "date": mjd_iso(f.exp.mjd), "noise": noise, "stars": stars, "img": img})
+    final_noise = steps[-1]["noise"] or float(np.nanstd(steps[-1]["img"])) or 1.0
+    peak = max(float(np.nanmax(np.abs(s["img"]))) for s in steps)
+    scale = max(float(final_noise) / 20.0, peak / 32000.0)          # fine steps, but never clip a bright star
+    for s in steps:
+        s["image"] = b64(quantize(s.pop("img"), scale))
+    return {"steps": steps, "scale": scale, "coverage": b64(acc.cov), "max_coverage": int(acc.cov.max()),
+            "total": total, "first_date": mjd_iso(frames[0].exp.mjd), "last_date": mjd_iso(frames[-1].exp.mjd)}

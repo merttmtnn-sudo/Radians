@@ -6,6 +6,7 @@ import { t, setLang, getLang } from './i18n.js';
 import { scatterChart, chartTable, SERIES, wlColor } from './charts.js';
 import { encodeGif } from './gif.js';
 import { CUBE_URL, nearestSlice } from './cube.js';
+import { depthStart, depthLive, depthLoad, depthHide } from './depth.js';
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
@@ -129,6 +130,7 @@ async function run(opts) {
     }
     state.target = target;
     setLoading(true, t('reading'));
+    depthStart();
     const job = Math.random().toString(36).slice(2, 12);
     poll = setInterval(async () => {
       try {
@@ -138,7 +140,8 @@ async function run(opts) {
           els.loadingSub.textContent = t('readingN', { done: p.done, total: p.total, pct: Math.round(100 * p.done / p.total) });
           els.loadingBar.hidden = false;
           els.loadingBar.value = p.done / p.total;
-        } else if (p.stage === 'process') {
+        }
+        if (p.preview) depthLive(p.preview); else if (p.stage === 'process') {
           els.loadingSub.textContent = t('processing');
           els.loadingBar.value = 1;
         }
@@ -154,14 +157,17 @@ async function run(opts) {
       els.empty.hidden = false;
       els.empty.innerHTML = `<p>${t('noData')}</p>`;
       renderCandidates();
+      depthHide();
       return;
     }
     load(data, opts.frame ?? 0);
-    document.dispatchEvent(new CustomEvent('radians:loaded'));
+    document.dispatchEvent(new CustomEvent('radians:loaded', { detail: data }));
+    depthLoad(gridParams(), api);
     syncUrl();
     if (opts.autoplay !== false) play();
   } catch (e) {
     if (e.name !== 'AbortError') {
+      depthHide();
       toast(e.message, true);
       if (!state.data) els.empty.hidden = false;
     }

@@ -226,3 +226,32 @@ def test_rate_limit_trusts_only_the_proxy_entry():
     from app import main
     req = SimpleNamespace(headers={"x-forwarded-for": "1.2.3.4, 9.9.9.9"}, client=SimpleNamespace(host="10.0.0.1"))
     assert main._client(req) == "9.9.9.9"
+
+
+def test_depth_series_noise_falls_and_stars_appear():
+    rng = np.random.default_rng(1)
+    n, frames = 41, []
+    sky = np.zeros((n, n))
+    for k, (x, y) in enumerate([(8, 9), (20, 30), (31, 12), (12, 25), (28, 22)]):
+        sky[y, x] = 3.0 + k * 0.2                       # faint stars: below 5 sigma in one exposure
+    for i in range(64):
+        e = Exposure(f"o{i}", 1 + i % 6, "u", 60000 + i - 0.01, 60000 + i + 0.01, 0, 0, 100, "c")
+        img = (sky + rng.normal(0, 1, (n, n))).astype(np.float32)
+        frames.append(stack.Frame(e, img, np.ones((n, n), np.float32), np.zeros((n, n), np.uint32)))
+    d = stack.depth_series(list(reversed(frames)), n)
+    st = d["steps"]
+    assert st[0]["n_exposures"] == 1 and st[-1]["n_exposures"] == 64 and d["total"] == 64
+    assert st[-1]["noise"] < st[0]["noise"] / 6                         # ~1/sqrt(64) = 1/8
+    assert st[-1]["stars"] >= 5 and st[0]["stars"] < 5
+    assert d["max_coverage"] == 64
+    q = np.frombuffer(__import__("base64").b64decode(st[-1]["image"]), np.int16).reshape(n, n)
+    assert abs(q[30, 20] * d["scale"] - sky[30, 20]) < 0.6
+
+
+def test_live_preview_reports_partial_coadd():
+    from app import main
+    add = main._live_preview("jobdepth", 5, 10)
+    for _ in range(3):
+        add(_frame(np.ones((5, 5))))
+    p = main._progress["jobdepth"]["preview"]
+    assert p["count"] == 3 and p["n"] == 5 and p["image"]
