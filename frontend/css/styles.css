@@ -539,6 +539,15 @@ body.embed .stage { max-height: calc(100vh - 70px); }
 .mapdeep > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #mapDeepGo { flex: none; height: 30px; padding: 0 14px; border: 0; border-radius: 999px; background: #ffb347; color: #1a1205; font: inherit; font-weight: 600; cursor: pointer; }
 #mapDeepGo:hover { filter: brightness(1.08); }
+.maptm { position: absolute; z-index: 16; left: 14px; bottom: 64px; max-width: min(420px, calc(100% - 28px)); padding: 8px 12px;
+  border-radius: 12px; background: rgba(12, 12, 14, .82); border: 1px solid rgba(120, 190, 255, .45); color: #dfe6f0; font-size: 12px; line-height: 1.4;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.maptm[hidden] { display: none; }
+.maptm b { color: #8cc8ff; margin-right: 4px; }
+.mapdeepseg { display: inline-flex; flex: none; gap: 2px; padding: 2px; border-radius: 999px; background: rgba(255, 255, 255, .08); }
+.mapdeepseg[hidden] { display: none; }
+.mapdeepseg button { height: 26px; padding: 0 11px; border: 0; border-radius: 999px; background: none; color: #cfd2d8; font: inherit; cursor: pointer; }
+.mapdeepseg button.on { background: #ffb347; color: #1a1205; font-weight: 600; }
 .mapdeep #mapDeepOff { margin-right: 0; }
 .mapdeep.busy::before { content: ""; flex: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .25);
   border-top-color: #ffb347; animation: spin .8s linear infinite; }

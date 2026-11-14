@@ -100,7 +100,7 @@ async function initMap() {
     map.aladin.setImageSurvey(map.base);
     map.hips = window.A.imageHiPS('radians-spherex', { url: CUBE_URL, name: 'SPHEREx DR1', successCallback: () => setSlice(map.slice) });
     map.aladin.setOverlayImageLayer(map.hips, 'spherex');
-    map.aladin.on('zoomChanged', () => deepChip());
+    map.aladin.on('zoomChanged', () => { deepChip(); twoMass(); });
     // tint layer between the sky image and the markers, in the colour of the wavelength
     const div = $('skymapAladin');
     map.tint = document.createElement('div');
@@ -493,11 +493,12 @@ function prefetchSoon() {
   }, map.timer ? 60 : 250);
 }
 
-// ---------------------------------------------------------------- deeper zoom: SPHEREx's own 6″ pixels
+// ---------------------------------------------------------------- deeper zoom: sharper than one SPHEREx pixel
 // Closer than DEEP_FOV the all-sky map only magnifies its 13″ pixels. The visitor can then load the real
-// exposures of that spot (the same reader as the blink, one detector: the band of the chosen wavelength),
-// stacked and laid over the map at SPHEREx's native 6.15″ pixels.
-const deep = { layer: false, busy: false, det: null, n: 0, err: '' };
+// exposures of that spot (one detector: the band of the chosen wavelength). The server drizzles them onto 3″
+// pixels (backend/app/sharp.py: many dithered exposures sample the sky at sub-pixel offsets) and also
+// stacks them on SPHEREx's own 6.15″ grid, so "Before / After" compares the two with one stretch.
+const deep = { layer: false, busy: false, det: null, n: 0, err: '', data: null, view: 'after' };
 function deepChip() {
   const box = $('mapDeep');
   if (!map.aladin) return;
@@ -509,12 +510,14 @@ function deepChip() {
   let text;
   if (deep.busy) text = deep.total ? t('mapDeepLoading', { det: deep.det, done: deep.done, total: deep.total }) : t('mapDeepWait', { det: deep.det });
   else if (deep.err) text = deep.err;
-  else if (deep.layer) text = t('mapDeepShown', { det: deep.det, n: deep.n });
+  else if (deep.layer) text = t(deep.view === 'after' ? 'mapDeepShown' : 'mapDeepNative', { det: deep.det, n: deep.n });
   else text = t('mapDeepOffer');
   $('mapDeepText').textContent = text;
   $('mapDeepGo').hidden = deep.busy || (deep.layer && deep.det === det && !deep.err);
   $('mapDeepGo').textContent = t(deep.err ? 'mapDeepRetry' : 'mapDeepGo', { det });
   $('mapDeepOff').hidden = !deep.layer || deep.busy;
+  $('mapDeepSeg').hidden = !deep.layer || deep.busy;
+  for (const b of $('mapDeepSeg').querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === deep.view);
   box.classList.toggle('busy', deep.busy);
 }
 async function loadDeep() {
@@ -533,13 +536,16 @@ async function loadDeep() {
     } catch { /* cosmetic */ }
   }, 1500);
   try {
-    const q = new URLSearchParams({ ra: ra.toFixed(6), dec: dec.toFixed(6), fov, mode: 'epoch', detectors: String(deep.det),
-      matched: 'false', candidates: 'false', job });
-    const r = await fetch(new URL(`api/frames?${q}`, location.href));
+    const q = new URLSearchParams({ ra: ra.toFixed(5), dec: dec.toFixed(5), fov, det: String(deep.det), factor: 2, job });
+    const r = await fetch(new URL(`api/sharp?${q}`, location.href));
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail === 'IRSA_UNAVAILABLE' || r.status >= 502 ? t('irsaDown') : data.detail === 'IRSA_FAILED' ? t('irsaFailed') : `HTTP ${r.status}`);
-    if (!data.frames || !data.frames.length) throw new Error(t('mapDeepNone'));
-    showDeep(data);
+    if (!data.count) throw new Error(t('mapDeepNone'));
+    data.img = decodeB64(data.image, Float32Array);
+    data.nat = decodeB64(data.native, Float32Array);
+    data.range = percentiles([data.nat], [2, 99.8]);   // one stretch for both, so before / after compare fairly
+    deep.data = data; deep.view = 'after';
+    showDeep();
   } catch (e) {
     deep.err = e.message;
   } finally {
@@ -548,14 +554,10 @@ async function loadDeep() {
     deepChip();
   }
 }
-function showDeep(data) {
-  const g = data.grid, n = g.n;
-  const imgs = data.frames.map(f => decodeB64(f.image, Float32Array));
-  const sum = new Float64Array(n * n), cnt = new Uint16Array(n * n);
-  for (const a of imgs) for (let i = 0; i < a.length; i++) if (Number.isFinite(a[i])) { sum[i] += a[i]; cnt[i]++; }
-  const st = new Float32Array(n * n);
-  for (let i = 0; i < st.length; i++) st[i] = cnt[i] ? sum[i] / cnt[i] : NaN;
-  const [lo, hi] = percentiles([st], [2, 99.8]);
+function showDeep() {
+  const d = deep.data, after = deep.view === 'after';
+  const n = after ? d.n : d.n_native, st = after ? d.img : d.nat, scale = after ? d.scale : d.native_scale;
+  const [lo, hi] = d.range;
   const cv = document.createElement('canvas');
   cv.width = cv.height = n;
   const ctx = cv.getContext('2d');
@@ -570,23 +572,56 @@ function showDeep(data) {
     }
   }
   ctx.putImageData(out, 0, 0);
-  const s = g.pixel_scale / 3600;
+  // Aladin draws image layers with hard pixel edges: hand it a smoothly 3x enlarged copy instead
+  const U = 3, big = document.createElement('canvas');
+  big.width = big.height = n * U;
+  const bx = big.getContext('2d');
+  bx.imageSmoothingEnabled = true; bx.imageSmoothingQuality = 'high';
+  bx.drawImage(cv, 0, 0, n * U, n * U);
+  const s = scale / U / 3600;
   try { map.aladin.removeImageLayer('native'); } catch { /* none yet */ }
-  const img = window.A.image(cv.toDataURL('image/png'), {
-    name: `SPHEREx D${deep.det} 6″`, imgFormat: 'png',
-    wcs: { NAXIS: 2, NAXIS1: n, NAXIS2: n, CTYPE1: 'RA---TAN', CTYPE2: 'DEC--TAN', CRVAL1: g.ra, CRVAL2: g.dec,
-      CRPIX1: (n + 1) / 2, CRPIX2: (n + 1) / 2, CDELT1: -s, CDELT2: s, RADESYS: 'ICRS', EQUINOX: 2000 },
+  const img = window.A.image(big.toDataURL('image/png'), {
+    name: `SPHEREx D${deep.det} ${after ? '3″ drizzle' : '6″'}`, imgFormat: 'png',
+    wcs: { NAXIS: 2, NAXIS1: n * U, NAXIS2: n * U, CTYPE1: 'RA---TAN', CTYPE2: 'DEC--TAN', CRVAL1: d.ra, CRVAL2: d.dec,
+      CRPIX1: (n * U + 1) / 2, CRPIX2: (n * U + 1) / 2, CDELT1: -s, CDELT2: s, RADESYS: 'ICRS', EQUINOX: 2000 },
   });
   map.aladin.setOverlayImageLayer(img, 'native');
   deep.layer = true;
-  deep.n = data.n_exposures_read;
+  deep.n = d.count;
+  twoMass();
 }
 $('mapDeepGo').onclick = loadDeep;
+
+// Closer still, past what any SPHEREx picture holds, the map fades to 2MASS (IRSA's copy of the CDS colour
+// HiPS: J, H, Ks at 1″) and says so on screen. Not while a SPHEREx deep picture is shown: that one wins.
+const TWOMASS_URL = 'https://irsa.ipac.caltech.edu/data/hips/CDS/2MASS/Color';
+const TM_FROM = 0.25, TM_FULL = 0.08;   // degrees: start fading in / fully 2MASS
+function twoMass() {
+  if (!map.aladin) return;
+  let fov = 180;
+  try { fov = map.aladin.getFov()[0]; } catch { /* default */ }
+  const a = deep.layer || deep.busy ? 0 : Math.max(0, Math.min(1, (TM_FROM - fov) / (TM_FROM - TM_FULL)));
+  if (a > 0 && !map.tm) {
+    try {
+      map.tm = window.A.imageHiPS('radians-2mass', { url: TWOMASS_URL, name: '2MASS J H Ks', imgFormat: 'jpeg' });
+      map.aladin.setOverlayImageLayer(map.tm, 'twomass');
+    } catch { map.tm = null; }
+  }
+  try { map.tm?.setOpacity(a); } catch { /* older Aladin */ }
+  $('mapTm').hidden = a < 0.05;
+}
+$('mapDeepSeg').onclick = e => {
+  const v = e.target.closest('button')?.dataset.v;
+  if (!v || !deep.data || v === deep.view) return;
+  deep.view = v; showDeep(); deepChip();
+};
 $('mapDeepOff').onclick = () => {
   try { map.aladin.removeImageLayer('native'); } catch { /* gone */ }
   deep.layer = false;
+  deep.data = null;
   deep.err = '';
   deepChip();
+  twoMass();
 };
 
 // ---------------------------------------------------------------- start

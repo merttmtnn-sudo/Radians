@@ -340,3 +340,15 @@ def test_objinfo_variants_and_limit():
     assert "M  42" in objinfo.variants("M42") and objinfo.variants("HIP 33856")[0] == "HIP 33856"
     assert objinfo.variants("Sirius") == ["Sirius", "NAME Sirius"]
     assert main.LIMITS["/api/object"] == config.RATE_LOOKUP
+
+
+def test_sharp_grids_and_limit():
+    from app import main, sharp
+    w = sharp.out_wcs(10.0, 20.0, 81, 3.075)
+    x, y = w.wcs_world2pix([[10.0, 20.0]], 0)[0]
+    assert abs(x - 40) < 1e-6 and abs(y - 40) < 1e-6
+    import numpy as np
+    acc, wacc = np.zeros(9), np.zeros(9)
+    sharp._bilinear(acc, wacc, np.array([1.5]), np.array([1.0]), np.array([4.0]), 1.0, 3)
+    assert abs(wacc.sum() - 1) < 1e-9 and abs(acc[3 + 1] - 2) < 1e-9
+    assert main.LIMITS["/api/sharp"] == config.RATE_FRAMES

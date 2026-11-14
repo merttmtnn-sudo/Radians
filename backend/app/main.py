@@ -30,6 +30,7 @@ LIMITS = {"/api/frames": config.RATE_FRAMES, "/api/photometry": config.RATE_PHOT
 # endpoints that ask SIMBAD / Gaia / VizieR / IRSA for a visitor or fit on the server: one budget each
 LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr",
                                               "/api/curious/motion", "/api/curious/period", "/api/curious/xmatch", "/api/object")})
+LIMITS["/api/sharp"] = config.RATE_FRAMES
 
 
 def _client(request: Request) -> str:
@@ -554,3 +555,42 @@ def object_info(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge
     """SIMBAD facts and a Wikipedia summary for the object clicked in the planetarium (each part may fail alone)."""
     return JSONResponse(objinfo.lookup((id or "").strip() or None, round(ra, 5), round(dec, 5), lang, kind),
                         headers={"Cache-Control": "public, max-age=86400"})
+
+
+# ---------------------------------------------------------------- sharper than one pixel (drizzle)
+from . import sharp  # noqa: E402
+
+
+@app.get("/api/sharp")
+def sharp_view(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+               fov: float = Query(300, ge=60, le=900, description="arcsec"), det: int = Query(1, ge=1, le=6),
+               factor: int = Query(2, ge=2, le=3), max_exposures: int = Query(300, ge=10, le=600),
+               job: str | None = Query(None, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")):
+    """One detector band of a spot drizzled onto a grid `factor` times finer than SPHEREx's 6.15″ pixels, plus
+    the ordinary stack on the native grid for comparison. Cached on disk for a week."""
+    ra, dec, fov = round(ra, 5), round(dec, 5), round(fov)
+    key = f"{ra}|{dec}|{fov}|{det}|{factor}|{max_exposures}"
+
+    def run():
+        _report(job, stage="search")
+        exps = [e for e in _exposures(ra, dec) if e.detector == det]
+        if len(exps) > max_exposures:
+            idx = np.linspace(0, len(exps) - 1, max_exposures).round().astype(int)
+            exps = [exps[i] for i in sorted(set(idx))]
+        if not exps:
+            return {"count": 0}
+        _report(job, stage="queue")
+        if not _cold.acquire(timeout=120):
+            raise HTTPException(503, "The server is busy reading other positions; please try again in a minute.",
+                                headers={"Retry-After": "60"})
+        try:
+            _report(job, stage="read", done=0, total=len(exps))
+            out = sharp.drizzle(exps, ra, dec, fov, factor, progress=lambda i, k: _report(job, done=i, total=k))
+        finally:
+            _cold.release()
+        threading.Thread(target=stack.prune_cache, daemon=True).start()
+        return {**out, "det": det} if out else {"count": 0}
+
+    out = explorer._cached_json("sharp", key, 7 * 86400, run)
+    _report(job, stage="done")
+    return JSONResponse(out, headers={"Cache-Control": "public, max-age=3600"})

@@ -42,7 +42,7 @@ uniform sampler2D uAtlas0, uIndex0, uAtlas1, uIndex1, uLut;
 uniform vec2 uRes, uC; uniform float uK, uMaxT; uniform int uProj;
 uniform mat3 uRot, uMnt; uniform float uLon0, uLat0, uLonSign;
 uniform int uOrder0, uOrder1, uMode0, uMode1, uOrient; uniform float uMix, uGain, uGamma, uBlack, uFade; uniform bool uHas1;
-uniform sampler2D uMos; uniform bool uMosOn; uniform vec3 uM0, uME, uMN; uniform float uMScale, uMSize;
+uniform sampler2D uMos; uniform bool uMosOn; uniform bool uCubic; uniform float uLod; uniform vec3 uM0, uME, uMN; uniform float uMScale, uMSize;
 out vec4 outColor;
 const float PI = 3.141592653589793;
 float gi(float r) {
@@ -51,6 +51,23 @@ float gi(float r) {
   if (uProj == 2) return r <= 1.0 ? asin(r) : -1.0;
   if (uProj == 3) return atan(r);
   return r <= 2.0 ? 2.0 * asin(r / 2.0) : -1.0;
+}
+// one tile of the atlas: bilinear, or Catmull-Rom (16 texels, inside the tile) when the view magnifies the
+// data, which keeps stars round and crisp instead of soft squares
+vec3 tileSample(sampler2D atlas, int slot, vec2 uv) {
+  vec2 base = vec2(float(slot % ${PER_ROW}), float(slot / ${PER_ROW})) * ${TILE}.0;
+  if (!uCubic) return textureLod(atlas, (base + uv * ${TILE}.0) / ${ATLAS}.0, uLod).rgb;   // mipmapped when minified
+  vec2 t = uv * ${TILE}.0 - 0.5, f = fract(t);
+  ivec2 i0 = ivec2(floor(t)), b = ivec2(base);
+  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f)), w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+  vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f)), w3 = f * f * (-0.5 + 0.5 * f);
+  float wx[4] = float[4](w0.x, w1.x, w2.x, w3.x), wy[4] = float[4](w0.y, w1.y, w2.y, w3.y);
+  vec3 c = vec3(0.0);
+  for (int j = 0; j < 4; j++) for (int i = 0; i < 4; i++) {
+    ivec2 q = clamp(i0 + ivec2(i - 1, j - 1), ivec2(0), ivec2(${TILE} - 1));
+    c += texelFetch(atlas, b + q, 0).rgb * wx[i] * wy[j];
+  }
+  return clamp(c, 0.0, 1.0);
 }
 int spreadBits(int v) { int r = 0; for (int i = 0; i < 6; i++) r |= ((v >> i) & 1) << (2 * i); return r; }
 // returns rgb, a = 1 when a tile (or an empty marker) was found
@@ -85,12 +102,13 @@ vec4 sampleLayer(vec3 e, int maxOrder, sampler2D atlas, sampler2D idx) {
     if (v < 0.5) continue;
     if (v > 254.5) return vec4(0.0, 0.0, 0.0, 1.0);
     int slot = int(v + 0.5) - 1;
-    vec2 uv = clamp(vec2(xf - float(xi), yf - float(yi)), vec2(0.6 / ${TILE}.0), vec2(1.0 - 0.6 / ${TILE}.0));
+    // keep away from the tile edge by half a texel of the mip level read, so neighbours in the atlas never bleed in
+    float edge = (0.6 * exp2(uLod)) / ${TILE}.0;
+    vec2 uv = clamp(vec2(xf - float(xi), yf - float(yi)), vec2(edge), vec2(1.0 - edge));
     if ((uOrient & 1) != 0) uv = uv.yx;
     if ((uOrient & 2) != 0) uv.x = 1.0 - uv.x;
     if ((uOrient & 4) != 0) uv.y = 1.0 - uv.y;
-    vec2 a = (vec2(float(slot % ${PER_ROW}), float(slot / ${PER_ROW})) + uv) / ${PER_ROW}.0;
-    return vec4(texture(atlas, a).rgb, 1.0);
+    return vec4(tileSample(atlas, slot, uv), 1.0);
   }
   return vec4(0.0);
 }
@@ -100,25 +118,28 @@ vec3 tone(vec3 c, int mode) {
   if (mode == 0) return texture(uLut, vec2(clamp(c.r, 0.0, 1.0), 0.5)).rgb;
   return clamp(c, 0.0, 1.0);
 }
-void main() {
-  vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+// screen pixel -> sky direction (false outside the projection)
+bool dirAt(vec2 p, out vec3 e) {
+  e = vec3(0.0, 0.0, 1.0);
   float X = (p.x - uC.x) / uK, Y = (uC.y - p.y) / uK, r = length(vec2(X, Y));
-  vec3 e;
   if (uProj == 6) {
-    if (X * X / 8.0 + Y * Y / 2.0 > 1.0) { outColor = vec4(0.0); return; }
+    if (X * X / 8.0 + Y * Y / 2.0 > 1.0) return false;
     float z = sqrt(max(0.0, 1.0 - X * X / 16.0 - Y * Y / 4.0));
     float lon = 2.0 * atan(z * X, 2.0 * (2.0 * z * z - 1.0)), lat = asin(clamp(z * Y, -1.0, 1.0));
     e = normalize(uRot * vec3(cos(lat) * sin(lon), sin(lat), cos(lat) * cos(lon)));
   } else if (uProj == 5) {
     float lon = uLon0 + uLonSign * X, lat = uLat0 + Y;
-    if (abs(lat) > PI / 2.0 || abs(X) > uMaxT) { outColor = vec4(0.0); return; }
+    if (abs(lat) > PI / 2.0 || abs(X) > uMaxT) return false;
     e = normalize(uMnt * vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat)));
   } else {
     float t = gi(r);
-    if (t < 0.0 || t > uMaxT) { outColor = vec4(0.0); return; }
+    if (t < 0.0 || t > uMaxT) return false;
     vec3 d = r < 1e-9 ? vec3(0.0, 0.0, 1.0) : vec3(X / r * sin(t), Y / r * sin(t), cos(t));
     e = normalize(uRot * d);
   }
+  return true;
+}
+vec3 shade(vec3 e) {
   vec4 c0 = sampleLayer(e, uOrder0, uAtlas0, uIndex0);
   vec3 col = c0.a > 0.0 ? tone(c0.rgb, uMode0) : vec3(0.0);
   if (uHas1 && uMix > 0.0) {
@@ -139,7 +160,13 @@ void main() {
       }
     }
   }
-  outColor = vec4(col * uFade, 1.0);
+  return col;
+}
+void main() {
+  vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  vec3 e;
+  if (!dirAt(p, e)) { outColor = vec4(0.0); return; }
+  outColor = vec4(shade(e) * uFade, 1.0);
 }`;
 
 // ---------------- layer (one HiPS source, its atlas and index) ----------------
@@ -149,8 +176,8 @@ class Layer {
     const gl = this.gl;
     this.atlas = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.atlas);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, ATLAS, ATLAS);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texStorage2D(gl.TEXTURE_2D, 4, gl.RGBA8, ATLAS, ATLAS);   // 4 mip levels: a tile is still 64 px at the last
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -180,8 +207,9 @@ class Layer {
     this.idxDirty = true;
   }
   upload() {
-    if (!this.idxDirty) return;
     const gl = this.gl;
+    if (this.mipDirty) { gl.bindTexture(gl.TEXTURE_2D, this.atlas); gl.generateMipmap(gl.TEXTURE_2D); this.mipDirty = false; }
+    if (!this.idxDirty) return;
     gl.bindTexture(gl.TEXTURE_2D, this.index);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, IDX_W, IDX_W, gl.RGBA, gl.UNSIGNED_BYTE, this.idxData);
     this.idxDirty = false;
@@ -227,6 +255,7 @@ class Layer {
     gl.bindTexture(gl.TEXTURE_2D, this.atlas);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, (slot % PER_ROW) * TILE, Math.floor(slot / PER_ROW) * TILE, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    this.mipDirty = true;
     this.slots.set(this.key(o, n), { slot, o, n, last: performance.now(), pinned: o === 0 });
     this.setIndex(o, n, slot + 1);
   }
@@ -325,7 +354,7 @@ export class HipsRenderer {
     if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
     this.u = {};
     for (const n of ['uAtlas0', 'uIndex0', 'uAtlas1', 'uIndex1', 'uLut', 'uRes', 'uC', 'uK', 'uMaxT', 'uProj', 'uRot', 'uOrder0', 'uOrder1', 'uMode0', 'uMode1',
-      'uOrient', 'uMnt', 'uLon0', 'uLat0', 'uLonSign', 'uMix', 'uGain', 'uGamma', 'uBlack', 'uFade', 'uHas1', 'uMos', 'uMosOn', 'uM0', 'uME', 'uMN', 'uMScale', 'uMSize']) this.u[n] = gl.getUniformLocation(pr, n);
+      'uOrient', 'uMnt', 'uLon0', 'uLat0', 'uLonSign', 'uMix', 'uGain', 'uGamma', 'uBlack', 'uFade', 'uHas1', 'uMos', 'uMosOn', 'uM0', 'uME', 'uMN', 'uMScale', 'uMSize', 'uCubic', 'uLod']) this.u[n] = gl.getUniformLocation(pr, n);
     this.mosTex = gl.createTexture();
     this.mosaic = null;
     const buf = gl.createBuffer();
@@ -376,14 +405,14 @@ export class HipsRenderer {
     if (!this.cmp) this.cmp = new Layer(this, src); else this.cmp.setSource(src);
   }
   // view: {W, H, cx, cy, k, proj, maxT, rot(3x3 J2000->view rows), unproject(px,py)->J2000 vec}
-  orderFor(layer, k) {
-    const need = Math.ceil(Math.log2(Math.max(1, 1.0233 * k / TILE * 1.15)));
+  orderFor(layer, k, proj) {
+    const need = Math.ceil(Math.log2(Math.max(1, 1.0233 * k * (proj === 6 ? Math.SQRT2 : 1) / TILE * 1.15)));
     return Math.max(0, Math.min(layer.source.maxOrder, MAX_ORDER_INDEXED, need));
   }
   update(view) {
     for (const L of [this.base, this.cmp]) {
       if (!L) continue;
-      let order = this.orderFor(L, view.k);
+      let order = this.orderFor(L, view.k, view.projIndex);
       let tiles;
       for (;;) {
         const set = new Map();
@@ -427,6 +456,11 @@ export class HipsRenderer {
     const N = view.mnt || [[1, 0, 0], [0, 1, 0], [0, 0, 1]];   // column-major: columns of the mount -> J2000 matrix
     gl.uniformMatrix3fv(u.uMnt, false, new Float32Array([N[0][0], N[1][0], N[2][0], N[0][1], N[1][1], N[2][1], N[0][2], N[1][2], N[2][2]]));
     gl.uniform1f(u.uLon0, view.lon0 || 0); gl.uniform1f(u.uLat0, view.lat0 || 0); gl.uniform1f(u.uLonSign, view.lonSign || 1);
+    // screen pixels per data pixel of the base layer: < 0.75 the data is minified (supersample), > 1.25 magnified (bicubic)
+    const ratio = view.k * (view.projIndex === 6 ? Math.SQRT2 : 1) * 1.0233 / (TILE * 2 ** (this.base.order ?? 0));
+    // minified: read a smaller mip level (the average of the texels under one screen pixel) instead of picking
+    // one texel, so the whole-sky star field is smooth rather than grainy; magnified: bicubic
+    gl.uniform1f(u.uLod, Math.min(3, Math.max(0, -Math.log2(ratio) - 0.5)));   // half a level crisper than a plain box average gl.uniform1i(u.uCubic, ratio > 1.25 ? 1 : 0);
     gl.uniform1i(u.uOrder0, this.base.order ?? 0); gl.uniform1i(u.uOrder1, this.cmp?.order ?? 0);
     gl.uniform1i(u.uMode0, this.base.source.mono ? 0 : 1); gl.uniform1i(u.uMode1, this.cmp?.source.mono ? 0 : 1);
     gl.uniform1i(u.uOrient, this.orient);

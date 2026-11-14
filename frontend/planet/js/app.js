@@ -10,6 +10,7 @@ import { lut } from './imaging.js';
 import { spherexSource, urlSource } from './hips.js';
 import { pageLang } from './tr.js';
 import { createInfo } from './info.js';
+import { createDeep } from './deep.js';
 
 const sky = new Sky($('#skyCanvas'), $('#skyGL'));
 const blink = new Blink();
@@ -499,7 +500,7 @@ function loop(t) { sky.tick(t); requestAnimationFrame(loop); }
 // window.radiansSky; the sky reports its time back with postMessage. A click shows a small card instead
 // of the full info panel.
 // the quick card next to the object and the details panel live in info.js
-let infoUi = null;
+let infoUi = null, deepUi = null;
 function renderCard(o) {
   infoUi ||= createInfo({ sky, bodyFn, fmtLocal, altOf, send: m => parent.postMessage(m, location.origin) });
   infoUi.show(o);
@@ -518,6 +519,7 @@ function setPal(p) {
   }
   sky.layers.spherex = true;
   applySpx();
+  deepUi?.recolor();
 }
 function tonightAt21() { const d = new Date(); d.setHours(21, 0, 0, 0); return d; }
 function report() {
@@ -544,6 +546,9 @@ function embedBoot() {
   });
   bus.on('skytime', report);
   bus.on('skyframe', () => infoUi?.place());
+  // closer than the map's own pixels: offer the drizzled 3″ picture of the spot in the middle
+  deepUi = createDeep({ sky, plane: () => +$('#hxFrame').value, cmap: () => $('#hxCmap').value });
+  bus.on('skyframe', () => deepUi.tick());
   setInterval(() => { report(); infoUi?.refreshSky(); }, 1000);
   const render = sky.render.bind(sky);
   sky.render = (now) => { holdHorizon(); return render(now); };

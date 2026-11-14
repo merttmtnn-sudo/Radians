@@ -178,6 +178,7 @@ Manual Deploy → Deploy latest commit in the dashboard.
 | `GET /api/progress?job=` | progress of a running `/api/frames?…&job=` request |
 | `GET /api/photometry?ra=&dec=&fov=&x=&y=` | per-exposure brightness and wavelength at one pixel: an on-the-fly spectrum |
 | `GET /api/coverage?ra=&dec=` | has SPHEREx seen this spot: exposures, sky passes, exposures per detector band (the map card) |
+| `GET /api/sharp?ra=&dec=&fov=&det=&factor=` | super-resolution: one detector band of a spot drizzled onto 3″ pixels (SPHEREx's are 6.15″) from its dithered exposures, plus the ordinary 6.15″ stack for a before / after comparison (map and planetarium deep zoom; cached a week) |
 | `GET /api/object?ra=&dec=&id=&lang=&kind=` | planetarium details panel: SIMBAD facts (type, magnitudes, distance, spectral type, other names) and a Wikipedia summary in the page language, found through Wikidata catalogue codes |
 | `GET /api/gaia?ra=&dec=&radius=` | Gaia DR3 stars (ESA archive), with proper motions |
 | `GET /api/crossmatch?ra=&dec=&radius=&cat=` | SIMBAD and CatWISE2020 objects in the field, each with its own `ok` (one being down does not fail the request) |
@@ -222,7 +223,7 @@ S/N 5 is below the finder's detection threshold (8) on purpose.
 ## Sharing one free server
 
 Each visitor may ask for 20 views and 90 spectra a minute, and 60 a minute of each catalogue / fit lookup
-(crossmatch, coverage, spectral type, object details, the "for the curious" tools) (HTTP 429 with `Retry-After` beyond that);
+(crossmatch, coverage, spectral type, object details, the "for the curious" tools; super-resolution counts as a view) (HTTP 429 with `Retry-After` beyond that);
 at most two new positions are read from IRSA at the same time; IRSA's own `Retry-After` is honoured;
 the cut-out cache is trimmed to 4 GB, oldest first. All four are environment settings
 (`RATE_FRAMES`, `RATE_PHOT`, `RATE_LOOKUP`, `MAX_COLD_BUILDS`, `CACHE_MAX_MB`).

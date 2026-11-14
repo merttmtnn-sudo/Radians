@@ -318,3 +318,15 @@ body.embed #skyInfo.qcard { position: absolute; width: 260px; padding: 12px 14px
   .sdet.open { transform: none; }
 }
 .sd-tab .nw { white-space: nowrap; margin-right: 8px; display: inline-block; }
+
+/* ---- deep zoom: drizzled 3″ picture of the spot in the middle (deep.js) ---- */
+.deepchip { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 6; display: flex; gap: 10px; align-items: center;
+  flex-wrap: wrap; justify-content: center; max-width: min(640px, calc(100% - 20px)); padding: 9px 12px; border-radius: 14px; font-size: 12.5px;
+  background: rgba(14, 16, 24, .82); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.12); }
+.deepchip[hidden], .deepchip [hidden] { display: none !important; }
+.deepchip .dtext { color: var(--muted); }
+.deepchip .dbtns, .deepchip .dseg { display: inline-flex; gap: 6px; }
+.deepchip.busy .dtext::before { content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 50%;
+  border: 2px solid var(--accent); border-right-color: transparent; animation: dspin .8s linear infinite; vertical-align: -1px; }
+@keyframes dspin { to { transform: rotate(360deg); } }
+@media (max-width: 620px) { .deepchip { bottom: auto; top: 10px; } }
