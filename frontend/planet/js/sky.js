@@ -463,7 +463,7 @@ export class Sky {
     // ground
     if (L.ground) this.drawGround(ss);
     if (L.azGrid || (L.ground && !this.flatBand)) this.polyline(this.horizonLine, 'hor', 'rgba(255,160,90,0.55)', 1);
-    if (this.P.ait) this.drawAllSkyHorizon();
+    if (this.P.ait) this.drawEllipseRim();
     if (L.cardinal && !this.cinema) this.drawCardinal();
 
     // labels (after ground)
@@ -710,36 +710,9 @@ export class Sky {
     }
   }
 
-  // All-sky ellipse: what is below the horizon at the chosen time is darkened (a low-resolution mask,
-  // smoothed when drawn), the horizon is an amber line, and a thin rim marks the edge of the ellipse.
-  drawAllSkyHorizon() {
-    const ctx = this.ctx, W = this.W, H = this.H, S = 5 * this.dpr;
-    const w = Math.ceil(W / S), h = Math.ceil(H / S);
-    const key = [w, h, this.k.toFixed(3), this.view.ra.toFixed(3), this.view.dec.toFixed(3), Math.round(this.simMs / 20000), this.loc.lat, this.loc.lon].join();
-    if (this.shadeKey !== key) {
-      this.shadeKey = key;
-      const c = this.shadeCv || (this.shadeCv = document.createElement('canvas'));
-      c.width = w; c.height = h;
-      const g = c.getContext('2d'), img = g.createImageData(w, h), d = img.data, M = this.M;
-      for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-        const e = this.unproject((i + 0.5) * S, (j + 0.5) * S);
-        if (!e) continue;
-        const z = M[2][0] * e[0] + M[2][1] * e[1] + M[2][2] * e[2];   // sin(altitude)
-        const a = clamp(-z / 0.03, 0, 1) * 0.62;
-        if (a > 0) { const o = (j * w + i) * 4; d[o] = 4; d[o + 1] = 4; d[o + 2] = 8; d[o + 3] = a * 255; }
-      }
-      g.putImageData(img, 0, 0);
-    }
-    ctx.save();
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(this.shadeCv, 0, 0, w * S, h * S);
-    ctx.restore();
-    if (!this.cinema) {
-      ctx.save();
-      ctx.shadowColor = 'rgba(255,179,71,0.8)'; ctx.shadowBlur = 10 * this.dpr;
-      this.polyline(this.horizonLine, 'hor', 'rgba(255,179,71,0.75)', 1.3);
-      ctx.restore();
-    }
+  // All-sky ellipse: a thin rim marks its edge
+  drawEllipseRim() {
+    const ctx = this.ctx;
     ctx.beginPath();
     ctx.ellipse(this.cx, this.cy, 2 * Math.SQRT2 * this.k, Math.SQRT2 * this.k, 0, 0, 2 * Math.PI);
     ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 1 * this.dpr; ctx.stroke();
