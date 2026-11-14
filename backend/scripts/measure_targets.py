@@ -6,7 +6,7 @@ import sys
 import requests
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765"
-DEMO = [("Barnard's Star", "1,2,3,4,5,6"), ("eps Indi B", "1,2,3,4,5,6"), ("WISE J085510.83-071442.5", "6"),
+DEMO = [("Barnard's Star", "1,2,3,4,5,6"), ("eps Indi B", "1,2,3,4,5,6"), ("WISE J085510.83-071442.5", "5,6"),
         ("RW Aur", "1,2,3,4,5,6"), ("R Dra", "1,2,3,4,5,6")]
 
 for q, dets in DEMO:

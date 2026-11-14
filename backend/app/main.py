@@ -291,20 +291,24 @@ if FRONTEND.exists():
 
 
 # ---------------------------------------------------------------- warm-up of the demo targets
-DEMO = [("Barnard's Star", "1,2,3,4,5,6"), ("eps Indi B", "1,2,3,4,5,6"), ("WISE J085510.83-071442.5", "6"),
-        ("RW Aur", "1,2,3,4,5,6"), ("R Dra", "1,2,3,4,5,6")]
+# (name, detectors, wavelength matching) exactly as the page's "Try" buttons ask for them.
+# WISE 0855: D5+D6 without matching. With D6 alone (45 exposures) the finder sees no motion; with
+# matching across D5+D6 only 1-2 exposures per epoch remain. D5+D6 unmatched recovers 8.16"/yr (catalogue 8.15).
+DEMO = [("Barnard's Star", "1,2,3,4,5,6", True), ("eps Indi B", "1,2,3,4,5,6", True),
+        ("WISE J085510.83-071442.5", "5,6", False), ("RW Aur", "1,2,3,4,5,6", True), ("R Dra", "1,2,3,4,5,6", True)]
 
 
 def warm(targets=DEMO, fov=240):
     """Run the demo targets exactly as the page asks for them (same rounding, so every cache key
     matches): frames, Gaia, SkyBoT and NEOSSat. Slow the first time, instant afterwards."""
     r6 = lambda v: float(f"{v:.6f}")  # noqa: E731
-    for q, dets in targets:
+    for q, dets, *rest in targets:
+        matched = rest[0] if rest else True
         t0 = time.time()
         try:
             tg = archive.resolve(q)
             d = frames(ra=r6(tg["ra"]), dec=r6(tg["dec"]), fov=fov, mode="epoch", detectors=dets, pmra=tg.get("pmra"),
-                       pmdec=tg.get("pmdec"), ref_epoch=2000.0, max_exposures=400, candidates=True, job=None, matched=True)
+                       pmdec=tg.get("pmdec"), ref_epoch=2000.0, max_exposures=400, candidates=True, job=None, matched=matched)
             g = d["grid"]
             if g:
                 ra, dec, rdeg = r6(g["ra"]), r6(g["dec"]), g["fov"] / 3600 / math.sqrt(2)

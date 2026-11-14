@@ -53,3 +53,31 @@ The first run recovered only about half of the bright new sources. Two causes we
 "absent in the other visits" was judged against the formal error, so ordinary confusion noise counted
 as "present"; it now uses the same robust noise as detection. And visits were numbered after
 wavelength matching, which could split one visit in two; they are now numbered from all exposures.
+
+## WISE 0855
+
+WISE 0855 is the hardest challenge target: very cold (~285 K), so it is only visible at 4–5 µm, faint, and a
+static field star sits 7.8″ away, closer than SPHEREx's ~9″ PSF at these wavelengths. Two independent checks
+(14 Nov 2026):
+
+| Setup | Exposures per epoch | Finder result |
+|---|---|---|
+| D6 only, wavelength matching on (previous default) | 3, 18, 3, 21 | nothing reported |
+| D6 only, matching off | 3, 18, 3, 21 | nothing reported |
+| D5+D6, matching on | 1, 2, 2, 1 | no target; two spurious "transient" candidates |
+| **D5+D6, matching off (new default for this target)** | **11, 37, 9, 36** | **moving, 8.16″/yr, PA 285°, 7.3σ** (catalogue 8.15″/yr, PA 275°) |
+
+Matching across two detectors keeps only wavelengths every visit sampled, which leaves almost nothing; each
+detector co-added on its own gives enough signal. The rate is right; the ~10° position-angle offset is
+probably the static neighbour pulling the single-source fit.
+
+**Independent measurement** (Efe's SPHEREx Blink prototype; IRSA cutouts, D5+D6, the three 6-month
+passes, a two-source PSF fit with the neighbour's position fixed from D2, where WISE 0855 is invisible):
+7.64″ W, 0.52″ N over one year against 8.01″ W, 0.65″ N predicted from SIMBAD proper motion + parallax,
+every pass within 0.4″ of prediction, field-star registration 0.06–0.15″ rms. The last-minus-first
+difference image shows the moving pair at 4–5 µm and none at 1.1–1.6 µm.
+
+**Note on coordinates.** The challenge text gives WISE 0855 at 08h55m10.831s −07°14′42.53″, its 2010
+discovery position. During SPHEREx (2025–26) it is ~125″ west and ~10″ north of that point, outside a 100″
+field. Radians handles this by propagating proper motion to each exposure date and by its 240″ default
+field.
