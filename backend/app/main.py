@@ -333,6 +333,42 @@ def photometry(
     return stack.photometry_at(b["frs"], b["w"], x, y)
 
 
+from pydantic import BaseModel, Field  # noqa: E402
+
+from . import spectype, typecat  # noqa: E402
+
+
+class SpecPoint(BaseModel):
+    wavelength: float | None = None
+    flux_ujy: float | None = None
+    err_ujy: float | None = None
+    saturated: bool = False
+
+
+class SpecTypeRequest(BaseModel):
+    points: list[SpecPoint] = Field(..., max_length=5000)
+    ra: float = Field(..., ge=0, lt=360)
+    dec: float = Field(..., ge=-90, le=90)
+    name: str | None = Field(None, max_length=200)
+    gaia_id: str | None = Field(None, max_length=40)
+    catalogues: bool = False
+
+
+@app.post("/api/spectype")
+def spectral_type(req: SpecTypeRequest):
+    """Spectral type and molecular fingerprints of a spectrum the page already has (the points of
+    /api/frames or /api/photometry). With catalogues=true, also what SIMBAD and Gaia DR3 say about
+    the object and whether that agrees with our fit; the page asks without them first, so its own
+    answer does not wait for the catalogues."""
+    pts = [p.model_dump() for p in req.points]
+    out = {"fit": spectype.fit(pts), "fingerprints": spectype.fingerprints(pts), "catalogue": None, "agreement": None}
+    if req.catalogues:
+        cat = typecat.lookup(req.ra, req.dec, req.name, req.gaia_id)
+        out["catalogue"] = cat
+        out["agreement"] = spectype.agreement(cat["simbad"].get("sptype"), cat["gaia"].get("teff"), out["fit"])
+    return out
+
+
 def _external(fn, *args):
     try:
         return fn(*args)
