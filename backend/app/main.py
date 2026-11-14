@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import archive, config, stack
+from . import archive, config, detect, stack
 
 app = FastAPI(title="Radians", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
@@ -61,6 +61,7 @@ def frames(
     pmdec: float | None = Query(None, description="proper motion Dec, mas/yr"),
     ref_epoch: float = Query(2000.0, description="Julian year of ra/dec when pm is given"),
     max_exposures: int = Query(400, ge=1, le=2000),
+    candidates: bool = Query(True, description="run the moving / variable / transient finder"),
 ):
     fov = min(max(fov, config.MIN_FOV), config.MAX_FOV)
     n = int(round(fov / config.PIXEL_SCALE)) | 1                     # odd -> target on a pixel centre
@@ -79,17 +80,25 @@ def frames(
     frs = stack.build_frames(exps, cra, cdec, n, target)
     if not frs:
         raise HTTPException(502, "could not read any SPHEREx exposure for this position")
-    out_frames = stack.group_frames(frs, mode)
+    raw = {m: stack.group_raw(frs, m) for m in {mode, "epoch", "epoch_detector"} if m == mode or candidates}
+    out_frames = stack.encode(raw[mode])
+    w = stack.output_wcs(cra, cdec, n)
+    cands = []
+    if candidates:
+        try:
+            cands = detect.find_candidates(raw["epoch"], raw["epoch_detector"], w, ((n - 1) / 2, (n - 1) / 2))
+        except Exception as e:                       # the finder is a helper, never break the viewer
+            print("candidate finder failed:", repr(e))
     phot = sorted(({
         "obs_id": f.exp.obs_id, "detector": f.exp.detector, "mjd": f.exp.mjd, "date": stack.mjd_iso(f.exp.mjd),
         "wavelength": f.wavelength, "bandwidth": f.bandwidth, **f.phot} for f in frs), key=lambda p: p["mjd"])
-    w = stack.output_wcs(cra, cdec, n)
     return {
         "grid": {"n": n, "pixel_scale": config.PIXEL_SCALE, "ra": cra, "dec": cdec,
                  "fov": n * config.PIXEL_SCALE, "wcs": dict(w.to_header())},
         "query": {"ra": ra, "dec": dec, "pmra": pmra, "pmdec": pmdec, "ref_epoch": ref_epoch, "mode": mode},
         "flag_bits": {str(b): name for b, name in config.FLAG_BITS.items()}, "bad_mask": config.BAD_MASK,
         "frames": out_frames, "exposures": phot, "n_exposures_read": len(frs),
+        "candidates": cands, "detectors": config.DETECTORS,
     }
 
 

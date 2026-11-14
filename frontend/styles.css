@@ -96,3 +96,32 @@ input[type=range] { accent-color: var(--accent); }
 body.embed .top, body.embed .search, body.embed .examples, body.embed .panel, body.embed .foot, body.embed .timeline { display: none; }
 body.embed .layout { grid-template-columns: 1fr; padding: 8px; }
 body.embed .stage { max-height: calc(100vh - 70px); }
+
+/* ---- phase 3 ---- */
+.lang { margin-left: auto; display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.lang button { border: none; border-radius: 0; padding: 4px 10px; font-size: 13px; background: transparent; }
+.lang button[aria-pressed="true"] { background: var(--accent); color: #1b1200; font-weight: 700; }
+.dets { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 0 24px 8px; }
+.dets .lbl { margin: 0; }
+.detchips { display: flex; gap: 4px; }
+.detchip { padding: 3px 9px; font-size: 13px; border-radius: 6px; opacity: .55; }
+.detchip[aria-pressed="true"] { opacity: 1; border-color: var(--accent2); color: var(--accent2); }
+#preset { padding: 4px 8px; font-size: 13px; }
+.viewbar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 8px; }
+.viewbar p { margin: 0; flex: 1 1 240px; }
+.count { color: var(--text); font-weight: 400; }
+.cands { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow: auto; }
+.cand { border: 1px solid var(--line); border-radius: 8px; }
+.cand.on { border-color: var(--accent2); }
+.candhead { display: block; width: 100%; text-align: left; background: none; border: none; padding: 6px 8px; font-size: 13px; }
+.candhead b { margin-right: 4px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.tags { padding: 0 8px 6px; display: flex; gap: 4px; flex-wrap: wrap; }
+.tag { font-size: 11px; padding: 0 6px; border-radius: 4px; background: var(--bg2); border: 1px solid var(--accent2); color: var(--accent2); }
+.tag.warn { border-color: var(--accent); color: var(--accent); }
+.canddetail { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 2px; }
+.flagsum { margin-top: 10px; }
+.flagsum .lbl { margin-bottom: 4px; }
+details { margin-top: 8px; font-size: 13px; }
+summary { cursor: pointer; color: var(--muted); }
+.explist { margin: 6px 0 0; padding-left: 20px; max-height: 180px; overflow: auto; font-size: 11px; font-family: ui-monospace, Consolas, monospace; color: var(--muted); }

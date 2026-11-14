@@ -1,0 +1,99 @@
+// English / Turkish UI strings. Static text uses data-i18n="key" (also data-i18n-ph for placeholders,
+// data-i18n-title for tooltips); dynamic text uses t('key', {vars}).
+
+const STRINGS = {
+  en: {
+    tagline: 'See the infrared sky change — NASA SPHEREx, every six months, 102 colours.',
+    target: 'Target (name or RA Dec)',
+    targetPh: "Barnard's Star  ·  08h55m10.8s -07d14m42s  ·  133.795 -7.245",
+    fov: 'Field of view', frames: 'Frames', blink: 'Blink', tryLbl: 'Try:',
+    modeEpoch: 'One per epoch (co-added)', modeEpochDet: 'Epoch × detector', modeExposure: 'Every exposure',
+    detectors: 'Detectors', presetAll: 'All (0.75–5.0 µm)', presetShort: 'Short λ: D1–D3 (0.75–2.4 µm)',
+    presetLong: 'Long λ: D4–D6 (2.4–5.0 µm)', presetD6: 'D6 only — cold brown dwarfs (4.4–5.0 µm)', presetCustom: 'Custom',
+    emptyTitle: 'Type a target and press <b>Blink</b>.',
+    emptyBody: 'Radians fetches every SPHEREx image of that patch of sky and plays them as a movie. Anything that moves or changes brightness jumps out.',
+    view: 'View', viewImages: 'Images', viewDiffMedian: 'Difference: frame − median of all',
+    viewDiffPrev: 'Difference: frame − previous', viewDiffFirst: 'Difference: frame − first', viewStack: 'Stack: sum of all frames',
+    viewHelpDiff: 'Static sky cancels out. White = brighter than the reference, blue = fainter. A moving star leaves a white/blue pair.',
+    viewHelpStack: 'All frames added together: the deepest image, but anything moving is smeared.',
+    thisFrame: 'This frame', display: 'Display', stretch: 'Stretch', colours: 'Colours',
+    cmGray: 'grey', cmInvert: 'inverted grey', cmHeat: 'infrared heat',
+    black: 'Black point', white: 'White point', marker: 'Target marker', showFlagged: 'Show flagged pixels',
+    cursor: 'Cursor', share: 'Share', copy: 'Copy',
+    shareHelp: 'The link reproduces this exact view. Add <code>&amp;embed=1</code> to embed it on another site.',
+    candidates: 'Candidates', showCands: 'Show on image',
+    candHelp: 'Found automatically by comparing epochs. These are suggestions to check by eye, not confirmed discoveries.',
+    noCands: 'Nothing obvious moved, brightened or appeared here.',
+    moving: 'Moving', variable: 'Variable', transient: 'One epoch only',
+    movingDesc: '{rate}″/yr towards PA {pa}° ({sig}σ, {n} epochs)',
+    variableDesc: '×{ratio} brightness change in {dets} ({sig}σ)',
+    transientDesc: 'seen only in epoch {epoch} ({sig}σ)',
+    lowConf: 'low confidence: saturated / flagged pixels', isTarget: 'your target',
+    simbad: 'What is here? (SIMBAD)',
+    finding: 'Finding “{q}”…', reading: 'Reading SPHEREx images from NASA IRSA…',
+    slow: '{s} s — the first look at a new patch of sky reads hundreds of SPHEREx exposures; after that it is cached.',
+    noData: 'SPHEREx has not observed this position yet.', copied: 'Link copied', pressCopy: 'Press Ctrl+C to copy',
+    kTarget: 'Target', kCentre: 'Centre', kEpoch: 'Epoch', kDates: 'Dates', kExposures: 'Exposures', kDetectors: 'Detectors',
+    kWavelength: 'Wavelength', kPm: 'Proper motion', pmFollow: '{v}″/yr (centre follows it)', coordinates: 'coordinates',
+    kDegrees: 'Degrees', kPixel: 'Pixel', kValue: 'Value', kFlags: 'Flags', noDataPx: 'no data', none: 'none',
+    flagSummary: 'Flagged pixels in this frame', exposureList: 'Exposures in this frame ({n})',
+    stackLabel: 'Stack of {n} frames',
+  },
+  tr: {
+    tagline: 'Kızılötesi gökyüzünün değişimini görün — NASA SPHEREx, altı ayda bir, 102 renk.',
+    target: 'Hedef (isim ya da RA Dec)',
+    targetPh: "Barnard's Star  ·  08h55m10.8s -07d14m42s  ·  133.795 -7.245",
+    fov: 'Görüş alanı', frames: 'Kareler', blink: 'Oynat', tryLbl: 'Deneyin:',
+    modeEpoch: 'Epok başına bir (birleştirilmiş)', modeEpochDet: 'Epok × dedektör', modeExposure: 'Her poz',
+    detectors: 'Dedektörler', presetAll: 'Hepsi (0,75–5,0 µm)', presetShort: 'Kısa λ: D1–D3 (0,75–2,4 µm)',
+    presetLong: 'Uzun λ: D4–D6 (2,4–5,0 µm)', presetD6: 'Yalnız D6 — soğuk kahverengi cüceler (4,4–5,0 µm)', presetCustom: 'Özel',
+    emptyTitle: 'Bir hedef yazın ve <b>Oynat</b>’a basın.',
+    emptyBody: 'Radians, gökyüzünün o bölgesine ait tüm SPHEREx görüntülerini getirip bir film gibi oynatır. Hareket eden ya da parlaklığı değişen her şey göze çarpar.',
+    view: 'Görünüm', viewImages: 'Görüntüler', viewDiffMedian: 'Fark: kare − tüm karelerin medyanı',
+    viewDiffPrev: 'Fark: kare − önceki kare', viewDiffFirst: 'Fark: kare − ilk kare', viewStack: 'Yığın: tüm karelerin toplamı',
+    viewHelpDiff: 'Sabit gökyüzü silinir. Beyaz = referanstan parlak, mavi = sönük. Hareket eden yıldız beyaz/mavi bir çift bırakır.',
+    viewHelpStack: 'Tüm kareler toplanır: en derin görüntü, ama hareket eden her şey bulanıklaşır.',
+    thisFrame: 'Bu kare', display: 'Görüntü ayarları', stretch: 'Germe', colours: 'Renkler',
+    cmGray: 'gri', cmInvert: 'ters gri', cmHeat: 'kızılötesi ısı',
+    black: 'Siyah noktası', white: 'Beyaz noktası', marker: 'Hedef işareti', showFlagged: 'İşaretli pikselleri göster',
+    cursor: 'İmleç', share: 'Paylaş', copy: 'Kopyala',
+    shareHelp: 'Bu link aynı görünümü açar. Başka bir sitede göstermek için <code>&amp;embed=1</code> ekleyin.',
+    candidates: 'Adaylar', showCands: 'Görüntüde göster',
+    candHelp: 'Epoklar karşılaştırılarak otomatik bulundu. Bunlar gözle kontrol edilecek önerilerdir, doğrulanmış keşif değil.',
+    noCands: 'Burada belirgin şekilde hareket eden, parlayan ya da beliren bir şey yok.',
+    moving: 'Hareketli', variable: 'Değişken', transient: 'Tek epokta',
+    movingDesc: 'yılda {rate}″, PA {pa}° yönünde ({sig}σ, {n} epok)',
+    variableDesc: '{dets} içinde ×{ratio} parlaklık değişimi ({sig}σ)',
+    transientDesc: 'yalnız {epoch}. epokta görüldü ({sig}σ)',
+    lowConf: 'düşük güven: doymuş / işaretli pikseller', isTarget: 'hedefiniz',
+    simbad: 'Burada ne var? (SIMBAD)',
+    finding: '“{q}” aranıyor…', reading: 'SPHEREx görüntüleri NASA IRSA’dan okunuyor…',
+    slow: '{s} sn — yeni bir bölgeye ilk bakış yüzlerce SPHEREx pozu okur; sonrası önbellekten gelir.',
+    noData: 'SPHEREx bu konumu henüz gözlemedi.', copied: 'Link kopyalandı', pressCopy: 'Kopyalamak için Ctrl+C',
+    kTarget: 'Hedef', kCentre: 'Merkez', kEpoch: 'Epok', kDates: 'Tarihler', kExposures: 'Pozlar', kDetectors: 'Dedektörler',
+    kWavelength: 'Dalga boyu', kPm: 'Öz hareket', pmFollow: 'yılda {v}″ (merkez onu izliyor)', coordinates: 'koordinat',
+    kDegrees: 'Derece', kPixel: 'Piksel', kValue: 'Değer', kFlags: 'İşaretler', noDataPx: 'veri yok', none: 'yok',
+    flagSummary: 'Bu karede işaretli pikseller', exposureList: 'Bu karedeki pozlar ({n})',
+    stackLabel: '{n} karenin yığını',
+  },
+};
+
+let lang = 'en';
+
+export function setLang(l) {
+  lang = STRINGS[l] ? l : 'en';
+  document.documentElement.lang = lang;
+  for (const el of document.querySelectorAll('[data-i18n]')) el.innerHTML = t(el.dataset.i18n);
+  for (const el of document.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh);
+  for (const el of document.querySelectorAll('[data-i18n-title]')) el.title = t(el.dataset.i18nTitle);
+  return lang;
+}
+
+export function getLang() { return lang; }
+
+export function t(key, vars = {}) {
+  const s = (STRINGS[lang] && STRINGS[lang][key]) ?? STRINGS.en[key] ?? key;
+  return s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? `{${k}}`));
+}
+
+export const LANGS = Object.keys(STRINGS);

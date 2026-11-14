@@ -1,29 +1,27 @@
 import {
-  decodeB64, percentiles, stretchValue, lut, pixToSky, skyToPix, formatRA, formatDec, flagNames, parseState,
+  decodeB64, percentiles, stretchValue, stretchSigned, lut, lutDiverging, pixToSky, formatRA, formatDec,
+  flagNames, parseState, computeView, isDiffView,
 } from './sky.js';
+import { t, setLang, getLang } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
-const els = {
-  form: $('search'), q: $('q'), fov: $('fov'), mode: $('mode'), go: $('go'),
-  sky: $('sky'), overlay: $('overlay'), stage: $('stage'), empty: $('empty'),
-  loading: $('loading'), loadingMsg: $('loadingMsg'), loadingSub: $('loadingSub'),
-  play: $('play'), prev: $('prev'), next: $('next'), scrub: $('scrub'), fps: $('fps'), fpsVal: $('fpsVal'),
-  timeline: $('timeline'), frameInfo: $('frameInfo'), cursor: $('cursor'),
-  stretch: $('stretch'), cmap: $('cmap'), lo: $('lo'), hi: $('hi'), cross: $('cross'), flagView: $('flagView'),
-  link: $('link'), copy: $('copy'), toast: $('toast'),
-  hudDate: $('hudDate'), hudIdx: $('hudIdx'), hudScale: $('hudScale'),
-};
+const els = Object.fromEntries([
+  'search', 'q', 'fov', 'mode', 'go', 'sky', 'overlay', 'stage', 'empty', 'loading', 'loadingMsg', 'loadingSub',
+  'play', 'prev', 'next', 'scrub', 'fps', 'fpsVal', 'timeline', 'frameInfo', 'cursor', 'stretch', 'cmap', 'lo', 'hi',
+  'cross', 'flagView', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'view', 'viewHelp', 'detchips',
+  'preset', 'cands', 'candCount', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples',
+].map(id => [id, $(id)]));
 
+const ALL_DETS = [1, 2, 3, 4, 5, 6];
 const state = {
-  data: null,        // /api/frames response
-  target: null,      // {name, ra, dec, pmra, pmdec}
-  images: [], flags: [],
-  idx: 0, playing: false, timer: null,
-  levels: [0, 1],
-  abort: null,
+  data: null, target: null,
+  images: [], variances: [], flags: [],   // as delivered (one per frame)
+  shown: [],                              // what the current view displays
+  idx: 0, playing: false, timer: null, levels: [0, 1], abort: null,
+  dets: new Set(ALL_DETS), selected: null,
 };
 
-// ------------------------------------------------------------------ API
+// ------------------------------------------------------------------ helpers
 async function api(path, params, signal) {
   const url = new URL(path, location.href);
   for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined) url.searchParams.set(k, v);
@@ -33,7 +31,6 @@ async function api(path, params, signal) {
   return body;
 }
 
-// ------------------------------------------------------------------ loading
 function setLoading(on, msg = '', sub = '') {
   els.loading.hidden = !on;
   els.go.disabled = on;
@@ -45,10 +42,65 @@ function toast(msg, isErr = false) {
   els.toast.textContent = msg;
   els.toast.classList.toggle('err', isErr);
   els.toast.hidden = false;
-  clearTimeout(toast.t);
-  toast.t = setTimeout(() => { els.toast.hidden = true; }, isErr ? 7000 : 2500);
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { els.toast.hidden = true; }, isErr ? 7000 : 2500);
 }
 
+function info(dl, rows) {
+  dl.replaceChildren(...rows.flatMap(([k, v]) => {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd');
+    if (v instanceof Node) dd.append(v); else dd.textContent = v;
+    return [dt, dd];
+  }));
+}
+
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const isStack = () => els.view.value === 'stack';
+
+// ------------------------------------------------------------------ detectors
+function buildDetChips() {
+  const ranges = { 1: '0.75–1.09', 2: '1.10–1.62', 3: '1.63–2.42', 4: '2.42–3.82', 5: '3.83–4.41', 6: '4.42–5.00' };
+  els.detchips.replaceChildren(...ALL_DETS.map(d => {
+    const b = el('button', 'detchip', `D${d}`);
+    b.type = 'button';
+    b.dataset.det = d;
+    b.title = `${ranges[d]} µm`;
+    b.setAttribute('aria-pressed', 'true');
+    b.onclick = () => {
+      if (state.dets.has(d) && state.dets.size === 1) return;          // keep at least one
+      state.dets.has(d) ? state.dets.delete(d) : state.dets.add(d);
+      syncDetUi();
+      requery();
+    };
+    return b;
+  }));
+}
+
+function syncDetUi() {
+  for (const b of els.detchips.children) b.setAttribute('aria-pressed', String(state.dets.has(Number(b.dataset.det))));
+  const key = [...state.dets].sort().join(',');
+  const match = [...els.preset.options].find(o => o.value === key);
+  els.preset.value = match ? key : 'custom';
+}
+
+function setDets(list) {
+  const ds = list.filter(d => ALL_DETS.includes(d));
+  state.dets = new Set(ds.length ? ds : ALL_DETS);
+  syncDetUi();
+}
+
+els.preset.onchange = () => {
+  if (els.preset.value === 'custom') return;
+  setDets(els.preset.value.split(',').map(Number));
+  requery();
+};
+
+function requery() {
+  if (state.target) run({ q: els.q.value.trim(), ...state.target, fov: els.fov.value, mode: els.mode.value });
+}
+
+// ------------------------------------------------------------------ load
 async function run(opts) {
   if (state.abort) state.abort.abort();
   const ctl = new AbortController();
@@ -58,26 +110,27 @@ async function run(opts) {
   const t0 = performance.now();
   const tick = setInterval(() => {
     const s = Math.round((performance.now() - t0) / 1000);
-    els.loadingSub.textContent = s < 8 ? '' :
-      `${s} s — the first look at a new patch of sky reads hundreds of SPHEREx exposures; after that it is cached.`;
+    els.loadingSub.textContent = s < 8 ? '' : t('slow', { s });
   }, 1000);
   try {
     let target;
-    if (opts.ra !== null && opts.dec !== null && opts.ra !== undefined) {
-      target = { name: opts.q || null, ra: opts.ra, dec: opts.dec, pmra: opts.pmra, pmdec: opts.pmdec };
+    if (opts.ra !== null && opts.ra !== undefined && opts.dec !== null && opts.dec !== undefined) {
+      target = { name: opts.name ?? opts.q ?? null, ra: opts.ra, dec: opts.dec, pmra: opts.pmra, pmdec: opts.pmdec };
     } else {
-      setLoading(true, `Finding “${opts.q}”…`);
+      setLoading(true, t('finding', { q: opts.q }));
       target = await api('api/resolve', { q: opts.q }, ctl.signal);
     }
     state.target = target;
-    setLoading(true, 'Reading SPHEREx images from NASA IRSA…');
+    setLoading(true, t('reading'));
     const data = await api('api/frames', {
       ra: target.ra.toFixed(6), dec: target.dec.toFixed(6), fov: opts.fov, mode: opts.mode,
-      pmra: target.pmra, pmdec: target.pmdec,
+      pmra: target.pmra, pmdec: target.pmdec, detectors: [...state.dets].sort().join(','),
     }, ctl.signal);
     if (!data.frames || !data.frames.length) {
+      state.data = null;
       els.empty.hidden = false;
-      els.empty.innerHTML = `<p>${data.message || 'No SPHEREx images here yet.'}</p>`;
+      els.empty.innerHTML = `<p>${t('noData')}</p>`;
+      renderCandidates();
       return;
     }
     load(data, opts.frame ?? 0);
@@ -94,36 +147,60 @@ async function run(opts) {
   }
 }
 
-// ------------------------------------------------------------------ frames
 function load(data, startIdx) {
   state.data = data;
+  state.selected = null;
   const n = data.grid.n;
   state.images = data.frames.map(f => decodeB64(f.image, Float32Array));
+  state.variances = data.frames.map(f => decodeB64(f.variance, Float32Array));
   state.flags = data.frames.map(f => decodeB64(f.flags, Uint32Array));
-  for (const c of [els.sky, els.overlay]) { c.width = n; c.height = n; }
-  els.overlay.width = els.overlay.height = n * 8;          // sharper markers
-  els.scrub.max = data.frames.length - 1;
+  els.sky.width = els.sky.height = n;
+  els.overlay.width = els.overlay.height = Math.max(400, n * 8);      // sharper markers
+  els.hudScale.textContent = `${(data.grid.fov / 60).toFixed(1)}′ × ${(data.grid.fov / 60).toFixed(1)}′`;
+  applyView(startIdx);
+  renderCandidates();
+}
+
+// ------------------------------------------------------------------ views
+function applyView(startIdx = state.idx) {
+  if (!state.data) return;
+  state.shown = computeView(state.images, state.variances, els.view.value);
+  els.scrub.max = state.shown.length - 1;
+  els.viewHelp.textContent = isDiffView(els.view.value) ? t('viewHelpDiff') : isStack() ? t('viewHelpStack') : '';
   computeLevels();
   buildTimeline();
-  els.hudScale.textContent = `${(data.grid.fov / 60).toFixed(1)}′ × ${(data.grid.fov / 60).toFixed(1)}′`;
-  show(Math.min(Math.max(0, startIdx), data.frames.length - 1));
+  show(isStack() ? 0 : startIdx);
 }
 
 function computeLevels() {
-  if (!state.images.length) return;
-  // one set of levels for every frame, so brightness changes are real, not display artefacts
-  state.levels = percentiles(state.images, [Number(els.lo.value), Number(els.hi.value)]);
+  if (!state.shown.length) return;
+  if (isDiffView(els.view.value)) {
+    // symmetric limit from the absolute differences; "white point" slider still applies
+    const abs = state.shown.map(a => a.map(Math.abs));
+    state.levels = [0, percentiles(abs, [Number(els.hi.value)])[0] || 1];
+  } else {
+    // one set of levels for every frame, so brightness changes are real, not display artefacts
+    state.levels = percentiles(state.shown, [Number(els.lo.value), Number(els.hi.value)]);
+  }
+}
+
+function frameFlags(i) {
+  if (!isStack()) return state.flags[i];
+  const out = new Uint32Array(state.flags[0].length);
+  for (const f of state.flags) for (let k = 0; k < out.length; k++) out[k] |= f[k];
+  return out;
 }
 
 function render() {
   const { data } = state;
   if (!data) return;
   const n = data.grid.n;
-  const img = state.images[state.idx];
-  const flg = state.flags[state.idx];
+  const img = state.shown[state.idx];
+  const flg = frameFlags(state.idx);
   const ctx = els.sky.getContext('2d');
   const out = ctx.createImageData(n, n);
-  const table = lut(els.cmap.value);
+  const diffView = isDiffView(els.view.value);
+  const table = diffView ? lutDiverging() : lut(els.cmap.value);
   const [lo, hi] = state.levels;
   const kind = els.stretch.value;
   const showFlags = els.flagView.checked;
@@ -131,9 +208,9 @@ function render() {
     const row = n - 1 - y;                                   // FITS y is up, canvas y is down
     for (let x = 0; x < n; x++) {
       const i = y * n + x, o = (row * n + x) * 4;
-      const t = stretchValue(img[i], lo, hi, kind);
-      if (Number.isNaN(t)) { out.data[o] = 30; out.data[o + 1] = 12; out.data[o + 2] = 40; out.data[o + 3] = 255; continue; }
-      const k = Math.round(t * 255) * 3;
+      const tv = diffView ? stretchSigned(img[i], hi, kind) : stretchValue(img[i], lo, hi, kind);
+      if (Number.isNaN(tv)) { out.data[o] = 30; out.data[o + 1] = 12; out.data[o + 2] = 40; out.data[o + 3] = 255; continue; }
+      const k = (diffView ? Math.round(128 + tv * 127) : Math.round(tv * 255)) * 3;
       out.data[o] = table[k]; out.data[o + 1] = table[k + 1]; out.data[o + 2] = table[k + 2]; out.data[o + 3] = 255;
       if (showFlags && (flg[i] & data.bad_mask)) { out.data[o] = 255; out.data[o + 1] *= 0.4; out.data[o + 2] *= 0.4; }
     }
@@ -142,20 +219,41 @@ function render() {
   drawOverlay();
 }
 
+// ------------------------------------------------------------------ overlay
+const COLORS = { moving: '#6fc3ff', variable: '#ffb347', transient: '#ff6fb5' };
+
+function toCanvas(x, y) {
+  const W = els.overlay.width, n = state.data.grid.n, k = W / n;
+  return [(x + 0.5) * k, (n - 1 - y + 0.5) * k, k];
+}
+
+function frameMjd() {
+  if (isStack()) return null;
+  return state.data.frames[state.idx].mjd;
+}
+
 function drawOverlay() {
   const ctx = els.overlay.getContext('2d');
-  const W = els.overlay.width, n = state.data.grid.n, k = W / n;
+  const W = els.overlay.width;
   ctx.clearRect(0, 0, W, W);
-  if (!els.cross.checked || !state.target) return;
-  // where the target should be at the mean time of this frame (proper motion included by the API)
-  const f = state.data.frames[state.idx];
-  const pts = state.data.exposures.filter(e => e.mjd >= f.mjd_start - 1e-6 && e.mjd <= f.mjd_end + 1e-6);
+  if (!state.data) return;
+  if (els.cross.checked && state.target) drawTargetMarker(ctx);
+  if (els.showCands.checked) for (const [i, c] of (state.data.candidates || []).entries()) drawCandidate(ctx, c, i === state.selected);
+}
+
+function drawTargetMarker(ctx) {
+  const n = state.data.grid.n;
   let x = (n - 1) / 2, y = (n - 1) / 2;
-  if (pts.length) {
-    x = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-    y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  if (!isStack()) {
+    // where the target should be during this frame (proper motion included by the API)
+    const f = state.data.frames[state.idx];
+    const pts = state.data.exposures.filter(e => e.mjd >= f.mjd_start - 1e-6 && e.mjd <= f.mjd_end + 1e-6);
+    if (pts.length) {
+      x = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+      y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    }
   }
-  const cx = (x + 0.5) * k, cy = (n - 1 - y + 0.5) * k;
+  const [cx, cy, k] = toCanvas(x, y);
   const r = Math.max(14, 3 * k);
   ctx.strokeStyle = 'rgba(111,195,255,.9)';
   ctx.lineWidth = 2;
@@ -167,49 +265,167 @@ function drawOverlay() {
   }
 }
 
-function show(i) {
-  const { data } = state;
-  if (!data) return;
-  const N = data.frames.length;
-  state.idx = ((i % N) + N) % N;
-  els.scrub.value = state.idx;
-  render();
-  const f = data.frames[state.idx];
-  const sameDay = f.date_start.slice(0, 10) === f.date_end.slice(0, 10);
-  els.hudDate.textContent = sameDay ? f.date_start.slice(0, 10) : `${f.date_start.slice(0, 10)} → ${f.date_end.slice(0, 10)}`;
-  els.hudIdx.textContent = `${state.idx + 1} / ${N}`;
-  for (const [j, li] of [...els.timeline.children].entries()) li.firstChild.classList.toggle('on', j === state.idx);
-  const wl = f.wavelength_min ? (f.wavelength_min === f.wavelength_max ? `${f.wavelength_min.toFixed(3)} µm`
-    : `${f.wavelength_min.toFixed(2)}–${f.wavelength_max.toFixed(2)} µm`) : '—';
-  const t = state.target;
-  info(els.frameInfo, [
-    ['Target', t.name ? t.name.replace(/^NAME /, '') : 'coordinates'],
-    ['Centre', `${formatRA(data.grid.ra)} ${formatDec(data.grid.dec)}`],
-    ['Epoch', `${f.epoch}`],
-    ['Dates', `${f.date_start} → ${f.date_end} UTC`],
-    ['Exposures', `${f.n_exposures}`],
-    ['Detectors', f.detectors.map(d => 'D' + d).join(' ')],
-    ['Wavelength', wl],
-    ...(t.pmra ? [['Proper motion', `${(Math.hypot(t.pmra, t.pmdec) / 1000).toFixed(2)}″/yr (centre follows it)`]] : []),
-  ]);
-  syncUrl(true);
+function drawCandidate(ctx, c, selected) {
+  const col = COLORS[c.type] || '#fff';
+  ctx.strokeStyle = col;
+  ctx.fillStyle = col;
+  ctx.lineWidth = selected ? 3 : 1.5;
+  const [cx, cy, k] = toCanvas(c.x, c.y);
+  const r = Math.max(10, 2.2 * k);
+  ctx.setLineDash([]);
+  if (c.type === 'moving' && c.points.length > 1) {
+    // the track through each epoch, with the current epoch highlighted
+    const pts = c.points.map(p => toCanvas(p.x, p.y));
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+    ctx.stroke();
+    const mjd = frameMjd();
+    let cur = -1;
+    if (mjd !== null) cur = c.points.reduce((b, p, i) => (Math.abs(p.mjd - mjd) < Math.abs(c.points[b].mjd - mjd) ? i : b), 0);
+    pts.forEach(([px, py], i) => {
+      ctx.beginPath();
+      ctx.arc(px, py, i === cur ? 5 : 2.5, 0, 2 * Math.PI);
+      ctx.fill();
+    });
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 1.3, 0, 2 * Math.PI);
+    ctx.stroke();
+  } else if (c.type === 'variable') {
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 1.3, 0, 2 * Math.PI);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r * 1.4); ctx.lineTo(cx + r * 1.4, cy); ctx.lineTo(cx, cy + r * 1.4); ctx.lineTo(cx - r * 1.4, cy);
+    ctx.closePath();
+    ctx.stroke();
+  }
+  if (selected) {
+    ctx.font = `${Math.max(12, k * 1.6)}px system-ui`;
+    ctx.fillText(t(c.type), cx + r * 1.6, cy - r * 1.2);
+  }
 }
 
-function info(dl, rows) {
-  dl.replaceChildren(...rows.flatMap(([k, v]) => {
-    const dt = document.createElement('dt'); dt.textContent = k;
-    const dd = document.createElement('dd');
-    if (v instanceof Node) dd.append(v); else dd.textContent = v;
-    return [dt, dd];
+// ------------------------------------------------------------------ candidates panel
+function candText(c) {
+  if (c.type === 'moving') return t('movingDesc', { rate: c.rate_arcsec_yr, pa: c.pa_deg, sig: c.significance, n: c.points.length });
+  if (c.type === 'variable') return t('variableDesc', { ratio: c.ratio, dets: c.detectors.map(d => 'D' + d.detector).join(', '), sig: c.significance });
+  return t('transientDesc', { epoch: c.epoch, sig: c.significance });
+}
+
+function renderCandidates() {
+  const cands = state.data?.candidates || [];
+  els.candCount.textContent = state.data ? `(${cands.length})` : '';
+  if (!state.data) { els.cands.replaceChildren(); return; }
+  if (!cands.length) { els.cands.replaceChildren(el('li', 'muted small', t('noCands'))); return; }
+  els.cands.replaceChildren(...cands.map((c, i) => {
+    const li = el('li', 'cand' + (i === state.selected ? ' on' : ''));
+    const head = el('button', 'candhead');
+    head.type = 'button';
+    const dot = el('span', 'dot');
+    dot.style.background = COLORS[c.type];
+    head.append(dot, el('b', '', t(c.type)), el('span', 'small', ' ' + candText(c)));
+    head.onclick = () => { state.selected = state.selected === i ? null : i; renderCandidates(); drawOverlay(); };
+    li.append(head);
+    if (c.is_target || c.low_confidence) {
+      const tags = el('div', 'tags');
+      if (c.is_target) tags.append(el('span', 'tag', t('isTarget')));
+      if (c.low_confidence) tags.append(el('span', 'tag warn', t('lowConf')));
+      li.append(tags);
+    }
+    if (i === state.selected) {
+      const d = el('div', 'canddetail small');
+      d.append(el('div', '', `${formatRA(c.ra)} ${formatDec(c.dec)}`));
+      const a = el('a', '', t('simbad'));
+      a.href = `https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=${c.ra.toFixed(5)}+${c.dec >= 0 ? '%2B' : ''}${c.dec.toFixed(5)}&Radius=15&Radius.unit=arcsec`;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      d.append(a);
+      li.append(d);
+    }
+    return li;
   }));
 }
 
+els.showCands.onchange = drawOverlay;
+
+// ------------------------------------------------------------------ frame info
+function show(i) {
+  const { data } = state;
+  if (!data) return;
+  const N = state.shown.length;
+  state.idx = ((i % N) + N) % N;
+  els.scrub.value = state.idx;
+  render();
+  const tgt = state.target;
+  let rows;
+  if (isStack()) {
+    const fs = data.frames;
+    els.hudDate.textContent = `${fs[0].date_start.slice(0, 10)} → ${fs[fs.length - 1].date_end.slice(0, 10)}`;
+    els.hudIdx.textContent = t('stackLabel', { n: fs.length });
+    rows = [
+      [t('kTarget'), tgt.name ? tgt.name.replace(/^NAME /, '') : t('coordinates')],
+      [t('kExposures'), String(fs.reduce((s, f) => s + f.n_exposures, 0))],
+    ];
+    renderExposures(fs.flatMap(f => f.exposures || []));
+  } else {
+    const f = data.frames[state.idx];
+    const sameDay = f.date_start.slice(0, 10) === f.date_end.slice(0, 10);
+    els.hudDate.textContent = sameDay ? f.date_start.slice(0, 10) : `${f.date_start.slice(0, 10)} → ${f.date_end.slice(0, 10)}`;
+    els.hudIdx.textContent = `${state.idx + 1} / ${N}`;
+    const wl = f.wavelength_min ? (f.wavelength_min === f.wavelength_max ? `${f.wavelength_min.toFixed(3)} µm`
+      : `${f.wavelength_min.toFixed(2)}–${f.wavelength_max.toFixed(2)} µm`) : '—';
+    rows = [
+      [t('kTarget'), tgt.name ? tgt.name.replace(/^NAME /, '') : t('coordinates')],
+      [t('kCentre'), `${formatRA(data.grid.ra)} ${formatDec(data.grid.dec)}`],
+      [t('kEpoch'), `${f.epoch}`],
+      [t('kDates'), `${f.date_start} → ${f.date_end} UTC`],
+      [t('kExposures'), `${f.n_exposures}`],
+      [t('kDetectors'), f.detectors.map(d => 'D' + d).join(' ')],
+      [t('kWavelength'), wl],
+    ];
+    renderExposures(f.exposures || []);
+  }
+  if (tgt.pmra) rows.push([t('kPm'), t('pmFollow', { v: (Math.hypot(tgt.pmra, tgt.pmdec) / 1000).toFixed(2) })]);
+  info(els.frameInfo, rows);
+  renderFlagSummary();
+  for (const [j, li] of [...els.timeline.children].entries()) li.firstChild.classList.toggle('on', j === state.idx);
+  syncUrl(true);
+}
+
+function renderExposures(list) {
+  els.expSummary.textContent = t('exposureList', { n: list.length });
+  els.expList.replaceChildren(...list.slice(0, 300).map(e =>
+    el('li', '', `${e.date}  D${e.detector}  ${e.wavelength ? e.wavelength.toFixed(3) + ' µm' : ''}  ${e.obs_id}`)));
+}
+
+function renderFlagSummary() {
+  const flg = frameFlags(state.idx);
+  const bits = state.data.flag_bits;
+  const counts = {};
+  for (let i = 0; i < flg.length; i++) {
+    let v = flg[i];
+    for (let b = 0; v; b++, v >>>= 1) if (v & 1) counts[b] = (counts[b] || 0) + 1;
+  }
+  const items = Object.entries(counts).filter(([b]) => bits[b])
+    .map(([b, c]) => ({ name: bits[b], pct: (100 * c) / flg.length, bad: ((state.data.bad_mask >>> b) & 1) === 1 }))
+    .sort((a, b) => b.pct - a.pct);
+  els.flagSummary.replaceChildren(el('div', 'lbl', t('flagSummary')), ...items.map(it => {
+    const s = el('span', 'flagname' + (it.bad ? ' bad' : ''), `${it.name} ${it.pct < 1 ? it.pct.toFixed(1) : Math.round(it.pct)}%`);
+    return s;
+  }));
+  if (!items.length) els.flagSummary.append(el('span', 'muted small', t('none')));
+}
+
 function buildTimeline() {
-  els.timeline.replaceChildren(...state.data.frames.map((f, i) => {
-    const li = document.createElement('li');
-    const b = document.createElement('button');
+  const frames = isStack() ? [] : state.data.frames;
+  els.timeline.replaceChildren(...frames.map((f, i) => {
+    const li = el('li');
+    const b = el('button', '', frames.length > 12 ? `${i + 1}`
+      : `E${f.epoch} · ${f.date_start.slice(0, 7)}${f.detectors.length === 1 ? ' D' + f.detectors[0] : ''}`);
     b.type = 'button';
-    b.textContent = state.data.frames.length > 12 ? `${i + 1}` : `E${f.epoch} · ${f.date_start.slice(0, 7)}${f.detectors.length === 1 ? ' D' + f.detectors[0] : ''}`;
     b.title = `${f.date_start} → ${f.date_end}`;
     b.onclick = () => { stop(); show(i); };
     li.append(b);
@@ -219,7 +435,7 @@ function buildTimeline() {
 
 // ------------------------------------------------------------------ playback
 function play() {
-  if (!state.data || state.data.frames.length < 2) return;
+  if (!state.data || state.shown.length < 2) return;
   state.playing = true;
   els.play.textContent = '⏸';
   els.play.setAttribute('aria-label', 'Pause');
@@ -239,11 +455,12 @@ els.prev.onclick = () => { stop(); show(state.idx - 1); };
 els.next.onclick = () => { stop(); show(state.idx + 1); };
 els.scrub.oninput = () => { stop(); show(Number(els.scrub.value)); };
 els.fps.oninput = () => { els.fpsVal.textContent = els.fps.value; if (state.playing) play(); syncUrl(true); };
-for (const el of [els.stretch, els.cmap, els.cross, els.flagView]) el.onchange = () => { render(); syncUrl(true); };
-for (const el of [els.lo, els.hi]) el.oninput = () => { computeLevels(); render(); };
+for (const e of [els.stretch, els.cmap, els.cross, els.flagView]) e.onchange = () => { render(); syncUrl(true); };
+for (const e of [els.lo, els.hi]) e.oninput = () => { computeLevels(); render(); };
+els.view.onchange = () => { const was = state.playing; applyView(); if (was) play(); syncUrl(true); };
 
 document.addEventListener('keydown', (e) => {
-  if (e.target.matches('input:not([type=range]), select, textarea')) return;
+  if (e.target.matches('input:not([type=range]):not([type=checkbox]), select, textarea')) return;
   if (e.key === ' ') { e.preventDefault(); state.playing ? stop() : play(); }
   else if (e.key === 'ArrowRight') { stop(); show(state.idx + 1); }
   else if (e.key === 'ArrowLeft') { stop(); show(state.idx - 1); }
@@ -256,45 +473,55 @@ els.overlay.addEventListener('mousemove', (e) => {
   const rect = els.overlay.getBoundingClientRect();
   const n = data.grid.n;
   const x = Math.floor((e.clientX - rect.left) / rect.width * n);
-  const row = Math.floor((e.clientY - rect.top) / rect.height * n);
-  const y = n - 1 - row;
+  const y = n - 1 - Math.floor((e.clientY - rect.top) / rect.height * n);
   if (x < 0 || y < 0 || x >= n || y >= n) return;
   const [ra, dec] = pixToSky(x, y, data.grid);
   const i = y * n + x;
-  const v = state.images[state.idx][i];
-  const flags = flagNames(state.flags[state.idx][i], data.flag_bits, data.bad_mask);
-  const fl = document.createElement('span');
-  if (!flags.length) fl.textContent = 'none';
-  for (const f of flags) {
-    const s = document.createElement('span');
-    s.className = 'flagname' + (f.bad ? ' bad' : '');
-    s.textContent = f.name;
-    fl.append(s);
-  }
+  const v = state.shown[state.idx][i];
+  const flags = flagNames(frameFlags(state.idx)[i], data.flag_bits, data.bad_mask);
+  const fl = el('span');
+  if (!flags.length) fl.textContent = t('none');
+  for (const f of flags) fl.append(el('span', 'flagname' + (f.bad ? ' bad' : ''), f.name));
   info(els.cursor, [
     ['RA, Dec', `${formatRA(ra)} ${formatDec(dec)}`],
-    ['Degrees', `${ra.toFixed(5)}, ${dec.toFixed(5)}`],
-    ['Pixel', `${x}, ${y}`],
-    ['Value', Number.isFinite(v) ? `${v.toFixed(4)} MJy/sr` : 'no data'],
-    ['Flags', fl],
+    [t('kDegrees'), `${ra.toFixed(5)}, ${dec.toFixed(5)}`],
+    [t('kPixel'), `${x}, ${y}`],
+    [t('kValue'), Number.isFinite(v) ? `${v.toFixed(4)} MJy/sr` : t('noDataPx')],
+    [t('kFlags'), fl],
   ]);
+});
+
+// click a candidate on the image to select it
+els.overlay.addEventListener('click', (e) => {
+  const cands = state.data?.candidates || [];
+  if (!cands.length) return;
+  const rect = els.overlay.getBoundingClientRect();
+  const n = state.data.grid.n;
+  const x = (e.clientX - rect.left) / rect.width * n - 0.5;
+  const y = n - 1 - ((e.clientY - rect.top) / rect.height * n - 0.5);
+  let best = null, bd = 3;
+  cands.forEach((c, i) => { const d = Math.hypot(c.x - x, c.y - y); if (d < bd) { best = i; bd = d; } });
+  if (best !== null) { state.selected = best; renderCandidates(); drawOverlay(); }
 });
 
 // ------------------------------------------------------------------ URL state
 function syncUrl(replace = false) {
   if (!state.target || !state.data) return;
   const p = new URLSearchParams();
-  const t = state.target;
+  const tg = state.target;
   if (els.q.value.trim()) p.set('q', els.q.value.trim());
-  p.set('ra', t.ra.toFixed(6));
-  p.set('dec', t.dec.toFixed(6));
-  if (t.pmra) { p.set('pmra', t.pmra); p.set('pmdec', t.pmdec); }
+  p.set('ra', tg.ra.toFixed(6));
+  p.set('dec', tg.dec.toFixed(6));
+  if (tg.pmra) { p.set('pmra', tg.pmra); p.set('pmdec', tg.pmdec); }
   p.set('fov', els.fov.value);
   p.set('mode', els.mode.value);
+  if (state.dets.size < 6) p.set('det', [...state.dets].sort().join(','));
+  if (els.view.value !== 'images') p.set('view', els.view.value);
   if (els.fps.value !== '2') p.set('fps', els.fps.value);
   if (els.stretch.value !== 'asinh') p.set('stretch', els.stretch.value);
   if (els.cmap.value !== 'gray') p.set('cmap', els.cmap.value);
   if (!state.playing && state.idx) p.set('frame', state.idx);
+  if (getLang() !== 'en') p.set('lang', getLang());
   if (document.body.classList.contains('embed')) p.set('embed', '1');
   const url = `${location.pathname}?${p}`;
   history[replace ? 'replaceState' : 'pushState'](null, '', url);
@@ -302,8 +529,8 @@ function syncUrl(replace = false) {
 }
 
 els.copy.onclick = async () => {
-  try { await navigator.clipboard.writeText(els.link.value); toast('Link copied'); }
-  catch { els.link.select(); toast('Press Ctrl+C to copy'); }
+  try { await navigator.clipboard.writeText(els.link.value); toast(t('copied')); }
+  catch { els.link.select(); toast(t('pressCopy')); }
 };
 
 function setSelect(sel, v) {
@@ -313,6 +540,16 @@ function setSelect(sel, v) {
   sel.value = s;
 }
 
+// ------------------------------------------------------------------ language
+function applyLang(l) {
+  setLang(l);
+  try { localStorage.setItem('radians-lang', getLang()); } catch { /* private mode */ }
+  for (const b of document.querySelectorAll('[data-lang]')) b.setAttribute('aria-pressed', String(b.dataset.lang === getLang()));
+  if (state.data) { applyView(state.idx); renderCandidates(); syncUrl(true); }
+}
+for (const b of document.querySelectorAll('[data-lang]')) b.onclick = () => applyLang(b.dataset.lang);
+
+// ------------------------------------------------------------------ start
 function fromUrl() {
   const s = parseState(location.search);
   document.body.classList.toggle('embed', s.embed);
@@ -320,35 +557,34 @@ function fromUrl() {
   else if (s.ra !== null && s.dec !== null) els.q.value = `${s.ra} ${s.dec}`;
   if (s.fov) setSelect(els.fov, s.fov);
   if (s.mode) setSelect(els.mode, s.mode);
+  if (s.view) setSelect(els.view, s.view);
   if (s.fps) { els.fps.value = s.fps; els.fpsVal.textContent = s.fps; }
   if (s.stretch) setSelect(els.stretch, s.stretch);
   if (s.cmap) setSelect(els.cmap, s.cmap);
-  if (s.ra !== null && s.dec !== null) {
-    run({ q: s.q, ra: s.ra, dec: s.dec, pmra: s.pmra, pmdec: s.pmdec, fov: els.fov.value, mode: els.mode.value,
-      frame: s.frame, autoplay: s.frame === null });
-  } else if (s.q) {
-    run({ q: s.q, fov: els.fov.value, mode: els.mode.value, frame: s.frame, autoplay: s.frame === null });
-  }
+  setDets(s.det ? s.det.split(',').map(Number) : ALL_DETS);
+  const common = { fov: els.fov.value, mode: els.mode.value, frame: s.frame, autoplay: s.frame === null };
+  if (s.ra !== null && s.dec !== null) run({ q: s.q, ra: s.ra, dec: s.dec, pmra: s.pmra, pmdec: s.pmdec, ...common });
+  else if (s.q) run({ q: s.q, ...common });
 }
 
-// ------------------------------------------------------------------ search
-els.form.onsubmit = (e) => {
+els.search.onsubmit = (e) => {
   e.preventDefault();
   const q = els.q.value.trim();
   if (q) run({ q, fov: els.fov.value, mode: els.mode.value });
 };
-// changing FOV or frame mode re-queries the same target
-for (const el of [els.fov, els.mode]) el.onchange = () => {
-  if (state.target) run({ q: els.q.value.trim(), ...state.target, fov: els.fov.value, mode: els.mode.value });
-};
-$('examples').onclick = (e) => {
+for (const e of [els.fov, els.mode]) e.onchange = requery;
+els.examples.onclick = (e) => {
   const b = e.target.closest('button[data-q]');
   if (!b) return;
   els.q.value = b.dataset.q;
-  if (b.dataset.fov) setSelect(els.fov, b.dataset.fov);
+  setSelect(els.fov, b.dataset.fov || '240');
+  setDets(b.dataset.det ? b.dataset.det.split(',').map(Number) : ALL_DETS);
   run({ q: b.dataset.q, fov: els.fov.value, mode: els.mode.value });
 };
 window.addEventListener('popstate', fromUrl);
 
+buildDetChips();
+let startLang = parseState(location.search).lang;
+try { startLang = startLang || localStorage.getItem('radians-lang'); } catch { /* private mode */ }
+applyLang(startLang || (navigator.language || '').startsWith('tr') ? (startLang || 'tr') : 'en');
 fromUrl();
-export { skyToPix };   // used by later overlays

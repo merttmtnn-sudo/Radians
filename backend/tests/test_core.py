@@ -2,6 +2,8 @@
 import sys
 from pathlib import Path
 
+import math
+
 import numpy as np
 import pytest
 
@@ -84,3 +86,44 @@ def test_coadd_fills_all_flagged_pixels():
     img, var, flg = stack.coadd([a, b])
     assert np.allclose(img, 3.0) and np.isfinite(var).all()
     assert (flg & (1 << 26)).all()
+
+
+def test_gauss3_peak_recovers_subpixel_shift():
+    from app import detect
+    for true in (-0.4, -0.1, 0.0, 0.25, 0.45):
+        prof = [math.exp(-((i - true) ** 2) / (2 * 0.51 ** 2)) for i in (-1, 0, 1)]
+        assert abs(detect._gauss3(*prof) - true) < 1e-9
+
+
+def test_finder_sees_moving_star():
+    from astropy.wcs import WCS
+    from app import detect
+    n = 31
+    rng = np.random.default_rng(1)
+
+    def epoch(i, x, mjd, with_var=False):
+        yy, xx = np.mgrid[0:n, 0:n]
+        img = 50 * np.exp(-((xx - x) ** 2 + (yy - 15) ** 2) / (2 * 0.6 ** 2))
+        img += 30 * np.exp(-((xx - 7.3) ** 2 + (yy - 22.6) ** 2) / (2 * 0.6 ** 2))   # static star
+        img += rng.normal(0, 0.1, (n, n))
+        return {"epoch": i, "mjd": mjd, "image": img, "variance": np.full((n, n), 0.01),
+                "flags": np.zeros((n, n), np.uint32), "detector": 1}
+
+    eps = [epoch(1, 15.0, 60800), epoch(2, 15.5, 60983), epoch(3, 16.0, 61165)]
+    w = stack.output_wcs(10.0, 0.0, n)
+    c = detect.find_candidates(eps, eps, w, (15, 15))
+    mov = [k for k in c if k["type"] == "moving"]
+    assert len(mov) == 1
+    assert abs(mov[0]["rate_arcsec_yr"] - 1.0 * 6.15) < 0.5          # 1 px/yr
+    assert abs(mov[0]["pa_deg"] - 270) < 5                             # +x is west
+
+
+def test_cached_cutout_reused_when_it_covers_the_box():
+    from app.fitsrange import Cutout
+    w = stack.output_wcs(10.0, 0.0, 2041)                 # stand-in for a detector WCS
+    h = w.to_header()
+    big = Cutout(np.zeros((41, 41), np.float32), np.zeros((41, 41), np.float32), np.zeros((41, 41), np.uint32),
+                 1000, 1000, h, 1020.0, 1020.0)
+    assert stack._covers(big, 10.0, 0.0, 15)               # smaller field of view: reuse
+    assert not stack._covers(big, 10.0, 0.0, 30)           # larger: must download
+    assert not stack._covers(big, 10.0, 0.05, 15)          # moved 30 px: must download

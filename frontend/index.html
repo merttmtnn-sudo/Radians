@@ -14,16 +14,19 @@
     <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="5"/><path d="M16 2v6M16 24v6M2 16h6M24 16h6"/></svg>
     <span>Radians</span>
   </a>
-  <p class="tagline">See the infrared sky change — NASA SPHEREx, every six months, 102 colours.</p>
+  <p class="tagline" data-i18n="tagline"></p>
+  <div class="lang" role="group" aria-label="Language">
+    <button type="button" data-lang="en">EN</button><button type="button" data-lang="tr">TR</button>
+  </div>
 </header>
 
 <form id="search" class="search" autocomplete="off">
   <label class="grow">
-    <span class="lbl">Target (name or RA Dec)</span>
-    <input id="q" name="q" placeholder="Barnard's Star  ·  08h55m10.8s -07d14m42s  ·  133.795 -7.245" required>
+    <span class="lbl" data-i18n="target"></span>
+    <input id="q" name="q" data-i18n-ph="targetPh" required>
   </label>
   <label>
-    <span class="lbl">Field of view</span>
+    <span class="lbl" data-i18n="fov"></span>
     <select id="fov">
       <option value="120">2′</option>
       <option value="240" selected>4′</option>
@@ -33,26 +36,49 @@
     </select>
   </label>
   <label>
-    <span class="lbl">Frames</span>
+    <span class="lbl" data-i18n="frames"></span>
     <select id="mode">
-      <option value="epoch" selected>One per epoch (co-added)</option>
-      <option value="epoch_detector">Epoch × detector</option>
-      <option value="exposure">Every exposure</option>
+      <option value="epoch" selected data-i18n="modeEpoch"></option>
+      <option value="epoch_detector" data-i18n="modeEpochDet"></option>
+      <option value="exposure" data-i18n="modeExposure"></option>
     </select>
   </label>
-  <button type="submit" id="go">Blink</button>
+  <button type="submit" id="go" data-i18n="blink"></button>
 </form>
+<div class="dets">
+  <span class="lbl" data-i18n="detectors"></span>
+  <div class="detchips" id="detchips" role="group"></div>
+  <select id="preset" aria-label="Detector preset">
+    <option value="1,2,3,4,5,6" data-i18n="presetAll"></option>
+    <option value="1,2,3" data-i18n="presetShort"></option>
+    <option value="4,5,6" data-i18n="presetLong"></option>
+    <option value="6" data-i18n="presetD6"></option>
+    <option value="custom" data-i18n="presetCustom" hidden></option>
+  </select>
+</div>
 <div class="examples" id="examples">
-  <span class="lbl">Try:</span>
+  <span class="lbl" data-i18n="tryLbl"></span>
   <button data-q="Barnard's Star">Barnard's Star</button>
   <button data-q="eps Indi B">ε Indi B</button>
-  <button data-q="08h55m10.831s -07d14m42.53s" data-fov="600">WISE 0855</button>
+  <button data-q="WISE J085510.83-071442.5" data-det="6">WISE 0855 (D6)</button>
   <button data-q="RW Aur">RW Aurigae</button>
   <button data-q="R Dra">R Draconis</button>
 </div>
 
 <main class="layout">
   <section class="viewer" aria-label="Sky viewer">
+    <div class="viewbar">
+      <label><span class="lbl" data-i18n="view"></span>
+        <select id="view">
+          <option value="images" data-i18n="viewImages"></option>
+          <option value="diff_median" data-i18n="viewDiffMedian"></option>
+          <option value="diff_prev" data-i18n="viewDiffPrev"></option>
+          <option value="diff_first" data-i18n="viewDiffFirst"></option>
+          <option value="stack" data-i18n="viewStack"></option>
+        </select>
+      </label>
+      <p class="muted small" id="viewHelp"></p>
+    </div>
     <div class="stage" id="stage">
       <canvas id="sky" width="1" height="1"></canvas>
       <canvas id="overlay" width="1" height="1"></canvas>
@@ -61,23 +87,22 @@
       <div class="hud hud-bl compass" aria-hidden="true"><span class="n">N</span><span class="e">E</span></div>
       <div class="hud hud-br" id="hudScale"></div>
       <div class="empty" id="empty">
-        <p>Type a target and press <b>Blink</b>.</p>
-        <p class="muted">Radians fetches every SPHEREx image of that patch of sky and plays them as a movie.
-          Anything that moves or changes brightness jumps out.</p>
+        <p data-i18n="emptyTitle"></p>
+        <p class="muted" data-i18n="emptyBody"></p>
       </div>
       <div class="loading" id="loading" hidden>
         <div class="spinner"></div>
-        <p id="loadingMsg">Asking the NASA archive…</p>
+        <p id="loadingMsg"></p>
         <p class="muted" id="loadingSub"></p>
       </div>
     </div>
 
     <div class="controls" id="controls">
-      <button id="prev" title="Previous frame (←)" aria-label="Previous frame">⏮</button>
-      <button id="play" title="Play / pause (space)" aria-label="Play">▶</button>
-      <button id="next" title="Next frame (→)" aria-label="Next frame">⏭</button>
+      <button id="prev" aria-label="Previous frame">⏮</button>
+      <button id="play" aria-label="Play">▶</button>
+      <button id="next" aria-label="Next frame">⏭</button>
       <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Frame">
-      <label class="speed" title="Frames per second">
+      <label class="speed">
         <span id="fpsVal">2</span> fps
         <input id="fps" type="range" min="0.5" max="10" step="0.5" value="2" aria-label="Speed">
       </label>
@@ -87,13 +112,22 @@
 
   <aside class="panel">
     <section>
-      <h2>This frame</h2>
-      <dl id="frameInfo" class="kv"><dt>—</dt><dd></dd></dl>
+      <h2><span data-i18n="candidates"></span> <span class="count" id="candCount"></span></h2>
+      <label class="row check"><input id="showCands" type="checkbox" checked> <span data-i18n="showCands"></span></label>
+      <ul class="cands" id="cands"></ul>
+      <p class="muted small" data-i18n="candHelp"></p>
     </section>
 
     <section>
-      <h2>Display</h2>
-      <label class="row"><span>Stretch</span>
+      <h2 data-i18n="thisFrame"></h2>
+      <dl id="frameInfo" class="kv"><dt>—</dt><dd></dd></dl>
+      <div id="flagSummary" class="flagsum"></div>
+      <details id="expDetails"><summary id="expSummary"></summary><ol id="expList" class="explist"></ol></details>
+    </section>
+
+    <section>
+      <h2 data-i18n="display"></h2>
+      <label class="row"><span data-i18n="stretch"></span>
         <select id="stretch">
           <option value="asinh" selected>asinh</option>
           <option value="linear">linear</option>
@@ -101,31 +135,31 @@
           <option value="sqrt">sqrt</option>
         </select>
       </label>
-      <label class="row"><span>Colours</span>
+      <label class="row"><span data-i18n="colours"></span>
         <select id="cmap">
-          <option value="gray" selected>grey</option>
-          <option value="invert">inverted grey</option>
-          <option value="heat">infrared heat</option>
+          <option value="gray" selected data-i18n="cmGray"></option>
+          <option value="invert" data-i18n="cmInvert"></option>
+          <option value="heat" data-i18n="cmHeat"></option>
         </select>
       </label>
-      <label class="row"><span>Black point</span><input id="lo" type="range" min="0" max="60" step="0.5" value="5"></label>
-      <label class="row"><span>White point</span><input id="hi" type="range" min="90" max="100" step="0.05" value="99.7"></label>
-      <label class="row check"><input id="cross" type="checkbox" checked> Target marker</label>
-      <label class="row check"><input id="flagView" type="checkbox"> Show flagged pixels</label>
+      <label class="row"><span data-i18n="black"></span><input id="lo" type="range" min="0" max="60" step="0.5" value="5"></label>
+      <label class="row"><span data-i18n="white"></span><input id="hi" type="range" min="90" max="100" step="0.05" value="99.7"></label>
+      <label class="row check"><input id="cross" type="checkbox" checked> <span data-i18n="marker"></span></label>
+      <label class="row check"><input id="flagView" type="checkbox"> <span data-i18n="showFlagged"></span></label>
     </section>
 
     <section>
-      <h2>Cursor</h2>
+      <h2 data-i18n="cursor"></h2>
       <dl id="cursor" class="kv"><dt>RA, Dec</dt><dd>—</dd></dl>
     </section>
 
     <section>
-      <h2>Share</h2>
+      <h2 data-i18n="share"></h2>
       <div class="share">
-        <input id="link" readonly aria-label="Link to this view">
-        <button id="copy" type="button">Copy</button>
+        <input id="link" readonly aria-label="Link">
+        <button id="copy" type="button" data-i18n="copy"></button>
       </div>
-      <p class="muted small">The link reproduces this exact view. Add <code>&amp;embed=1</code> to embed it on another site.</p>
+      <p class="muted small" data-i18n="shareHelp"></p>
     </section>
   </aside>
 </main>

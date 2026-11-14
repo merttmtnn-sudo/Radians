@@ -5,7 +5,12 @@ from pathlib import Path
 
 IRSA_SIA = os.getenv("IRSA_SIA", "https://irsa.ipac.caltech.edu/SIA")
 COLLECTIONS = [c.strip() for c in os.getenv("SPHEREX_COLLECTIONS", "spherex_dr1").split(",") if c.strip()]
-SESAME = "https://cds.unistra.fr/cgi-bin/nph-sesame/-oxp/SNV"
+# CDS Sesame and its mirrors, tried in order (the main site redirects to a mirror that can be slow)
+SESAME = [
+    "https://cds.unistra.fr/cgi-bin/nph-sesame/-oxp/SNV",
+    "https://vizier.cfa.harvard.edu/viz-bin/nph-sesame/-oxp/SNV",
+    "https://vizier.cds.unistra.fr/viz-bin/nph-sesame/-oxp/SNV",
+]
 
 CACHE_DIR = Path(os.getenv("CACHE_DIR", Path(__file__).resolve().parents[1] / ".cache"))
 SIA_TTL_S = int(os.getenv("SIA_TTL_S", 12 * 3600))  # re-ask the archive twice a day for new data
@@ -16,7 +21,9 @@ MAX_WORKERS = int(os.getenv("MAX_WORKERS", 12))
 EPOCH_GAP_DAYS = 20.0       # observations further apart than this start a new epoch
 DEFAULT_FOV = 300.0         # arcsec
 MIN_FOV, MAX_FOV = 60.0, 1800.0
-APERTURE_PX = 2.0           # photometry aperture radius in output pixels
+APERTURE_PX = 2.0
+# Nominal SPHEREx detector wavelength ranges (micron); each is a linear-variable filter.
+DETECTORS = {1: [0.75, 1.09], 2: [1.10, 1.62], 3: [1.63, 2.42], 4: [2.42, 3.82], 5: [3.83, 4.41], 6: [4.42, 5.00]}           # photometry aperture radius in output pixels
 
 # SPHEREx Level-2 FLAGS bits: MSKN/MSKD header keywords of DR1 (v27) files, as listed in the IRSA
 # SPHEREx tutorial; bits 29+ from the IRSA spectrophotometry tool notes. Authoritative: Table 16 of

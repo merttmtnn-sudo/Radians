@@ -50,17 +50,41 @@ def propagate(ra, dec, pmra, pmdec, ref_year, mjd):
     return ra2 % 360, dec2
 
 
+def _covers(cut, ra, dec, half) -> bool:
+    """Does a cached cutout contain the box of +-half pixels around (ra, dec)?"""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        x, y = WCS(cut.header).all_world2pix([[ra, dec]], 0, quiet=True)[0]
+    n = config.DETECTOR_SIZE
+    ny, nx = cut.image.shape
+    xa, xb = max(0, round(x) - half), min(n, round(x) + half + 1)
+    ya, yb = max(0, round(y) - half), min(n, round(y) + half + 1)
+    return cut.x0 <= xa and xb <= cut.x0 + nx and cut.y0 <= ya and yb <= cut.y0 + ny
+
+
+def _load(p):
+    try:
+        return pickle.loads(p.read_bytes()) if p.exists() else None
+    except Exception:
+        return None
+
+
 def _cutout_cached(exp: Exposure, ra, dec, half):
-    key = f"{exp.url}|{ra:.5f}|{dec:.5f}|{half}"
-    p = config.CACHE_DIR / "cut" / (hashlib.sha1(key.encode()).hexdigest() + ".pkl")
-    if p.exists():
-        try:
-            return pickle.loads(p.read_bytes())
-        except Exception:
-            pass
+    """One cached cutout per exposure; reused whenever it already covers the requested box,
+    so a smaller field of view or a slightly different centre costs no download."""
+    cdir = config.CACHE_DIR / "cut"
+    p = cdir / (hashlib.sha1(exp.url.encode()).hexdigest() + ".pkl")
+    c = _load(p)
+    if c is None:          # cache written by older versions (keyed on centre and size)
+        c = _load(cdir / (hashlib.sha1(f"{exp.url}|{ra:.5f}|{dec:.5f}|{half}".encode()).hexdigest() + ".pkl"))
+    if c is not None and _covers(c, ra, dec, half):
+        if not p.exists():
+            p.write_bytes(pickle.dumps(c))
+        return c
     c = fitsrange.read_cutout(exp.url, ra, dec, half)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_bytes(pickle.dumps(c))
+    if c is not None:
+        p.write_bytes(pickle.dumps(c))
     return c
 
 
@@ -79,6 +103,8 @@ def _aperture(img, var, flg, px, py, r=config.APERTURE_PX):
     if not ap.any():
         return None
     good = ap & np.isfinite(img)
+    if not good.any():                      # e.g. a saturated core the pipeline blanked
+        return None
     # MJy/sr * pixel solid angle -> microJansky
     pix_sr = (config.PIXEL_SCALE / 206264.806) ** 2
     to_ujy = pix_sr * 1e12
@@ -189,7 +215,8 @@ def mjd_iso(m):
     return Time(m, format="mjd").isot[:16].replace("T", " ")
 
 
-def group_frames(frames: list[Frame], mode: str):
+def group_raw(frames: list[Frame], mode: str):
+    """Group frames ('epoch', 'epoch_detector' or 'exposure') and co-add each group (arrays kept)."""
     frames = sorted(frames, key=lambda f: f.exp.mjd)
     ep = epochs([f.exp.mjd for f in frames])
     groups: dict[tuple, list[Frame]] = {}
@@ -203,11 +230,22 @@ def group_frames(frames: list[Frame], mode: str):
         dets = sorted({f.exp.detector for f in fs})
         wls = [f.wavelength for f in fs if f.wavelength]
         out.append({
-            "epoch": key[0] + 1, "detectors": dets, "n_exposures": len(fs),
+            "epoch": key[0] + 1, "detectors": dets, "detector": dets[0] if len(dets) == 1 else None,
+            "n_exposures": len(fs),
             "mjd": float(np.mean([f.exp.mjd for f in fs])), "mjd_start": m0, "mjd_end": m1,
             "date_start": mjd_iso(m0), "date_end": mjd_iso(m1),
             "wavelength_min": min(wls) if wls else None, "wavelength_max": max(wls) if wls else None,
-            "obs_ids": [f"{f.exp.obs_id}/D{f.exp.detector}" for f in fs][:50],
-            "image": b64(img), "variance": b64(var), "flags": b64(flg.astype(np.uint32)),
+            "exposures": [{"obs_id": f.exp.obs_id, "detector": f.exp.detector, "date": mjd_iso(f.exp.mjd),
+                           "wavelength": f.wavelength} for f in fs][:200],
+            "image": img, "variance": var, "flags": flg.astype(np.uint32),
         })
     return out
+
+
+def encode(groups):
+    return [{**g, "image": b64(g["image"]), "variance": b64(g["variance"]), "flags": b64(g["flags"])}
+            for g in groups]
+
+
+def group_frames(frames: list[Frame], mode: str):
+    return encode(group_raw(frames, mode))

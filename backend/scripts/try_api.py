@@ -2,7 +2,7 @@
 import sys, time
 import numpy as np, base64
 from fastapi.testclient import TestClient
-sys.path.insert(0, ".")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
 from app.main import app
 
 c = TestClient(app)

@@ -50,3 +50,29 @@ test('url state', () => {
   assert.equal(s.q, "Barnard's Star"); assert.equal(s.ra, 269.45); assert.equal(s.fov, 240);
   assert.equal(s.embed, true); assert.equal(s.pmra, null); assert.equal(s.frame, null);
 });
+
+import { medianImage, stackImage, computeView, stretchSigned, lutDiverging } from '../sky.js';
+
+test('median and difference views cancel static sky', () => {
+  const a = new Float32Array([1, 5, NaN]), b = new Float32Array([1, 7, 2]), c = new Float32Array([1, 6, 4]);
+  assert.deepEqual([...medianImage([a, b, c])].slice(0, 2), [1, 6]);
+  assert.equal(medianImage([a, b, c])[2], 3);
+  const d = computeView([a, b, c], null, 'diff_median');
+  assert.equal(d[0][0], 0); assert.equal(d[1][1], 1);
+  assert.equal(computeView([a, b, c], null, 'diff_prev')[1][1], 2);
+  assert.equal(computeView([a, b, c], null, 'diff_first')[2][1], 1);
+});
+
+test('stack is inverse-variance weighted', () => {
+  const s = stackImage([new Float32Array([1]), new Float32Array([4])], [new Float32Array([1]), new Float32Array([3])]);
+  assert.ok(Math.abs(s[0] - (1 + 4 / 3) / (1 + 1 / 3)) < 1e-6);
+  assert.equal(computeView([new Float32Array([1])], null, 'stack').length, 1);
+});
+
+test('signed stretch and diverging lut', () => {
+  assert.equal(stretchSigned(-10, 1, 'linear'), -1);
+  assert.equal(stretchSigned(0.5, 1, 'linear'), 0.5);
+  const l = lutDiverging();
+  assert.deepEqual([l[128 * 3], l[128 * 3 + 1], l[128 * 3 + 2]], [0, 0, 0]);
+  assert.equal(l[255 * 3], 255); assert.equal(l[2], 255);
+});

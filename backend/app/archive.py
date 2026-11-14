@@ -98,9 +98,17 @@ def resolve(query: str) -> dict:
     path = _cache_path("sesame", query.strip().lower())
     if path.exists():
         return json.loads(path.read_text())
-    r = requests.get(config.SESAME + "?" + requests.utils.quote(query.strip()), timeout=30)
-    r.raise_for_status()
-    root = ET.fromstring(r.text)
+    root, last = None, None
+    for base in config.SESAME:
+        try:
+            r = requests.get(base + "?" + requests.utils.quote(query.strip()), timeout=12)
+            r.raise_for_status()
+            root = ET.fromstring(r.text)
+            break
+        except Exception as e:          # try the next mirror
+            last = e
+    if root is None:
+        raise ConnectionError(f"all name resolvers failed: {last}")
     for res in root.iter("Resolver"):
         ra, dec = res.findtext("jradeg"), res.findtext("jdedeg")
         if ra and dec:

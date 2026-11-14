@@ -117,5 +117,74 @@ export function parseState(search) {
     fov: num('fov'), mode: p.get('mode'), fps: num('fps'),
     stretch: p.get('stretch'), cmap: p.get('cmap'),
     frame: num('frame'), embed: p.get('embed') === '1',
+    det: p.get('det'), view: p.get('view'), lang: p.get('lang'),
   };
+}
+
+/** Per-pixel median of the finite values across frames. */
+export function medianImage(images) {
+  const n = images[0].length, F = images.length, out = new Float32Array(n), buf = new Float64Array(F);
+  for (let i = 0; i < n; i++) {
+    let k = 0;
+    for (let f = 0; f < F; f++) { const v = images[f][i]; if (Number.isFinite(v)) buf[k++] = v; }
+    if (!k) { out[i] = NaN; continue; }
+    const s = buf.subarray(0, k).sort();
+    out[i] = k % 2 ? s[(k - 1) >> 1] : 0.5 * (s[k / 2 - 1] + s[k / 2]);
+  }
+  return out;
+}
+
+/** Inverse-variance weighted mean of all frames (falls back to a plain mean without variances). */
+export function stackImage(images, variances) {
+  const n = images[0].length, out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let num = 0, den = 0, sum = 0, cnt = 0;
+    for (let f = 0; f < images.length; f++) {
+      const v = images[f][i];
+      if (!Number.isFinite(v)) continue;
+      sum += v; cnt++;
+      const w = variances && Number.isFinite(variances[f][i]) && variances[f][i] > 0 ? 1 / variances[f][i] : 0;
+      num += w * v; den += w;
+    }
+    out[i] = den > 0 ? num / den : cnt ? sum / cnt : NaN;
+  }
+  return out;
+}
+
+function diff(a, b) {
+  const out = new Float32Array(a.length);
+  for (let i = 0; i < a.length; i++) out[i] = a[i] - b[i];
+  return out;
+}
+
+/** Frames to display for a view: images, diff_median, diff_prev, diff_first or stack. */
+export function computeView(images, variances, view) {
+  if (!images.length) return [];
+  switch (view) {
+    case 'diff_median': { const m = medianImage(images); return images.map(im => diff(im, m)); }
+    case 'diff_prev': return images.map((im, i) => diff(im, images[(i - 1 + images.length) % images.length]));
+    case 'diff_first': return images.map(im => diff(im, images[0]));
+    case 'stack': return [stackImage(images, variances)];
+    default: return images;
+  }
+}
+
+export const isDiffView = (v) => v.startsWith('diff');
+
+/** Diverging lookup table: index 0 = most negative (blue), 128 = zero (black), 255 = most positive (white). */
+export function lutDiverging() {
+  const out = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const t = (i - 128) / 127;
+    const [r, g, b] = t >= 0 ? [t, t, t] : [-0.35 * t, -0.65 * t, -t];
+    out[i * 3] = r * 255; out[i * 3 + 1] = g * 255; out[i * 3 + 2] = b * 255;
+  }
+  return out;
+}
+
+/** Signed stretch for difference images: -1..1 (NaN for missing data). */
+export function stretchSigned(v, lim, kind) {
+  if (!Number.isFinite(v)) return NaN;
+  const s = stretchValue(Math.abs(v), 0, lim, kind);
+  return v < 0 ? -s : s;
 }
