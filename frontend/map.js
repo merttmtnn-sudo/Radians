@@ -5,11 +5,15 @@ import { t, getLang } from './i18n.js';
 import { wlColor } from './charts.js';
 import { CUBE_URL, CUBE_WL, BLANK, bandOf, nearestSlice, nextSlice } from './cube.js';
 import { TARGETS, EXPLORE } from './facts.js';
+import { decodeB64, percentiles, stretchValue } from './sky.js';
 
 const ALADIN_JS = 'https://cdn.jsdelivr.net/npm/aladin-lite@3.6.5/dist/aladin.js';
 const $ = (id) => document.getElementById(id);
 const root = document.documentElement;
 const HOME = { ra: 266.4, dec: -28.9, fov: 200 };          // the Galactic centre, Milky Way across the middle
+const DEEP_FOV = 0.7;        // degrees: closer than this the all-sky map's 13″ pixels are only being magnified
+const P = new URLSearchParams(location.search);
+
 const map = { aladin: null, hips: null, tint: null, slice: nearestSlice(2.2), timer: null, objectHit: false, down: null, coords: new Map() };
 
 // Wavelengths worth a look: hydrogen lines, dust and the ices SPHEREx was built to map.
@@ -78,17 +82,23 @@ async function initMap() {
       fov: HOME.fov, cooFrame: 'galactic', projection: 'AIT', showReticle: false,
       showLayersControl: false, showFullscreenControl: true, showCooGridControl: true, showSimbadPointerControl: false,
       showProjectionControl: false, showFrame: true, showZoomControl: true,
+      pixelateCanvas: false,                          // smooth magnified pixels instead of hard blocks
     });
-    map.aladin.gotoRaDec(HOME.ra, HOME.dec);
+    // ?c=ra,dec&z=fov&wl=µm open the map on a given view (shareable)
+    const c = (P.get('c') || '').split(',').map(Number);
+    if (c.length === 2 && c.every(Number.isFinite)) map.aladin.gotoRaDec(c[0], c[1]); else map.aladin.gotoRaDec(HOME.ra, HOME.dec);
+    if (Number(P.get('z')) > 0) map.aladin.setFoV(Number(P.get('z')));
+    if (Number(P.get('wl')) > 0) map.slice = nearestSlice(Number(P.get('wl')));
     // a slice set before the layer is added is stored but not applied: set it again once the layer is ready
     // Pixels with no data are transparent in IRSA's tiles, and they sit where one detector is masked. Underneath
     // the chosen plane sits the same channel from a neighbouring band (another detector, see fillOf), so a hole
     // shows SPHEREx sky at a nearby wavelength instead of black.
     // (A second id for the same cube keeps Aladin from treating the two layers as one.)
-    map.base = window.A.imageHiPS(CUBE_URL + '/', { name: 'SPHEREx DR1 (fill)', successCallback: () => setFill(true) });
+    map.base = window.A.imageHiPS('radians-spherex-fill', { url: CUBE_URL, name: 'SPHEREx DR1 (fill)', successCallback: () => setFill(true) });
     map.aladin.setImageSurvey(map.base);
-    map.hips = window.A.imageHiPS(CUBE_URL, { name: 'SPHEREx DR1', successCallback: () => setSlice(map.slice) });
+    map.hips = window.A.imageHiPS('radians-spherex', { url: CUBE_URL, name: 'SPHEREx DR1', successCallback: () => setSlice(map.slice) });
     map.aladin.setOverlayImageLayer(map.hips, 'spherex');
+    map.aladin.on('zoomChanged', () => deepChip());
     // tint layer between the sky image and the markers, in the colour of the wavelength
     const div = $('skymapAladin');
     map.tint = document.createElement('div');
@@ -123,6 +133,8 @@ function setSlice(i) {
   for (const b of $('mapPresets').children) b.classList.toggle('on', Number(b.dataset.slice) === i);
   try { map.hips?.setSliceNumber(i); } catch { /* older Aladin: one plane only */ }
   setFill();
+  prefetchSoon();
+  deepChip();
 }
 
 // The fill plane: the same channel on the neighbouring band whose detector has (almost) no holes.
@@ -292,8 +304,147 @@ $('mapPopGo').onclick = () => {
   if (card) card.click(); else $('search').requestSubmit();
 };
 
+// ---------------------------------------------------------------- faster: fetch the next planes ahead of time
+// Every tile the map shows is remembered; the same tiles of the next planes (and their fill planes) are fetched
+// into the browser cache in the background, so the slider and the tour find them already downloaded.
+const seen = new Map();                                  // 'Norder3/Dir0/Npix100' -> last time on screen
+const fetched = new Set();
+const queue = [];
+let active = 0;
+try { performance.setResourceTimingBufferSize(4000); } catch { /* old browser */ }
+try {
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries()) {
+      const m = e.name.match(/spherex_allsky_cube\/+(Norder\d+\/Dir\d+\/Npix\d+)(?:_\d+)?\.png/);
+      if (m) { seen.set(m[1], performance.now()); fetched.add(e.name.replace(/cube\/\//, 'cube/')); }
+    }
+    if (performance.getEntriesByType('resource').length > 3000) performance.clearResourceTimings();
+  }).observe({ type: 'resource' });
+} catch { /* no PerformanceObserver: no prefetch */ }
+
+const tileUrl = (path, slice) => `${CUBE_URL}/${path}${slice ? `_${slice}` : ''}.png`;
+function pump() {
+  while (active < 6 && queue.length) {
+    const u = queue.shift();
+    if (fetched.has(u)) continue;
+    fetched.add(u);
+    active++;
+    fetch(u, { mode: 'cors' }).then(r => r.arrayBuffer()).catch(() => {}).finally(() => { active--; pump(); });
+  }
+}
+function prefetchSoon() {
+  clearTimeout(map.preTimer);
+  map.preTimer = setTimeout(() => {
+    const now = performance.now();
+    const paths = [...seen].filter(([, t0]) => now - t0 < 15000).sort((x, y) => y[1] - x[1]).slice(0, 48).map(([k]) => k);
+    if (!paths.length) return;
+    const ahead = map.timer ? [1, 2, 3].map(k => { let j = map.slice; for (let q = 0; q < k; q++) j = nextSlice(j); return j; })
+      : [nextSlice(map.slice), nextSlice(map.slice, -1)];
+    queue.length = 0;                                     // only what is useful now
+    for (const j of ahead) for (const path of paths) queue.push(tileUrl(path, j));
+    for (const path of paths) queue.push(tileUrl(path, fillOf(ahead[0])));
+    pump();
+  }, map.timer ? 60 : 250);
+}
+
+// ---------------------------------------------------------------- deeper zoom: SPHEREx's own 6″ pixels
+// Closer than DEEP_FOV the all-sky map only magnifies its 13″ pixels. The visitor can then load the real
+// exposures of that spot (the same reader as the blink, one detector: the band of the chosen wavelength),
+// stacked and laid over the map at SPHEREx's native 6.15″ pixels.
+const deep = { layer: false, busy: false, det: null, n: 0, err: '' };
+function deepChip() {
+  const box = $('mapDeep');
+  if (!map.aladin) return;
+  let fov = 180;
+  try { fov = map.aladin.getFov()[0]; } catch { /* keep default */ }
+  box.hidden = !(fov < DEEP_FOV || deep.layer || deep.busy);
+  if (box.hidden) return;
+  const det = bandOf(map.slice);
+  let text;
+  if (deep.busy) text = deep.total ? t('mapDeepLoading', { det: deep.det, done: deep.done, total: deep.total }) : t('mapDeepWait', { det: deep.det });
+  else if (deep.err) text = deep.err;
+  else if (deep.layer) text = t('mapDeepShown', { det: deep.det, n: deep.n });
+  else text = t('mapDeepOffer');
+  $('mapDeepText').textContent = text;
+  $('mapDeepGo').hidden = deep.busy || (deep.layer && deep.det === det && !deep.err);
+  $('mapDeepGo').textContent = t(deep.err ? 'mapDeepRetry' : 'mapDeepGo', { det });
+  $('mapDeepOff').hidden = !deep.layer || deep.busy;
+  box.classList.toggle('busy', deep.busy);
+}
+async function loadDeep() {
+  if (deep.busy || !map.aladin) return;
+  const [ra, dec] = map.aladin.getRaDec();
+  let fovDeg = 0.3;
+  try { fovDeg = map.aladin.getFov()[0]; } catch { /* default */ }
+  const fov = Math.round(Math.min(900, Math.max(180, fovDeg * 3600 * 0.75)));
+  Object.assign(deep, { busy: true, det: bandOf(map.slice), err: '', done: 0, total: 0 });
+  deepChip();
+  const job = Math.random().toString(36).slice(2, 12);
+  const poll = setInterval(async () => {
+    try {
+      const p = await (await fetch(new URL(`api/progress?job=${job}`, location.href))).json();
+      if (p.stage === 'read' && p.total) { deep.done = p.done; deep.total = p.total; deepChip(); }
+    } catch { /* cosmetic */ }
+  }, 1500);
+  try {
+    const q = new URLSearchParams({ ra: ra.toFixed(6), dec: dec.toFixed(6), fov, mode: 'epoch', detectors: String(deep.det),
+      matched: 'false', candidates: 'false', quick: '1', job });
+    const r = await fetch(new URL(`api/frames?${q}`, location.href));
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    if (!data.frames || !data.frames.length) throw new Error(t('mapDeepNone'));
+    showDeep(data);
+  } catch (e) {
+    deep.err = e.message;
+  } finally {
+    clearInterval(poll);
+    deep.busy = false;
+    deepChip();
+  }
+}
+function showDeep(data) {
+  const g = data.grid, n = g.n;
+  const imgs = data.frames.map(f => decodeB64(f.image, Float32Array));
+  const sum = new Float64Array(n * n), cnt = new Uint16Array(n * n);
+  for (const a of imgs) for (let i = 0; i < a.length; i++) if (Number.isFinite(a[i])) { sum[i] += a[i]; cnt[i]++; }
+  const st = new Float32Array(n * n);
+  for (let i = 0; i < st.length; i++) st[i] = cnt[i] ? sum[i] / cnt[i] : NaN;
+  const [lo, hi] = percentiles([st], [2, 99.8]);
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = n;
+  const ctx = cv.getContext('2d');
+  const out = ctx.createImageData(n, n);
+  for (let y = 0; y < n; y++) {
+    const row = n - 1 - y;                                 // FITS y is up, image y is down
+    for (let x = 0; x < n; x++) {
+      const v = stretchValue(st[y * n + x], lo, hi, 'asinh'), o = (row * n + x) * 4;
+      if (Number.isNaN(v)) continue;                       // no data: transparent, the all-sky map shows through
+      out.data[o] = out.data[o + 1] = out.data[o + 2] = Math.round(v * 255);
+      out.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+  const s = g.pixel_scale / 3600;
+  try { map.aladin.removeImageLayer('native'); } catch { /* none yet */ }
+  const img = window.A.image(cv.toDataURL('image/png'), {
+    name: `SPHEREx D${deep.det} 6″`, imgFormat: 'png',
+    wcs: { NAXIS: 2, NAXIS1: n, NAXIS2: n, CTYPE1: 'RA---TAN', CTYPE2: 'DEC--TAN', CRVAL1: g.ra, CRVAL2: g.dec,
+      CRPIX1: (n + 1) / 2, CRPIX2: (n + 1) / 2, CDELT1: -s, CDELT2: s, RADESYS: 'ICRS', EQUINOX: 2000 },
+  });
+  map.aladin.setOverlayImageLayer(img, 'native');
+  deep.layer = true;
+  deep.n = data.n_exposures_read;
+}
+$('mapDeepGo').onclick = loadDeep;
+$('mapDeepOff').onclick = () => {
+  try { map.aladin.removeImageLayer('native'); } catch { /* gone */ }
+  deep.layer = false;
+  deep.err = '';
+  deepChip();
+};
+
 // ---------------------------------------------------------------- start
 buildPresets();
 buildChips();
 if (new URLSearchParams(location.search).get('map') === '1') openMap(false);
-document.addEventListener('radians:lang', () => { buildPresets(); buildChips(); hidePop(); setSlice(map.slice); stopTour(); });
+document.addEventListener('radians:lang', () => { buildPresets(); buildChips(); hidePop(); setSlice(map.slice); stopTour(); deepChip(); });

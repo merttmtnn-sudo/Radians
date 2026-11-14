@@ -427,8 +427,20 @@ body.embed .stage { max-height: calc(100vh - 70px); }
   box-shadow: 0 24px 60px rgba(0, 0, 0, .35); }
 #skymapAladin { width: 100%; height: min(70vh, 740px); min-height: 400px; }
 .maptint { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: multiply; transition: background-color .25s; }
-#skymapAladin .aladin-imageCanvas { filter: brightness(1.12) contrast(1.08); }
+#skymapAladin .aladin-imageCanvas { filter: contrast(var(--mapcontrast, 1.3)) brightness(var(--mapbright, .95)); }
 
+/* deeper zoom offer, floating over the top of the map */
+.mapdeep { position: absolute; z-index: 16; top: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
+  max-width: calc(100% - 140px); padding: 5px 5px 5px 14px; border-radius: 999px; background: rgba(12, 12, 14, .78);
+  border: 1px solid rgba(255, 255, 255, .14); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: #e6e7ea; font-size: 12.5px; }
+.mapdeep > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#mapDeepGo { flex: none; height: 30px; padding: 0 14px; border: 0; border-radius: 999px; background: #ffb347; color: #1a1205; font: inherit; font-weight: 600; cursor: pointer; }
+#mapDeepGo:hover { filter: brightness(1.08); }
+.mapdeep #mapDeepOff { margin-right: 0; }
+.mapdeep.busy::before { content: ""; flex: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .25);
+  border-top-color: #ffb347; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 700px) { .mapdeep { max-width: calc(100% - 24px); top: 56px; } .mapdeep > span { white-space: normal; } }
 /* legend + "whole sky", floating over the bottom of the map */
 .maplegend { position: absolute; z-index: 15; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px;
   padding: 5px 5px 5px 14px; border-radius: 999px; background: rgba(12, 12, 14, .72); border: 1px solid rgba(255, 255, 255, .12);

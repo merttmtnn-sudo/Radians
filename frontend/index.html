@@ -151,6 +151,13 @@
 
   <div class="mapwrap">
     <div id="skymapAladin"></div>
+    <div class="mapdeep" id="mapDeep" role="status" aria-live="polite" hidden>
+      <span id="mapDeepText"></span>
+      <button type="button" id="mapDeepGo"></button>
+      <button type="button" id="mapDeepOff" class="mappopx" aria-label="Remove" hidden>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>
+      </button>
+    </div>
     <div class="maplegend">
       <span><i class="ring c"></i><span data-i18n="mapChallenge"></span></span>
       <span><i class="ring e"></i><span data-i18n="mapExplore"></span></span>
