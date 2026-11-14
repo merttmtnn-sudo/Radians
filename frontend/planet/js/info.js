@@ -290,7 +290,9 @@ export function createInfo({ sky, bodyFn, fmtLocal, altOf, send }) {
       [T.pm, pm != null && pm > 5 ? nf(pm, 0) + ' mas/yr' : null],
       ...base,
     ]);
-    const names = [...new Set([...(s.names || []).map(prettyName), ...(inf.alias || [])])].filter(n => n && n !== inf.name);
+    const seen = new Set([inf.name.replace(/\s/g, '')]);
+    const names = [...(s.names || []), ...(inf.alias || [])].map(prettyName)
+      .filter(n => { const k = n.replace(/\s/g, ''); if (!n || seen.has(k)) return false; seen.add(k); return true; });
     return tab + aliasHtml(names, Math.max(0, (s.n_names || 0) - names.length)) + `<p class="sd-src">${T.source}: SIMBAD (CDS) · ${esc(prettyName(s.id || ''))}</p>`;
   }
   function aliasHtml(names, extra) {
