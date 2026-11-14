@@ -3,6 +3,13 @@
 
 const STRINGS = {
   en: {
+    mapBtn: "Map", mapEyebrow: "102 infrared colours", mapTitle: "The whole sky, as SPHEREx sees it",
+    mapSub: "NASA SPHEREx photographed the entire sky in 102 colours of infrared light. Slide through them: stars fade as you go redder, while warm dust and gas light up. Click anywhere to blink that spot.",
+    mapIrsa: "Open IRSA’s SPHEREx tools ↗", mapGo: "Blink here →", mapHere: "This spot", mapPlay: "Play the wavelength tour", mapPause: "Pause",
+    mapHint: "Amber circles: the five challenge targets. White circles: Explore stars. Drag to pan, scroll to zoom. Map: SPHEREx DR1 all-sky cube (NASA/IPAC IRSA) in Aladin Lite (CDS).",
+    mapChallenge: "Challenge targets", mapExplore: "Explore stars",
+    irsaSpec: "Check with IRSA’s official tool ↗", irsaSpecTitle: "Copies this position and opens IRSA’s SPHEREx spectrophotometry tool, which runs NASA’s own forced photometry (takes several minutes).",
+    irsaCopied: "Coordinates copied: paste them into IRSA’s form.",
     exploreBtn: "Explore", exploreTitle: "Jump to a random interesting patch of sky", exploreCta: "Explore the sky",
     storyBtn: "Story", storyCta: "Take the 2-minute story tour", storyCtaSub: "Five stops, one per challenge target, or jump to a random interesting star.",
     storyPrev: "Back", storyNext: "Next stop", storyDone: "Finish",
@@ -137,6 +144,13 @@ const STRINGS = {
     contextHelp: 'The orange box is the Radians field. Switch surveys to compare SPHEREx with 2MASS, WISE and optical images.',
   },
   tr: {
+    mapBtn: "Harita", mapEyebrow: "102 kızılötesi renk", mapTitle: "Tüm gökyüzü, SPHEREx’in gözünden",
+    mapSub: "NASA SPHEREx tüm gökyüzünü 102 farklı kızılötesi renkte fotoğrafladı. Aralarında gezinin: kırmızıya gittikçe yıldızlar söner, ılık toz ve gaz parlar. Herhangi bir noktaya tıklayıp orayı blink edin.",
+    mapIrsa: "IRSA’nın SPHEREx araçlarını aç ↗", mapGo: "Burada blink yap →", mapHere: "Bu nokta", mapPlay: "Dalga boyu turunu oynat", mapPause: "Duraklat",
+    mapHint: "Turuncu halkalar: beş yarışma hedefi. Beyaz halkalar: Keşfet yıldızları. Sürükleyerek kaydırın, tekerlekle yakınlaştırın. Harita: SPHEREx DR1 tüm gökyüzü küpü (NASA/IPAC IRSA), Aladin Lite (CDS).",
+    mapChallenge: "Yarışma hedefleri", mapExplore: "Keşfet yıldızları",
+    irsaSpec: "IRSA’nın resmî aracıyla doğrula ↗", irsaSpecTitle: "Bu konumu kopyalar ve NASA’nın kendi zorlanmış fotometrisini çalıştıran IRSA SPHEREx spektrofotometri aracını açar (birkaç dakika sürer).",
+    irsaCopied: "Koordinatlar kopyalandı: IRSA formuna yapıştırın.",
     exploreBtn: "Keşfet", exploreTitle: "Rastgele ilginç bir gökyüzü bölgesine git", exploreCta: "Gökyüzünü keşfet",
     storyBtn: "Hikâye", storyCta: "2 dakikalık hikâyeli turu başlat", storyCtaSub: "Her yarışma hedefi için bir durak; ya da rastgele ilginç bir yıldıza gidin.",
     storyPrev: "Geri", storyNext: "Sonraki durak", storyDone: "Bitir",

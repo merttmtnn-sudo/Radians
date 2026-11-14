@@ -5,6 +5,7 @@ import {
 import { t, setLang, getLang } from './i18n.js';
 import { scatterChart, chartTable, SERIES, wlColor } from './charts.js';
 import { encodeGif } from './gif.js';
+import { CUBE_URL, nearestSlice } from './cube.js';
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
@@ -676,6 +677,7 @@ function show(i) {
   info(els.frameInfo, rows);
   renderFlagSummary();
   for (const [j, li] of [...els.timeline.children].entries()) li.firstChild.classList.toggle('on', j === state.idx);
+  syncCube();
   syncUrl(true);
 }
 
@@ -1192,7 +1194,10 @@ async function updateAladin() {
 function setSurvey() {
   const opt = e4.ctxSurvey.selectedOptions[0];
   try {
-    ex.aladin.setImageSurvey(window.A.imageHiPS(opt.value, { name: opt.textContent }));
+    ex.hips = window.A.imageHiPS(opt.value, { name: opt.textContent });
+    ex.aladin.setImageSurvey(ex.hips);
+    ex.hipsSlice = null;
+    syncCube();
   } catch (err) { toast('Aladin: ' + err.message, true); }
 }
 
@@ -1427,3 +1432,24 @@ els.listen.onclick = () => {
 if (new URLSearchParams(location.search).get('compare') === '1') {
   document.addEventListener('radians:loaded', () => setTimeout(() => setCompare(true), 0), { once: true });
 }
+
+// ------------------------------------------------------------------ SPHEREx all-sky cube in the context view follows the frame's wavelength
+function syncCube() {
+  if (!ex.hips || !ex.aladin || !state.data || e4.ctxSurvey.value !== CUBE_URL) return;
+  const fs = state.data.frames;
+  const f = isStack() ? null : fs[state.idx];
+  const um = f && f.wavelength_min ? (f.wavelength_min + f.wavelength_max) / 2 : 2.2;
+  const i = nearestSlice(um);
+  if (ex.hipsSlice === i) return;
+  ex.hipsSlice = i;
+  try { ex.hips.setSliceNumber(i); } catch { /* single-plane survey */ }
+}
+
+// ------------------------------------------------------------------ IRSA's official spectrophotometry tool
+$('irsaSpec').onclick = async () => {
+  const p = ex.click || state.target;
+  if (!p) return;
+  const coo = `${p.ra.toFixed(6)} ${p.dec.toFixed(6)}`;
+  try { await navigator.clipboard.writeText(coo); toast(t('irsaCopied')); } catch { toast(coo); }
+  window.open('https://irsa.ipac.caltech.edu/applications/spherex/tool-spectrophotometry', '_blank', 'noopener');
+};

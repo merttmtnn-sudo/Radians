@@ -16,7 +16,8 @@
     try { const t = new URLSearchParams(location.search).get('theme') || localStorage.getItem('radians-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) { /* private mode */ }
     if (/[?&]tour=0/.test(location.search)) try { localStorage.setItem('radians-tour', 'done'); } catch (e) { /* private mode */ }
     // a shared link opens straight in the viewer
-    if (/[?&](q|ra)=/.test(location.search)) document.documentElement.classList.add('in-app');
+    if (/[?&]map=1/.test(location.search)) document.documentElement.classList.add('in-map');
+    else if (/[?&](q|ra)=/.test(location.search)) document.documentElement.classList.add('in-app');
   </script>
 </head>
 <body>
@@ -39,6 +40,7 @@
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 14h14"/><circle cx="7" cy="6" r="2"/><circle cx="13" cy="14" r="2"/></svg>
       <span data-i18n="advanced"></span>
     </button>
+    <button type="button" class="btn sm ghost" data-map data-i18n="mapBtn"></button>
     <div class="seg" role="group" aria-label="Language">
       <button type="button" data-lang="en">EN</button><button type="button" data-lang="tr">TR</button>
     </div>
@@ -136,6 +138,37 @@
   </section>
 </main>
 
+<!-- ================================================================ map -->
+<main class="mappage map-only" id="mapPage">
+  <div class="maphead">
+    <div>
+      <p class="eyebrow mono">NASA SPHEREx DR1 · <span data-i18n="mapEyebrow"></span></p>
+      <h1 data-i18n="mapTitle"></h1>
+      <p class="dim" data-i18n="mapSub"></p>
+    </div>
+    <a class="btn sm" href="https://irsa.ipac.caltech.edu/applications/spherex/" target="_blank" rel="noopener" data-i18n="mapIrsa"></a>
+  </div>
+  <div class="mapwrap">
+    <div id="skymapAladin"></div>
+    <div class="mappop" id="mapPop" hidden>
+      <div class="mappoptop"><b id="mapPopTitle"></b><button type="button" class="btn icon xs ghost" id="mapPopClose" aria-label="Close">✕</button></div>
+      <span class="mono small dim" id="mapPopPos"></span>
+      <button type="button" class="btn sm primary" id="mapPopGo" data-i18n="mapGo"></button>
+    </div>
+  </div>
+  <div class="mapbar">
+    <button type="button" class="btn primary icon" id="mapPlay" aria-label="Play">▶</button>
+    <div class="wlslider">
+      <input type="range" id="mapWl" min="0" max="101" step="1" value="44" aria-label="Wavelength">
+      <div class="wlstrip" id="mapStrip"></div>
+      <div class="wlticks mono" id="mapTicks"></div>
+    </div>
+    <div class="wlread"><i id="mapSwatch"></i><span class="mono" id="mapWlVal"></span><span class="mono small dim" id="mapWlBand"></span></div>
+  </div>
+  <p class="small dim maphint" data-i18n="mapHint"></p>
+  <p class="small dim" id="mapStatus"></p>
+</main>
+
 <!-- ================================================================ app -->
 <main class="layout app-only" id="app">
   <section class="viewer" aria-label="Sky viewer">
@@ -202,6 +235,7 @@
           </select>
         </label>
         <label class="small check"><input id="photFlagged" type="checkbox" checked> <span data-i18n="photShowFlagged"></span></label>
+        <button type="button" id="irsaSpec" class="btn sm ghost" data-i18n="irsaSpec" data-i18n-title="irsaSpecTitle"></button>
         <button type="button" id="listen" class="btn sm" aria-pressed="false" data-i18n="listen" data-i18n-title="listenTitle"></button>
         <button type="button" id="photCsv" class="btn sm" data-i18n="csv"></button>
       </div>
@@ -217,7 +251,7 @@
             <select id="ctxSurvey" class="input sm" aria-label="Survey">
               <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/2MASS/Color">2MASS (J, H, K)</option>
               <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/AllWISE/RGB-W4-W2-W1">AllWISE (W1, W2, W4)</option>
-              <option value="https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube">SPHEREx DR1</option>
+              <option value="https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube" selected>SPHEREx DR1</option>
               <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/DSS2/color">DSS2 (optical)</option>
             </select>
             <label class="small check"><input id="ctxGaia" type="checkbox" checked> Gaia DR3</label>
@@ -363,5 +397,6 @@
 <script src="static/app.js" type="module"></script>
 <script src="static/ui.js" type="module"></script>
 <script src="static/about.js" type="module"></script>
+<script src="static/map.js" type="module"></script>
 </body>
 </html>
