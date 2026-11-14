@@ -6,6 +6,7 @@ import { t, setLang, getLang } from '../core/i18n.js';
 import { scatterChart, chartTable, SERIES, wlColor } from '../core/charts.js';
 import { encodeGif } from './gif.js';
 import { renderTypeBox } from './typebox.js';
+import { createCurious } from './curious.js';
 import { CUBE_URL, nearestSlice } from '../core/cube.js';
 import { depthStart, depthLive, depthLoad, depthHide } from './depth.js';
 import { getPalette, setPalette, viewerCmap } from '../core/palette.js';
@@ -1046,7 +1047,27 @@ function drawType() {
   const show = !!typeState.res && ex.tab === 'spectrum' && !!ex.phot?.length;
   box.hidden = !show;
   if (show) renderTypeBox(box, typeState.res, t);
+  curious.redraw();
 }
+
+// ------------------------------------------------------------------ "for the curious" tools (under the Type box)
+const COMPASS = ['north', 'north_east', 'east', 'south_east', 'south', 'south_west', 'west', 'north_west'];
+
+// what the tools work on: the spot being measured, its Gaia star, the SPHEREx mover there, its light curve
+function curiousCtx() {
+  if (!state.data || !state.target || ex.tab !== 'spectrum' || !(ex.phot?.length >= 12)) return null;
+  const spot = typeSpot(), tg = state.target;
+  const mjd = spot.mjd ?? currentMjd();
+  const g = ex.gaia.find(s => String(s.id) === gaiaIdAt(spot));
+  const near = (c) => (ex.click ? Math.hypot(c.x - ex.click.x, c.y - ex.click.y) < 2.5 : c.is_target);
+  const mover = (state.data.candidates || []).find(c => c.type === 'moving' && near(c));
+  // motion to carry the star back to older surveys: Gaia's if it has one, else the target's own
+  const pm = g ? [g.pmra || 0, g.pmdec || 0] : ex.click ? [0, 0] : [tg.pmra || 0, tg.pmdec || 0];
+  return { ra: spot.ra, dec: spot.dec, mjd, pmra: pm[0], pmdec: pm[1], gaiaId: g ? String(g.id) : null,
+    cand: mover ? { ...mover, dir: COMPASS[Math.round((((mover.pa_deg % 360) + 360) % 360) / 45) % 8] } : null,
+    points: ex.phot.map(p => ({ mjd: p.mjd, wavelength: p.wavelength, value: valueOf(p) })) };
+}
+const curious = createCurious($('curiousBox'), { t, ctx: curiousCtx });
 
 // where the measured spectrum sits on the sky (a moving target: where it is at the middle of the visits)
 function typeSpot() {
@@ -1079,6 +1100,7 @@ async function loadType() {
   const seq = ++typeState.seq;
   typeState.res = null;
   drawType();
+  curious.reset();
   const pts = ex.phot || [];
   if (pts.length < 12 || !state.target) return;
   const data = state.data, spot = typeSpot();
