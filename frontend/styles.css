@@ -432,3 +432,6 @@ body.embed .stage { max-height: calc(100vh - 70px); }
 .wlread .mono:first-of-type { font-size: 18px; }
 .maphint { margin-top: 10px; }
 .irsalink { margin-left: auto; }
+/* Aladin: controls we switched off still leave empty dark boxes behind */
+#skymapAladin .aladin-stack-control, #skymapAladin .aladin-simbadPointer-control { display: none !important; }
+#skymapAladin .aladin-tooltip-container, #aladin .aladin-tooltip-container { background: transparent !important; }

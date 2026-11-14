@@ -1194,7 +1194,7 @@ async function updateAladin() {
 function setSurvey() {
   const opt = e4.ctxSurvey.selectedOptions[0];
   try {
-    ex.hips = window.A.imageHiPS(opt.value, { name: opt.textContent });
+    ex.hips = window.A.imageHiPS(opt.value, { name: opt.textContent, successCallback: () => { ex.hipsSlice = null; syncCube(); } });
     ex.aladin.setImageSurvey(ex.hips);
     ex.hipsSlice = null;
     syncCube();
@@ -1436,13 +1436,16 @@ if (new URLSearchParams(location.search).get('compare') === '1') {
 // ------------------------------------------------------------------ SPHEREx all-sky cube in the context view follows the frame's wavelength
 function syncCube() {
   if (!ex.hips || !ex.aladin || !state.data || e4.ctxSurvey.value !== CUBE_URL) return;
-  const fs = state.data.frames;
-  const f = isStack() ? null : fs[state.idx];
-  const um = f && f.wavelength_min ? (f.wavelength_min + f.wavelength_max) / 2 : 2.2;
-  const i = nearestSlice(um);
-  if (ex.hipsSlice === i) return;
-  ex.hipsSlice = i;
-  try { ex.hips.setSliceNumber(i); } catch { /* single-plane survey */ }
+  const f = isStack() ? null : state.data.frames[state.idx];
+  // only a narrow-band frame has a meaningful wavelength; a whole-epoch stack spans 0.75-5 µm
+  const narrow = f && f.wavelength_min && f.wavelength_max && f.wavelength_max - f.wavelength_min <= 0.3;
+  const i = nearestSlice(narrow ? (f.wavelength_min + f.wavelength_max) / 2 : 2.2);
+  clearTimeout(ex.cubeTimer);                         // while blinking, wait until the frame settles
+  ex.cubeTimer = setTimeout(() => {
+    if (ex.hipsSlice === i) return;
+    ex.hipsSlice = i;
+    try { ex.hips.setSliceNumber(i); } catch { /* single-plane survey */ }
+  }, ex.hipsSlice == null ? 0 : 700);
 }
 
 // ------------------------------------------------------------------ IRSA's official spectrophotometry tool

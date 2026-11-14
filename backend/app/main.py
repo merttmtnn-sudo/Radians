@@ -35,6 +35,17 @@ def _client(request: Request) -> str:
 
 
 @app.middleware("http")
+async def _revalidate(request: Request, call_next):
+    """The page and its scripts must be re-checked on every load (cheap with ETags), otherwise
+    browsers keep running an old app.js / styles.css after a deploy."""
+    resp = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.middleware("http")
 async def _rate_limit(request: Request, call_next):
     limit = LIMITS.get(request.url.path)
     if limit:

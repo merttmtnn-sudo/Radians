@@ -1,7 +1,7 @@
 // "Map": the whole sky as SPHEREx sees it (the DR1 all-sky cube from NASA/IPAC IRSA) in Aladin Lite,
 // with a 0.75-5 µm wavelength slider, an automatic wavelength tour, the challenge and Explore
 // targets marked, and click-anywhere-to-blink.
-import { t } from './i18n.js';
+import { t, getLang } from './i18n.js';
 import { wlColor } from './charts.js';
 import { CUBE_URL, CUBE_WL, BLANK, bandOf, nearestSlice, nextSlice } from './cube.js';
 import { TARGETS, EXPLORE } from './facts.js';
@@ -40,7 +40,7 @@ async function initMap() {
       showProjectionControl: false, showFrame: true, showZoomControl: true,
     });
     map.aladin.gotoRaDec(266.4, -28.9);                // the Galactic centre, Milky Way across the middle
-    map.hips = window.A.imageHiPS(CUBE_URL, { name: 'SPHEREx DR1' });
+    map.hips = window.A.imageHiPS(CUBE_URL, { name: 'SPHEREx DR1', successCallback: () => setSlice(map.slice) });
     map.aladin.setImageSurvey(map.hips);
     setSlice(map.slice);
     addMarkers();
@@ -95,17 +95,17 @@ function addMarkers() {
     map.aladin.addCatalog(c);
     return c;
   };
-  mk(t('mapChallenge'), '#ffb347', 16, TARGETS.map(x => ({ ra: x.ra, dec: x.dec, q: x.q, label: x.en.kind })));
+  mk(t('mapChallenge'), '#ffb347', 16, TARGETS.map(x => ({ ra: x.ra, dec: x.dec, q: x.q, label: x.q })));
   // Explore stars: positions come from the resolver, cached by the server
   Promise.all(EXPLORE.map(x => fetch(new URL(`api/resolve?q=${encodeURIComponent(x.q)}`, location.href)).then(r => (r.ok ? r.json() : null)).catch(() => null)))
     .then(rs => {
-      const ok = rs.map((r, k) => (r ? { ra: r.ra, dec: r.dec, q: EXPLORE[k].q, label: EXPLORE[k].en.split(':')[0] } : null)).filter(Boolean);
+      const ok = rs.map((r, k) => (r ? { ra: r.ra, dec: r.dec, q: EXPLORE[k].q, label: EXPLORE[k].q } : null)).filter(Boolean);
       if (ok.length) mk(t('mapExplore'), '#ffffff', 11, ok);
     });
   map.aladin.on('objectClicked', (obj) => {
     if (!obj || !obj.data || !obj.data.q) return;
     map.objectHit = true;
-    showPop(obj.ra, obj.dec, obj.data.q, obj.data.name);
+    showPop(obj.ra, obj.dec, obj.data.q, labelOf(obj.data.q));
   });
 }
 
@@ -122,12 +122,20 @@ function showPop(ra, dec, q, name, at) {
   const pop = $('mapPop');
   const r = $('skymapAladin').getBoundingClientRect();
   const [x, y] = at || (() => { try { return map.aladin.world2pix(ra, dec); } catch { return [r.width / 2, r.height / 2]; } })();
-  $('mapPopTitle').textContent = q ? (name ? `${q.replace('eps Indi B', 'ε Indi B')} · ${name}` : q) : t('mapHere');
+  const nice = q ? q.replace('eps Indi B', 'ε Indi B') : '';
+  $('mapPopTitle').textContent = q ? (name && name !== nice ? (TARGETS.some(x => x.q === q) ? `${nice} · ${name}` : name) : nice) : t('mapHere');
   $('mapPopPos').textContent = `RA ${(+ra).toFixed(4)}°  Dec ${(+dec).toFixed(4)}°`;
   pop.dataset.q = q || `${(+ra).toFixed(5)} ${(+dec).toFixed(5)}`;
   pop.hidden = false;
   pop.style.left = `${Math.min(r.width - pop.offsetWidth - 8, Math.max(8, x + 12))}px`;
   pop.style.top = `${Math.min(r.height - pop.offsetHeight - 8, Math.max(8, y + 12))}px`;
+}
+function labelOf(q) {
+  const l = getLang() === 'tr' ? 'tr' : 'en';
+  const tg = TARGETS.find(x => x.q === q);
+  if (tg) return tg[l].kind;
+  const ex = EXPLORE.find(x => x.q === q);
+  return ex ? ex[l].split(':')[0] : null;
 }
 function hidePop() { $('mapPop').hidden = true; }
 $('mapPopClose').onclick = hidePop;
