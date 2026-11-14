@@ -27,6 +27,9 @@ app.include_router(explorer.hips_router)
 _hits: dict = {}
 _hits_lock = threading.Lock()
 LIMITS = {"/api/frames": config.RATE_FRAMES, "/api/photometry": config.RATE_PHOT}
+# endpoints that ask SIMBAD / Gaia / VizieR / IRSA for a visitor or fit on the server: one budget each
+LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr",
+                                              "/api/curious/motion", "/api/curious/period", "/api/curious/xmatch")})
 
 
 def _client(request: Request) -> str:

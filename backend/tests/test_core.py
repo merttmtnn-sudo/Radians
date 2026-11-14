@@ -326,3 +326,10 @@ def test_frames_with_a_wavelength_window(monkeypatch):
     empty = c.get("/api/frames", params={**q, "wl_min": 2.0, "wl_max": 2.1}).json()
     assert empty["frames"] == [] and "wavelength window" in empty["message"]
     assert c.get("/api/frames", params=q).json()["wl_window"] is None
+
+
+def test_lookup_endpoints_are_rate_limited():
+    from app import main
+    for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr", "/api/curious/motion",
+              "/api/curious/period", "/api/curious/xmatch"):
+        assert main.LIMITS[p] == config.RATE_LOOKUP

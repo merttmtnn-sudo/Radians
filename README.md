@@ -220,10 +220,11 @@ S/N 5 is below the finder's detection threshold (8) on purpose.
 
 ## Sharing one free server
 
-Each visitor may ask for 20 views and 90 spectra a minute (HTTP 429 with `Retry-After` beyond that);
+Each visitor may ask for 20 views and 90 spectra a minute, and 60 a minute of each catalogue / fit lookup
+(crossmatch, coverage, spectral type, the "for the curious" tools) (HTTP 429 with `Retry-After` beyond that);
 at most two new positions are read from IRSA at the same time; IRSA's own `Retry-After` is honoured;
 the cut-out cache is trimmed to 4 GB, oldest first. All four are environment settings
-(`RATE_FRAMES`, `RATE_PHOT`, `MAX_COLD_BUILDS`, `CACHE_MAX_MB`).
+(`RATE_FRAMES`, `RATE_PHOT`, `RATE_LOOKUP`, `MAX_COLD_BUILDS`, `CACHE_MAX_MB`).
 
 ## Limitations
 
