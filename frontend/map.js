@@ -434,7 +434,7 @@ async function loadDeep() {
       matched: 'false', candidates: 'false', job });
     const r = await fetch(new URL(`api/frames?${q}`, location.href));
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    if (!r.ok) throw new Error(data.detail === 'IRSA_UNAVAILABLE' || r.status >= 502 ? t('irsaDown') : data.detail === 'IRSA_FAILED' ? t('irsaFailed') : `HTTP ${r.status}`);
     if (!data.frames || !data.frames.length) throw new Error(t('mapDeepNone'));
     showDeep(data);
   } catch (e) {

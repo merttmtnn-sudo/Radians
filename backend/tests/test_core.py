@@ -255,3 +255,35 @@ def test_live_preview_reports_partial_coadd():
         add(_frame(np.ones((5, 5))))
     p = main._progress["jobdepth"]["preview"]
     assert p["count"] == 3 and p["n"] == 5 and p["image"]
+
+
+def test_sia_falls_back_to_stale_cache_when_irsa_is_down(monkeypatch, tmp_path):
+    import json, os, time as _t
+    from app import archive as ar
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(config, "COLLECTIONS", ["c1"])
+    path = ar._cache_path("sia", "c1:10.00000:20.00000")
+    e = Exposure("o1", 2, "u", 60000.0, 60000.1, 1, 2, 100, "c1")
+    path.write_text(json.dumps([e.__dict__]))
+    old = _t.time() - config.SIA_TTL_S - 100
+    os.utime(path, (old, old))
+    def down(*a, **k):
+        raise ar.ArchiveUnavailable("502")
+    monkeypatch.setattr(ar, "_sia_table", down)
+    assert [x.obs_id for x in ar.query_exposures(10.0, 20.0)] == ["o1"]
+    path.unlink()
+    with pytest.raises(ar.ArchiveUnavailable):
+        ar.query_exposures(10.0, 20.0)
+
+
+def test_sia_retries_on_gateway_errors(monkeypatch):
+    from app import archive as ar
+    calls = []
+    class R:
+        def __init__(self, code): self.status_code, self.content = code, b""
+        def raise_for_status(self): pass
+    monkeypatch.setattr(ar.requests, "get", lambda *a, **k: calls.append(1) or R(502))
+    monkeypatch.setattr(ar.time, "sleep", lambda s: None)
+    with pytest.raises(ar.ArchiveUnavailable):
+        ar._sia_table("c1", 1.0, 2.0, tries=3)
+    assert len(calls) == 3

@@ -41,27 +41,63 @@ def _cache_path(kind, key):
 
 
 
+class ArchiveUnavailable(ConnectionError):
+    """IRSA did not answer (it returns 502 / 503 now and then); nothing cached to fall back on."""
+
+
+def _sia_table(coll, ra, dec, tries=5):
+    """One SIA2 query, straight to IRSA's query URL (no capabilities round trip, which fails on its own when IRSA
+    is busy), retried with back-off on busy / gateway errors and dropped connections."""
+    from astropy.io.votable import parse_single_table
+    import io
+    last = None
+    for attempt in range(tries):
+        try:
+            r = requests.get(config.IRSA_SIA, params={"POS": f"CIRCLE {ra:.6f} {dec:.6f} 0.0002", "COLLECTION": coll},
+                             timeout=60)
+            if r.status_code in (429, 500, 502, 503, 504):
+                raise requests.HTTPError(f"HTTP {r.status_code}")
+            r.raise_for_status()
+            return parse_single_table(io.BytesIO(r.content)).to_table(use_names_over_ids=True)
+        except (requests.RequestException, ValueError) as e:
+            last = e
+            if attempt < tries - 1:
+                time.sleep(min(8.0, 1.0 * 2 ** attempt))
+    raise ArchiveUnavailable(f"IRSA SIA ({coll}): {last}")
+
+
+def _rows(t, coll):
+    rows = []
+    if len(t) == 0 or "access_url" not in t.colnames:
+        return rows
+    for row in t:
+        if "dataproduct_subtype" in t.colnames and str(row["dataproduct_subtype"]) != "science":
+            continue
+        m = re.search(r"D(\d)", str(row["energy_bandpassname"]))
+        rows.append(Exposure(
+            obs_id=str(row["obs_id"]), detector=int(m.group(1)) if m else 0, url=str(row["access_url"]),
+            mjd_start=float(row["t_min"]), mjd_end=float(row["t_max"]),
+            wl_min=float(row["em_min"]) * 1e6, wl_max=float(row["em_max"]) * 1e6,
+            exptime=float(row["t_exptime"]), collection=coll))
+    return rows
+
+
 def query_exposures(ra: float, dec: float) -> list[Exposure]:
     out: list[Exposure] = []
     for coll in config.COLLECTIONS:
         key = f"{coll}:{ra:.5f}:{dec:.5f}"
         path = _cache_path("sia", key)
-        if path.exists() and time.time() - path.stat().st_mtime < config.SIA_TTL_S:
+        fresh = path.exists() and time.time() - path.stat().st_mtime < config.SIA_TTL_S
+        if fresh:
             out += [Exposure(**e) for e in json.loads(path.read_text())]
             continue
-        import pyvo
-        t = pyvo.dal.SIA2Service(config.IRSA_SIA).search(
-            pos=(ra, dec, 0.0002), collection=coll).to_table()
-        rows = []
-        for row in t:
-            if str(row["dataproduct_subtype"]) != "science":
+        try:
+            rows = _rows(_sia_table(coll, ra, dec), coll)
+        except ArchiveUnavailable:
+            if path.exists():                          # IRSA down: an older list is far better than nothing
+                out += [Exposure(**e) for e in json.loads(path.read_text())]
                 continue
-            m = re.search(r"D(\d)", str(row["energy_bandpassname"]))
-            rows.append(Exposure(
-                obs_id=str(row["obs_id"]), detector=int(m.group(1)) if m else 0, url=str(row["access_url"]),
-                mjd_start=float(row["t_min"]), mjd_end=float(row["t_max"]),
-                wl_min=float(row["em_min"]) * 1e6, wl_max=float(row["em_max"]) * 1e6,
-                exptime=float(row["t_exptime"]), collection=coll))
+            raise
         config.atomic_write(path, json.dumps([asdict(e) for e in rows]))
         out += rows
     # the same exposure can appear in two releases: keep the newest collection listed first

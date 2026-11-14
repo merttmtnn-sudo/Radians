@@ -33,9 +33,26 @@ async function api(path, params, signal) {
   for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined) url.searchParams.set(k, v);
   const r = await fetch(url, { signal });
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.detail || `${r.status} ${r.statusText}`);
+  if (!r.ok) {
+    const e = new Error(errorText(body.detail, r.status));
+    e.code = body.detail === 'IRSA_UNAVAILABLE' || (!body.detail && r.status >= 502) ? 'unavailable' : body.detail;
+    throw e;
+  }
   return body;
 }
+
+/** Readable message for an API error: never a raw HTML page from a proxy or the archive. */
+function errorText(detail, status) {
+  if (detail === 'IRSA_UNAVAILABLE') return t('irsaDown');
+  if (detail === 'IRSA_FAILED') return t('irsaFailed');
+  if (typeof detail === 'string' && detail.length < 300 && !/<[a-z!]/i.test(detail)) return detail;
+  if (status >= 502) return t('serverDown');
+  return `${t('errorGeneric')} (${status})`;
+}
+const sleep = (ms, signal) => new Promise((res, rej) => {
+  const id = setTimeout(res, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(id); rej(new DOMException('aborted', 'AbortError')); }, { once: true });
+});
 
 function setLoading(on, msg = '', sub = '') {
   els.loading.hidden = !on;
@@ -148,11 +165,26 @@ async function run(opts) {
         }
       } catch { /* progress is cosmetic */ }
     }, 1000);
-    const data = await api('api/frames', {
+    const query = {
       ra: target.ra.toFixed(6), dec: target.dec.toFixed(6), fov: opts.fov, mode: opts.mode,
       pmra: target.pmra, pmdec: target.pmdec, detectors: [...state.dets].sort().join(','), job,
       matched: els.wlMatch.checked,
-    }, ctl.signal);
+    };
+    // NASA's archive has short outages: wait and ask again a few times before giving up
+    let data;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        data = await api('api/frames', query, ctl.signal);
+        break;
+      } catch (e) {
+        if (e.code !== 'unavailable' || attempt >= 4) throw e;
+        for (let s = 20; s > 0; s--) {
+          setLoading(true, t('irsaRetry'), t('irsaRetryIn', { s, n: attempt, max: 3 }));
+          await sleep(1000, ctl.signal);
+        }
+        setLoading(true, t('reading'));
+      }
+    }
     if (!data.frames || !data.frames.length) {
       state.data = null;
       els.empty.hidden = false;

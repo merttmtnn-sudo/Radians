@@ -100,8 +100,12 @@ def about(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, 
 def _exposures(ra, dec):
     try:
         return archive.query_exposures(ra, dec)
+    except archive.ArchiveUnavailable as e:
+        print("IRSA unavailable:", e)
+        raise HTTPException(503, "IRSA_UNAVAILABLE", headers={"Retry-After": "60"})
     except Exception as e:
-        raise HTTPException(502, f"IRSA archive query failed: {e}")
+        print("IRSA query failed:", repr(e)[:300])
+        raise HTTPException(502, "IRSA_FAILED")
 
 
 @app.get("/api/observations")
