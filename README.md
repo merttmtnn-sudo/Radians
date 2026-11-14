@@ -84,6 +84,10 @@ data centre seconds; the page shows how many exposures have been read. Everythin
 | `GET /api/sso?ra=&dec=&radius=&mjd=` | known asteroids and comets in the field at each date (IMCCE SkyBoT) |
 | `GET /api/neossat?ra=&dec=&radius=` | archived NEOSSat images of the area (CSA, via CADC) |
 
+## Team
+
+Mert Metin · Efe Gönderen · Bora Hısım · Emre Bozkaya
+
 ## Data and credits
 
 - **SPHEREx** spectral images (DR1): NASA/IPAC Infrared Science Archive (IRSA). Photometry follows the
