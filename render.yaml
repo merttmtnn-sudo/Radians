@@ -1,0 +1,14 @@
+# Render Blueprint: one free Docker web service built from the Dockerfile in this repo.
+services:
+  - type: web
+    name: radians
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: MAX_WORKERS          # 512 MB free instance: fewer parallel reads
+        value: "16"
+      - key: WARM_ON_START
+        value: "1"
