@@ -127,3 +127,19 @@ def test_cached_cutout_reused_when_it_covers_the_box():
     assert stack._covers(big, 10.0, 0.0, 15)               # smaller field of view: reuse
     assert not stack._covers(big, 10.0, 0.0, 30)           # larger: must download
     assert not stack._covers(big, 10.0, 0.05, 15)          # moved 30 px: must download
+
+
+def test_measure_recovers_flux_over_background():
+    n = 31
+    img = np.full((n, n), 5.0, dtype=np.float32)            # flat background, MJy/sr
+    img[15, 15] += 100.0                                     # point source in one pixel
+    var = np.full_like(img, 0.01)
+    flg = np.zeros((n, n), dtype=np.int64)
+    m = stack.measure(img, var, flg, 15, 15)
+    to_ujy = (config.PIXEL_SCALE / 206264.806) ** 2 * 1e12
+    assert m["background"] == pytest.approx(5.0)
+    assert m["flux_ujy"] == pytest.approx(100.0 * to_ujy, rel=1e-4)
+    assert not m["flagged"] and not m["saturated"]
+    # a bad pixel inside the aperture marks the measurement as flagged
+    flg[15, 16] = 1 << 10                                  # HOT
+    assert stack.measure(img, var, flg, 15, 15)["flagged"]

@@ -28,6 +28,7 @@ class Frame:
     wavelength: float | None = None
     bandwidth: float | None = None
     phot: dict = field(default_factory=dict)
+    header: object = None          # detector WCS header of the cutout (for wavelengths elsewhere)
 
 
 def output_wcs(ra, dec, n):
@@ -116,6 +117,71 @@ def _aperture(img, var, flg, px, py, r=config.APERTURE_PX):
     }
 
 
+SATURATION_MASK = sum(1 << b for b, nm in config.FLAG_BITS.items() if nm in ("OVERFLOW", "NONLINEAR", "BLOOM"))
+R_BG_IN, R_BG_OUT = 5.0, 8.0          # px, local background annulus
+R_WING_IN, R_WING_OUT = 2.5, 4.5      # px, PSF wings: still measurable when the core saturates
+
+
+def measure(img, var, flg, px, py, r=config.APERTURE_PX):
+    """Aperture photometry with a local sigma-clipped annulus background (as in the IRSA SPHEREx
+    notebooks), plus the flux in the PSF wings, which tracks the brightness of saturated stars."""
+    n = img.shape[0]
+    yy, xx = np.mgrid[0:n, 0:n]
+    r2 = (xx - px) ** 2 + (yy - py) ** 2
+    fin = np.isfinite(img)
+    ap = r2 <= r * r
+    if not ap.any():
+        return {}
+    ann = (r2 >= R_BG_IN ** 2) & (r2 <= R_BG_OUT ** 2) & fin & ((flg & config.BAD_MASK) == 0)
+    bg = 0.0
+    if ann.sum() >= 8:
+        _, bg, _ = sigma_clipped_stats(img[ann], sigma=3, maxiters=5)
+        bg = float(bg)
+    to_ujy = (config.PIXEL_SCALE / 206264.806) ** 2 * 1e12        # MJy/sr * pixel -> microJansky
+    good = ap & fin
+    ap_flags = int(np.bitwise_or.reduce(flg[ap]))
+    out = {"flags": ap_flags, "background": bg,
+           "saturated": bool(ap_flags & SATURATION_MASK) or bool(good.sum() < ap.sum())}
+    if good.any():
+        out.update({
+            "flux_ujy": float((img[good].sum() - bg * good.sum()) * to_ujy),
+            "err_ujy": float(np.sqrt(np.nansum(var[good])) * to_ujy),
+            "flagged": bool((ap_flags & config.BAD_MASK) != 0 or good.sum() < ap.sum()),
+        })
+    else:
+        out.update({"flux_ujy": None, "err_ujy": None, "flagged": True})
+    wing = (r2 >= R_WING_IN ** 2) & (r2 <= R_WING_OUT ** 2) & fin & ((flg & config.BAD_MASK) == 0)
+    if wing.sum() >= 6:
+        out["wing_ujy"] = float((img[wing].sum() - bg * wing.sum()) * to_ujy * (np.pi * (R_WING_OUT ** 2 - R_WING_IN ** 2) / wing.sum()))
+    return out
+
+
+def wavelength_for(f: "Frame", ra, dec):
+    """Wavelength SPHEREx saw at sky position (ra, dec) in this exposure (linear-variable filter)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        dx, dy = WCS(f.header).all_world2pix([[ra, dec]], 0, quiet=True)[0]
+        try:
+            tab = fitsrange.wave_table(f.exp.url, f.exp.detector)
+            return fitsrange.wavelength_at(f.header, tab, float(dx), float(dy))
+        except Exception:
+            return 0.5 * (f.exp.wl_min + f.exp.wl_max), None
+
+
+def photometry_at(frames: list["Frame"], wout, x, y):
+    """Per-exposure brightness and wavelength at a fixed grid position: an on-the-fly spectrum."""
+    ra, dec = (float(v) for v in wout.wcs_pix2world([[x, y]], 0)[0])
+    pts = []
+    for f in frames:
+        m = measure(f.image, f.variance, f.flags, x, y)
+        if not m:
+            continue
+        lam, bw = wavelength_for(f, ra, dec)
+        pts.append({"obs_id": f.exp.obs_id, "detector": f.exp.detector, "mjd": f.exp.mjd, "date": mjd_iso(f.exp.mjd),
+                    "wavelength": lam, "bandwidth": bw, "x": float(x), "y": float(y), **m})
+    return {"x": float(x), "y": float(y), "ra": ra, "dec": dec, "points": sorted(pts, key=lambda p: p["mjd"])}
+
+
 def build_frame(exp: Exposure, ra, dec, n, wout, target) -> Frame | None:
     half = int(math.ceil(n / 2 * math.sqrt(2))) + 2
     cut = _cutout_cached(exp, ra, dec, half)
@@ -134,7 +200,7 @@ def build_frame(exp: Exposure, ra, dec, n, wout, target) -> Frame | None:
     if np.isfinite(img).sum() < 0.2 * n * n:
         return None
     img = (img - _background(img)).astype(np.float32)
-    f = Frame(exp, img, var.astype(np.float32), flg)
+    f = Frame(exp, img, var.astype(np.float32), flg, header=cut.header)
 
     # where is the (moving) target on the detector and on our grid at this exposure?
     tra, tdec = target(exp.mjd)
@@ -147,7 +213,7 @@ def build_frame(exp: Exposure, ra, dec, n, wout, target) -> Frame | None:
             f.wavelength, f.bandwidth = fitsrange.wavelength_at(cut.header, tab, float(dx), float(dy))
         except Exception:
             f.wavelength = 0.5 * (exp.wl_min + exp.wl_max)
-    f.phot = _aperture(img, f.variance, flg, gx, gy) or {}
+    f.phot = measure(img, f.variance, flg, gx, gy)
     f.phot.update({"x": float(gx), "y": float(gy)})
     return f
 

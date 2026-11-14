@@ -3,7 +3,8 @@
 """
 from __future__ import annotations
 
-import math
+import threading
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -12,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import archive, config, detect, stack
+from . import archive, config, detect, external, stack
 
 app = FastAPI(title="Radians", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
@@ -50,6 +51,42 @@ def observations(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., g
         for e, k in zip(exps, ep)]}
 
 
+# The last few prepared frame sets stay in memory, so clicking a star for its spectrum or
+# switching views does not re-read hundreds of exposures.
+_built: OrderedDict = OrderedDict()
+_built_lock = threading.Lock()
+
+
+def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures):
+    fov = min(max(fov, config.MIN_FOV), config.MAX_FOV)
+    n = int(round(fov / config.PIXEL_SCALE)) | 1                     # odd -> target on a pixel centre
+    dets = tuple(sorted({int(d) for d in detectors.split(",") if d.strip().isdigit()}))
+    key = (round(ra, 6), round(dec, 6), n, dets, pmra, pmdec, ref_epoch, max_exposures)
+    with _built_lock:
+        if key in _built:
+            _built.move_to_end(key)
+            return _built[key]
+    exps = [e for e in _exposures(ra, dec) if e.detector in dets]
+    if len(exps) > max_exposures:                                   # thin evenly in time
+        idx = np.linspace(0, len(exps) - 1, max_exposures).round().astype(int)
+        exps = [exps[i] for i in sorted(set(idx))]
+    if not exps:
+        return None
+    # centre the grid on the target's mean position during the SPHEREx observations
+    mean_mjd = float(np.mean([e.mjd for e in exps]))
+    cra, cdec = stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mean_mjd)
+    target = lambda mjd: stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mjd)  # noqa: E731
+    frs = stack.build_frames(exps, cra, cdec, n, target)
+    if not frs:
+        raise HTTPException(502, "could not read any SPHEREx exposure for this position")
+    built = {"frs": frs, "n": n, "ra": cra, "dec": cdec, "w": stack.output_wcs(cra, cdec, n)}
+    with _built_lock:
+        _built[key] = built
+        while len(_built) > 6:
+            _built.popitem(last=False)
+    return built
+
+
 @app.get("/api/frames")
 def frames(
     ra: float = Query(..., ge=0, lt=360),
@@ -63,26 +100,12 @@ def frames(
     max_exposures: int = Query(400, ge=1, le=2000),
     candidates: bool = Query(True, description="run the moving / variable / transient finder"),
 ):
-    fov = min(max(fov, config.MIN_FOV), config.MAX_FOV)
-    n = int(round(fov / config.PIXEL_SCALE)) | 1                     # odd -> target on a pixel centre
-    dets = {int(d) for d in detectors.split(",") if d.strip().isdigit()}
-    exps = [e for e in _exposures(ra, dec) if e.detector in dets]
-    if len(exps) > max_exposures:                                   # thin evenly in time
-        idx = np.linspace(0, len(exps) - 1, max_exposures).round().astype(int)
-        exps = [exps[i] for i in sorted(set(idx))]
-    if not exps:
+    b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures)
+    if b is None:
         return {"grid": None, "frames": [], "exposures": [], "message": "SPHEREx has not observed this position yet."}
-
-    # centre the grid on the target's mean position during the SPHEREx observations
-    mean_mjd = float(np.mean([e.mjd for e in exps]))
-    cra, cdec = stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mean_mjd)
-    target = lambda mjd: stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mjd)
-    frs = stack.build_frames(exps, cra, cdec, n, target)
-    if not frs:
-        raise HTTPException(502, "could not read any SPHEREx exposure for this position")
+    frs, n, w = b["frs"], b["n"], b["w"]
     raw = {m: stack.group_raw(frs, m) for m in {mode, "epoch", "epoch_detector"} if m == mode or candidates}
     out_frames = stack.encode(raw[mode])
-    w = stack.output_wcs(cra, cdec, n)
     cands = []
     if candidates:
         try:
@@ -93,13 +116,65 @@ def frames(
         "obs_id": f.exp.obs_id, "detector": f.exp.detector, "mjd": f.exp.mjd, "date": stack.mjd_iso(f.exp.mjd),
         "wavelength": f.wavelength, "bandwidth": f.bandwidth, **f.phot} for f in frs), key=lambda p: p["mjd"])
     return {
-        "grid": {"n": n, "pixel_scale": config.PIXEL_SCALE, "ra": cra, "dec": cdec,
+        "grid": {"n": n, "pixel_scale": config.PIXEL_SCALE, "ra": b["ra"], "dec": b["dec"],
                  "fov": n * config.PIXEL_SCALE, "wcs": dict(w.to_header())},
         "query": {"ra": ra, "dec": dec, "pmra": pmra, "pmdec": pmdec, "ref_epoch": ref_epoch, "mode": mode},
-        "flag_bits": {str(b): name for b, name in config.FLAG_BITS.items()}, "bad_mask": config.BAD_MASK,
+        "flag_bits": {str(bit): name for bit, name in config.FLAG_BITS.items()}, "bad_mask": config.BAD_MASK,
         "frames": out_frames, "exposures": phot, "n_exposures_read": len(frs),
         "candidates": cands, "detectors": config.DETECTORS,
     }
+
+
+@app.get("/api/photometry")
+def photometry(
+    x: float = Query(..., description="grid pixel (0-based, as in /api/frames)"),
+    y: float = Query(...),
+    ra: float = Query(..., ge=0, lt=360),
+    dec: float = Query(..., ge=-90, le=90),
+    fov: float = Query(config.DEFAULT_FOV),
+    detectors: str = Query("1,2,3,4,5,6"),
+    pmra: float | None = Query(None),
+    pmdec: float | None = Query(None),
+    ref_epoch: float = Query(2000.0),
+    max_exposures: int = Query(400, ge=1, le=2000),
+):
+    """Spectrum and light curve of any pixel of a /api/frames view (same parameters)."""
+    b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures)
+    if b is None:
+        raise HTTPException(404, "no SPHEREx data here")
+    if not (0 <= x < b["n"] and 0 <= y < b["n"]):
+        raise HTTPException(400, "pixel outside the view")
+    return stack.photometry_at(b["frs"], b["w"], x, y)
+
+
+def _external(fn, *args):
+    try:
+        return fn(*args)
+    except Exception as e:
+        raise HTTPException(502, f"service unavailable: {e}")
+
+
+@app.get("/api/gaia")
+def gaia(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+         radius: float = Query(0.06, gt=0, le=0.5), gmax: float = Query(19.0, le=21)):
+    """Gaia DR3 sources (ESA) with proper motions, epoch 2016.0."""
+    return _external(external.gaia, ra, dec, radius, gmax)
+
+
+@app.get("/api/sso")
+def sso(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+        radius: float = Query(300, gt=0, le=3600, description="arcsec"),
+        mjd: str = Query(..., description="comma-separated MJDs")):
+    """Known asteroids and comets in the field at the given times (IMCCE SkyBoT)."""
+    mjds = [float(m) for m in mjd.split(",") if m.strip()]
+    return _external(external.skybot, ra, dec, radius, mjds)
+
+
+@app.get("/api/neossat")
+def neossat(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+            radius: float = Query(0.25, gt=0, le=2)):
+    """NEOSSat (Canadian Space Agency) observations of this position, from the CADC archive."""
+    return _external(external.neossat, ra, dec, radius)
 
 
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"

@@ -108,6 +108,42 @@
       </label>
     </div>
     <ol class="timeline" id="timeline"></ol>
+
+    <section class="analysis" id="analysis" hidden>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="spectrum" aria-selected="true" data-i18n="tabSpectrum"></button>
+        <button type="button" role="tab" data-tab="lightcurve" aria-selected="false" data-i18n="tabLight"></button>
+        <button type="button" role="tab" data-tab="table" aria-selected="false" data-i18n="tabTable"></button>
+      </div>
+      <div class="anabar">
+        <span id="photSource" class="small"></span>
+        <label class="small"><span data-i18n="photMode"></span>
+          <select id="photMode">
+            <option value="aperture" data-i18n="photAperture"></option>
+            <option value="wings" data-i18n="photWings"></option>
+          </select>
+        </label>
+        <label class="small check"><input id="photFlagged" type="checkbox" checked> <span data-i18n="photShowFlagged"></span></label>
+      </div>
+      <div id="chart"></div>
+      <p class="muted small" id="chartNote"></p>
+    </section>
+
+    <details class="context" id="ctx">
+      <summary data-i18n="context"></summary>
+      <div class="ctxbar">
+        <select id="ctxSurvey" aria-label="Survey">
+          <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/2MASS/Color">2MASS (J, H, K)</option>
+          <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/AllWISE/RGB-W4-W2-W1">AllWISE (W1, W2, W4)</option>
+          <option value="https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube">SPHEREx DR1</option>
+          <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/DSS2/color">DSS2 (optical)</option>
+        </select>
+        <label class="small check"><input id="ctxGaia" type="checkbox" checked> Gaia DR3</label>
+        <label class="small check"><input id="ctxCatwise" type="checkbox"> CatWISE2020</label>
+      </div>
+      <div id="aladin"></div>
+      <p class="muted small" data-i18n="contextHelp"></p>
+    </details>
   </section>
 
   <aside class="panel">
@@ -116,6 +152,13 @@
       <label class="row check"><input id="showCands" type="checkbox" checked> <span data-i18n="showCands"></span></label>
       <ul class="cands" id="cands"></ul>
       <p class="muted small" data-i18n="candHelp"></p>
+    </section>
+
+    <section>
+      <h2 data-i18n="overlays"></h2>
+      <label class="row check"><input id="ovGaia" type="checkbox" checked> <span class="ovkey gaia"></span><span data-i18n="ovGaia"></span></label>
+      <label class="row check"><input id="ovSso" type="checkbox" checked> <span class="ovkey sso"></span><span data-i18n="ovSso"></span></label>
+      <p class="muted small" id="ovStatus"></p>
     </section>
 
     <section>
@@ -151,6 +194,12 @@
     <section>
       <h2 data-i18n="cursor"></h2>
       <dl id="cursor" class="kv"><dt>RA, Dec</dt><dd>—</dd></dl>
+    </section>
+
+    <section>
+      <h2 data-i18n="neossat"></h2>
+      <p class="muted small" data-i18n="neossatHelp"></p>
+      <ul id="neossat" class="neolist"></ul>
     </section>
 
     <section>

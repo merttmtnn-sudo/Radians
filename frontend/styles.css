@@ -125,3 +125,39 @@ body.embed .stage { max-height: calc(100vh - 70px); }
 details { margin-top: 8px; font-size: 13px; }
 summary { cursor: pointer; color: var(--muted); }
 .explist { margin: 6px 0 0; padding-left: 20px; max-height: 180px; overflow: auto; font-size: 11px; font-family: ui-monospace, Consolas, monospace; color: var(--muted); }
+
+/* ---------------------------------------------------------------- phase 4: analysis, overlays, context */
+.analysis, .context { margin-top: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 6px 12px; color: var(--muted); }
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.anabar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 8px; }
+.anabar #photSource { flex: 1 1 240px; }
+.anabar label { display: flex; align-items: center; gap: 6px; }
+.anabar select { padding: 4px 8px; }
+.chart { position: relative; }
+.chart svg { display: block; overflow: visible; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .axis { stroke: #3a4566; stroke-width: 1; }
+.chart .ref { stroke: var(--muted); stroke-dasharray: 4 4; stroke-width: 1; }
+.chart .tick { fill: var(--muted); font-size: 11px; }
+.chart .label { fill: var(--muted); font-size: 12px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text); margin-bottom: 6px; }
+.legend span, .charttip div { display: inline-flex; align-items: center; gap: 6px; }
+.legend i, .charttip i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.charttip { position: absolute; pointer-events: none; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 9px; font-size: 12px; line-height: 1.45; min-width: 160px; box-shadow: 0 6px 20px #0008; z-index: 3; }
+.charttip div { display: flex; }
+.datatable { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+#chart:has(.datatable) { max-height: 320px; overflow: auto; }
+.datatable th { position: sticky; top: 0; background: var(--panel); text-align: left; color: var(--muted); font-weight: 600; }
+.datatable th, .datatable td { padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.context summary { cursor: pointer; font-weight: 600; }
+.ctxbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 10px 0; }
+.ctxbar label { display: flex; align-items: center; gap: 6px; }
+#aladin { width: 100%; height: 420px; border-radius: 8px; overflow: hidden; background: #000; }
+.ovkey { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; }
+.ovkey.gaia { border: 1.5px solid #7ee0c3; border-radius: 50%; }
+.ovkey.sso { background: linear-gradient(45deg, transparent 43%, #b9a7ff 43% 57%, transparent 57%), linear-gradient(-45deg, transparent 43%, #b9a7ff 43% 57%, transparent 57%); }
+.neolist { list-style: none; padding: 0; margin: 6px 0 0; display: flex; flex-direction: column; gap: 3px; max-height: 200px; overflow: auto; }
+@media (max-width: 640px) { #aladin { height: 300px; } .tabs button { padding: 6px 8px; } }

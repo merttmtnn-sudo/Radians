@@ -29,7 +29,7 @@ one environment variable (`SPHEREX_COLLECTIONS=spherex_dr2,spherex_dr1`).
 | 1 | Core backend: search, cutouts, reprojection, epochs, co-add, photometry, API | ✅ |
 | 2 | Blink player: input, playback, stretch, dates, shareable URLs | ✅ |
 | 3 | Discovery tools: difference/stack views, detector selection, flag summary, candidate finder, EN/TR | ✅ |
-| 4 | Extras: on-the-fly spectra, light curves, Gaia / WISE overlays with Aladin Lite | 🚧 |
+| 4 | Extras: on-the-fly spectra, light curves, Gaia DR3 / SkyBoT overlays, NEOSSat archive, Aladin Lite context | ✅ |
 | 5 | Testing on challenge targets, deployment (Hugging Face Space), demo | ⏳ |
 
 ## Run locally
@@ -48,12 +48,23 @@ Tests: `cd backend && python -m pytest -q tests`
 |---|---|
 | `GET /api/resolve?q=Barnard's Star` | name or coordinates → RA/Dec (+ proper motion) |
 | `GET /api/observations?ra=&dec=` | SPHEREx exposures covering a position |
-| `GET /api/frames?ra=&dec=&fov=300&mode=epoch` | aligned frames (`epoch`, `epoch_detector`, `exposure`) + photometry |
+| `GET /api/frames?ra=&dec=&fov=300&mode=epoch` | aligned frames (`epoch`, `epoch_detector`, `exposure`) + photometry + candidates |
+| `GET /api/photometry?ra=&dec=&fov=&x=&y=` | per-exposure brightness and wavelength at one pixel: an on-the-fly spectrum |
+| `GET /api/gaia?ra=&dec=&radius=` | Gaia DR3 stars (ESA archive), with proper motions |
+| `GET /api/sso?ra=&dec=&radius=&mjd=` | known asteroids and comets in the field at each date (IMCCE SkyBoT) |
+| `GET /api/neossat?ra=&dec=&radius=` | archived NEOSSat images of the area (CSA, via CADC) |
 
 ## Data and credits
 
-SPHEREx data from NASA/IPAC Infrared Science Archive (IRSA). Name resolution by CDS Sesame
-(Strasbourg). Built with Astropy, PyVO, NumPy, SciPy and FastAPI.
+- **SPHEREx** spectral images (DR1): NASA/IPAC Infrared Science Archive (IRSA). Photometry follows the
+  IRSA SPHEREx tutorial notebooks (annulus background, flag bits, wavelength from the WCS-WAVE table).
+- **2MASS, AllWISE, DSS2 and SPHEREx HiPS** sky maps for the Aladin Lite context view: served by IRSA.
+- **Gaia DR3**: ESA Gaia archive (TAP). **CatWISE2020**: VizieR. Gaia stars are moved to each frame's
+  date with their proper motions, so fast movers line up with the SPHEREx image.
+- **Known Solar System objects**: IMCCE SkyBoT.
+- **NEOSSat** (Canadian Space Agency) archive search: CADC.
+- Name resolution by CDS Sesame (Strasbourg); sky viewer: Aladin Lite (CDS).
+- Built with Astropy, PyVO, NumPy, SciPy and FastAPI; the browser side has no build step or framework.
 
 ## Finding things
 
@@ -79,3 +90,16 @@ SPHEREx data from NASA/IPAC Infrared Science Archive (IRSA). Name resolution by 
 - Hover the image for RA/Dec, pixel value (MJy/sr) and the SPHEREx contamination flags of that pixel.
 - Every view is a URL: `/?q=RW%20Aur&fov=240&frame=1&cmap=heat&view=diff_median&det=4,5,6&lang=tr`. Add `&embed=1` for a
   chrome-free player to put in an `<iframe>`.
+
+## Spectra, light curves and context (phase 4)
+
+- **Spectrum**: SPHEREx's linear-variable filters see every position at a different wavelength in each
+  exposure, so the brightness of one pixel across all exposures *is* a 0.75–5 µm spectrum. The target's
+  spectrum appears below the player; click any star to measure it instead. Colours mark epochs.
+- **Light curve**: each detector divided by its own median; real variability moves all detectors together.
+- **Saturated stars** (Barnard's Star, R Dra) switch automatically to *PSF wings* photometry: the flux in a
+  ring 2.5–4.5 px from the core, which still follows the star's brightness.
+- **Overlays**: Gaia DR3 circles (propagated to the frame date; a line shows 5 years of motion for stars
+  faster than 0.15″/yr) and SkyBoT crosses for known asteroids at that exact time.
+- **NEOSSat**: links to archived images of the field from Canada's asteroid-hunting microsatellite.
+- **Wider context**: Aladin Lite with 2MASS / AllWISE / SPHEREx / DSS2 maps, the Radians field outlined.

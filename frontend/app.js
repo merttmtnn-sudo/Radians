@@ -1,8 +1,9 @@
 import {
   decodeB64, percentiles, stretchValue, stretchSigned, lut, lutDiverging, pixToSky, formatRA, formatDec,
-  flagNames, parseState, computeView, isDiffView,
+  flagNames, parseState, computeView, isDiffView, skyToPix, stackImage,
 } from './sky.js';
 import { t, setLang, getLang } from './i18n.js';
+import { scatterChart, chartTable, SERIES } from './charts.js';
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
@@ -159,6 +160,7 @@ function load(data, startIdx) {
   els.hudScale.textContent = `${(data.grid.fov / 60).toFixed(1)}′ × ${(data.grid.fov / 60).toFixed(1)}′`;
   applyView(startIdx);
   renderCandidates();
+  onLoaded();
 }
 
 // ------------------------------------------------------------------ views
@@ -238,6 +240,7 @@ function drawOverlay() {
   ctx.clearRect(0, 0, W, W);
   if (!state.data) return;
   if (els.cross.checked && state.target) drawTargetMarker(ctx);
+  drawExtras(ctx);
   if (els.showCands.checked) for (const [i, c] of (state.data.candidates || []).entries()) drawCandidate(ctx, c, i === state.selected);
 }
 
@@ -488,13 +491,14 @@ els.overlay.addEventListener('mousemove', (e) => {
     [t('kPixel'), `${x}, ${y}`],
     [t('kValue'), Number.isFinite(v) ? `${v.toFixed(4)} MJy/sr` : t('noDataPx')],
     [t('kFlags'), fl],
+    ...extraCursorRows(x, y),
   ]);
 });
 
 // click a candidate on the image to select it
 els.overlay.addEventListener('click', (e) => {
-  const cands = state.data?.candidates || [];
-  if (!cands.length) return;
+  if (!state.data) return;
+  const cands = state.data.candidates || [];
   const rect = els.overlay.getBoundingClientRect();
   const n = state.data.grid.n;
   const x = (e.clientX - rect.left) / rect.width * n - 0.5;
@@ -502,6 +506,7 @@ els.overlay.addEventListener('click', (e) => {
   let best = null, bd = 3;
   cands.forEach((c, i) => { const d = Math.hypot(c.x - x, c.y - y); if (d < bd) { best = i; bd = d; } });
   if (best !== null) { state.selected = best; renderCandidates(); drawOverlay(); }
+  else photAt(x, y);
 });
 
 // ------------------------------------------------------------------ URL state
@@ -545,7 +550,7 @@ function applyLang(l) {
   setLang(l);
   try { localStorage.setItem('radians-lang', getLang()); } catch { /* private mode */ }
   for (const b of document.querySelectorAll('[data-lang]')) b.setAttribute('aria-pressed', String(b.dataset.lang === getLang()));
-  if (state.data) { applyView(state.idx); renderCandidates(); syncUrl(true); }
+  if (state.data) { applyView(state.idx); renderCandidates(); renderAnalysis(); renderNeossat(); syncUrl(true); }
 }
 for (const b of document.querySelectorAll('[data-lang]')) b.onclick = () => applyLang(b.dataset.lang);
 
@@ -583,8 +588,324 @@ els.examples.onclick = (e) => {
 };
 window.addEventListener('popstate', fromUrl);
 
+
+// ================================================================== phase 4
+// spectra and light curves, Gaia / SkyBoT overlays, NEOSSat archive, Aladin Lite context
+const ex = { phot: null, click: null, tab: 'spectrum', gaia: [], sso: [], neo: null, deep: null, photAbort: null, aladin: null };
+const e4 = Object.fromEntries(['analysis', 'photSource', 'photMode', 'photFlagged', 'chart', 'chartNote', 'ovGaia', 'ovSso',
+  'ovStatus', 'neossat', 'ctx', 'ctxSurvey', 'ctxGaia', 'ctxCatwise', 'aladin'].map(id => [id, $(id)]));
+const MJD_J2016 = 57388.5;
+const DET_RANGE = { 1: '0.75–1.09', 2: '1.10–1.62', 3: '1.63–2.42', 4: '2.42–3.82', 5: '3.83–4.41', 6: '4.42–5.00' };
+const mjdDate = (m) => new Date((m - 40587) * 86400000).toISOString().slice(0, 10);
+
+function gridParams() {
+  const tg = state.target;
+  return { ra: tg.ra.toFixed(6), dec: tg.dec.toFixed(6), fov: els.fov.value, pmra: tg.pmra, pmdec: tg.pmdec,
+    detectors: [...state.dets].sort().join(',') };
+}
+
+function onLoaded() {
+  ex.deep = stackImage(state.images, state.variances);
+  setPhot(state.data.exposures || [], null);
+  loadCatalogues();
+  loadNeossat();
+  if (e4.ctx.open) updateAladin();
+}
+
+// ------------------------------------------------------------------ photometry
+function setPhot(points, click) {
+  ex.phot = points;
+  ex.click = click;
+  const sat = points.filter(p => p.saturated).length;
+  e4.photMode.value = sat > points.length / 2 && points.some(p => Number.isFinite(p.wing_ujy)) ? 'wings' : 'aperture';
+  renderAnalysis();
+}
+
+async function photAt(x, y) {
+  // snap to the brightest pixel within 1.5 px of the click in the deep stack
+  const n = state.data.grid.n;
+  let bx = Math.round(x), by = Math.round(y), bv = -Infinity;
+  for (let yy = Math.round(y) - 1; yy <= Math.round(y) + 1; yy++) {
+    for (let xx = Math.round(x) - 1; xx <= Math.round(x) + 1; xx++) {
+      if (xx < 0 || yy < 0 || xx >= n || yy >= n || Math.hypot(xx - x, yy - y) > 1.5) continue;
+      const v = ex.deep ? ex.deep[yy * n + xx] : NaN;
+      if (Number.isFinite(v) && v > bv) { bv = v; bx = xx; by = yy; }
+    }
+  }
+  if (ex.photAbort) ex.photAbort.abort();
+  const ctl = new AbortController();
+  ex.photAbort = ctl;
+  e4.analysis.hidden = false;
+  e4.photSource.textContent = t('photLoading');
+  try {
+    const r = await api('api/photometry', { ...gridParams(), x: bx, y: by }, ctl.signal);
+    setPhot(r.points, { x: r.x, y: r.y, ra: r.ra, dec: r.dec });
+    drawOverlay();
+  } catch (err) {
+    if (err.name !== 'AbortError') { toast(err.message, true); renderAnalysis(); }
+  }
+}
+
+function epochIndex(points) {
+  const ms = [...new Set(points.map(p => p.mjd))].sort((a, b) => a - b);
+  const map = new Map();
+  let k = 1;
+  ms.forEach((m, i) => { if (i && m - ms[i - 1] > 20) k++; map.set(m, k); });
+  return map;
+}
+
+const valueOf = (p) => (e4.photMode.value === 'wings' ? p.wing_ujy : p.flux_ujy);
+
+function median(a) {
+  const s = [...a].filter(Number.isFinite).sort((x, y) => x - y);
+  return s.length ? (s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : NaN;
+}
+
+function tipFor(p, ep) {
+  const wings = e4.photMode.value === 'wings';
+  const rows = [`${p.date} UTC · D${p.detector}`, `λ ${p.wavelength?.toFixed(3)} µm · ${t('epochN', { n: ep })}`,
+    `${Math.round(valueOf(p)).toLocaleString()} µJy${p.err_ujy && !wings ? ' ± ' + Math.round(p.err_ujy).toLocaleString() : ''}`];
+  if (p.flagged) {
+    const bad = flagNames(p.flags || 0, state.data.flag_bits, state.data.bad_mask).filter(f => f.bad).map(f => f.name);
+    rows.push(bad.join(' ') || 'flagged');
+  }
+  return rows;
+}
+
+function renderAnalysis() {
+  if (!state.data || !ex.phot || !ex.phot.length) { e4.analysis.hidden = true; return; }
+  e4.analysis.hidden = false;
+  const tg = state.target;
+  e4.photSource.textContent = ex.click
+    ? t('photClicked', { pos: `${formatRA(ex.click.ra)} ${formatDec(ex.click.dec)}` })
+    : `${t('photTarget', { name: tg.name ? tg.name.replace(/^NAME /, '') : t('coordinates') })} · ${t('clickHint')}`;
+  for (const b of e4.analysis.querySelectorAll('[data-tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === ex.tab));
+  const wings = e4.photMode.value === 'wings';
+  const eps = epochIndex(ex.phot);
+  const pts = ex.phot.filter(p => Number.isFinite(valueOf(p)) && (e4.photFlagged.checked || !p.flagged));
+  const yFmt = v => Math.abs(v) >= 1e4 ? `${(v / 1000).toFixed(0)}k` : `${Math.round(v)}`;
+  if (ex.tab === 'spectrum') {
+    const byEp = new Map();
+    for (const p of pts) { const k = eps.get(p.mjd); if (!byEp.has(k)) byEp.set(k, []); byEp.get(k).push(p); }
+    scatterChart(e4.chart, {
+      series: [...byEp.keys()].sort((a, b) => a - b).map(k => ({
+        name: `${t('epochN', { n: k })} · ${mjdDate(byEp.get(k)[0].mjd).slice(0, 7)}`, color: SERIES[(k - 1) % SERIES.length],
+        points: byEp.get(k).map(p => ({ x: p.wavelength, y: valueOf(p), err: wings ? null : p.err_ujy, hollow: p.flagged, tip: tipFor(p, k) })),
+      })),
+      xLabel: t('specX'), yLabel: wings ? t('wingY') : t('specY'), xFmt: v => v.toFixed(1), yFmt,
+    });
+    e4.chartNote.textContent = (wings ? t('chartNoteWings') + ' ' : '') + t('chartNoteSpec');
+  } else if (ex.tab === 'lightcurve') {
+    const byDet = new Map();
+    for (const p of pts) { if (!byDet.has(p.detector)) byDet.set(p.detector, []); byDet.get(p.detector).push(p); }
+    scatterChart(e4.chart, {
+      series: [...byDet.keys()].sort().map(d => {
+        const ps = byDet.get(d);
+        const clean = ps.filter(p => !p.flagged).map(valueOf);
+        const med = median(clean.length >= 3 ? clean : ps.map(valueOf));
+        return {
+          name: `D${d} · ${DET_RANGE[d]} µm`, color: SERIES[d - 1],
+          points: ps.map(p => ({ x: p.mjd, y: valueOf(p) / med, err: wings || !p.err_ujy ? null : p.err_ujy / Math.abs(med),
+            hollow: p.flagged, tip: tipFor(p, eps.get(p.mjd)) })),
+        };
+      }),
+      xLabel: t('lcX'), yLabel: t('lcY'), refLine: 1, xFmt: v => mjdDate(v).slice(0, 7), yFmt: v => v.toFixed(2),
+    });
+    e4.chartNote.textContent = (wings ? t('chartNoteWings') + ' ' : '') + t('chartNoteLc');
+  } else {
+    const num = v => (Number.isFinite(v) ? Math.round(v) : '');
+    chartTable(e4.chart, [t('colDate'), t('colDet'), t('colWl'), t('colFlux'), t('colErr'), t('colWing'), t('colFlag')],
+      ex.phot.map(p => [p.date, `D${p.detector}`, p.wavelength?.toFixed(3) ?? '', num(p.flux_ujy), num(p.err_ujy), num(p.wing_ujy),
+        flagNames(p.flags || 0, state.data.flag_bits, state.data.bad_mask).map(f => f.name).join(' ')]));
+    e4.chartNote.textContent = '';
+  }
+}
+
+for (const b of e4.analysis.querySelectorAll('[data-tab]')) b.onclick = () => { ex.tab = b.dataset.tab; renderAnalysis(); };
+e4.photMode.onchange = renderAnalysis;
+e4.photFlagged.onchange = renderAnalysis;
+window.addEventListener('resize', () => { clearTimeout(ex.rt); ex.rt = setTimeout(renderAnalysis, 200); });
+
+// ------------------------------------------------------------------ Gaia DR3 + SkyBoT overlays
+function loadCatalogues() {
+  const d = state.data;
+  ex.gaia = []; ex.sso = [];
+  e4.ovStatus.textContent = t('ovLoading');
+  const rDeg = d.grid.fov / 3600 / Math.SQRT2;
+  const centre = { ra: d.grid.ra.toFixed(6), dec: d.grid.dec.toFixed(6) };
+  const live = () => state.data === d;
+  api('api/gaia', { ...centre, radius: rDeg.toFixed(4) })
+    .then(r => { if (live()) { ex.gaia = r.sources || []; drawOverlay(); if (ex.aladin) setAladinCats(); } }).catch(() => {});
+  api('api/sso', { ...centre, radius: Math.ceil(rDeg * 3600), mjd: d.frames.slice(0, 40).map(f => f.mjd.toFixed(3)).join(',') })
+    .then(r => { if (live()) { ex.sso = r || []; drawOverlay(); } }).catch(() => {});
+}
+
+function currentMjd() {
+  const fs = state.data.frames;
+  return isStack() ? fs.reduce((a, f) => a + f.mjd, 0) / fs.length : fs[state.idx].mjd;
+}
+
+function gaiaAt(src, mjd) {
+  const dt = (mjd - MJD_J2016) / 365.25;
+  const dec = src.dec + (src.pmdec || 0) * dt / 3.6e6;
+  const ra = src.ra + (src.pmra || 0) * dt / 3.6e6 / Math.cos(src.dec * Math.PI / 180);
+  return [ra, dec];
+}
+
+function visibleExtras() {
+  const { grid } = state.data;
+  const n = grid.n, mjd = currentMjd();
+  const inView = ([x, y]) => x >= -0.5 && y >= -0.5 && x <= n - 0.5 && y <= n - 0.5;
+  const gaia = e4.ovGaia.checked ? ex.gaia.map(s => ({ s, p: skyToPix(...gaiaAt(s, mjd), grid) })).filter(o => inView(o.p)) : [];
+  let sso = [];
+  if (e4.ovSso.checked && !isStack()) {
+    const hit = ex.sso.find(e => Math.abs(e.mjd - mjd) < 0.01);
+    if (hit) sso = hit.objects.map(o => ({ o, p: skyToPix(o.ra, o.dec, grid) })).filter(v => inView(v.p));
+  }
+  return { gaia, sso };
+}
+
+function drawExtras(ctx) {
+  if (!state.data || !state.data.frames.length) return;
+  const { gaia, sso } = visibleExtras();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(126,224,195,.75)';
+  for (const { s, p } of gaia) {
+    const [cx, cy, k] = toCanvas(...p);
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(3, k * (s.g < 12 ? 1.1 : 0.7)), 0, 2 * Math.PI);
+    ctx.stroke();
+    if (Math.hypot(s.pmra || 0, s.pmdec || 0) > 150) {      // fast movers: line = motion over the next 5 years
+      const [x2, y2] = toCanvas(...skyToPix(...gaiaAt(s, currentMjd() + 5 * 365.25), state.data.grid));
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+  }
+  ctx.strokeStyle = '#b9a7ff';
+  ctx.fillStyle = '#b9a7ff';
+  ctx.lineWidth = 2;
+  for (const { o, p } of sso) {
+    const [cx, cy, k] = toCanvas(...p);
+    const r = Math.max(6, k * 1.2);
+    ctx.beginPath();
+    ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy + r); ctx.moveTo(cx + r, cy - r); ctx.lineTo(cx - r, cy + r);
+    ctx.stroke();
+    ctx.font = `${Math.max(11, Math.min(16, k * 1.3))}px system-ui`;
+    ctx.fillText(o.name, cx + r + 3, cy - r);
+  }
+  if (ex.click) {                              // where the clicked spectrum was measured
+    const [cx, cy, k] = toCanvas(ex.click.x, ex.click.y);
+    ctx.strokeStyle = '#f0efec';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.arc(cx, cy, Math.max(6, 2 * k), 0, 2 * Math.PI); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  e4.ovStatus.textContent = t('ovStatus', { g: gaia.length, s: sso.length });
+}
+
+function extraCursorRows(x, y) {
+  if (!state.data || !state.data.frames.length) return [];
+  const { gaia, sso } = visibleExtras();
+  const rows = [];
+  const g = gaia.find(o => Math.hypot(o.p[0] - x, o.p[1] - y) < 0.8);
+  if (g) rows.push(['Gaia', t('gaiaTip', { g: g.s.g?.toFixed(1), pm: (Math.hypot(g.s.pmra || 0, g.s.pmdec || 0) / 1000).toFixed(3) })]);
+  const s = sso.find(o => Math.hypot(o.p[0] - x, o.p[1] - y) < 1.5);
+  if (s) rows.push(['SkyBoT', t('ssoTip', { name: s.o.name, cls: s.o.class, v: s.o.vmag })]);
+  return rows;
+}
+
+e4.ovGaia.onchange = drawOverlay;
+e4.ovSso.onchange = drawOverlay;
+
+// ------------------------------------------------------------------ NEOSSat (CSA) via CADC
+async function loadNeossat() {
+  const d = state.data;
+  ex.neo = 'loading';
+  renderNeossat();
+  try {
+    const rows = await api('api/neossat', { ra: d.grid.ra.toFixed(6), dec: d.grid.dec.toFixed(6), radius: 0.25 });
+    if (state.data === d) ex.neo = rows;
+  } catch {
+    if (state.data === d) ex.neo = 'fail';
+  }
+  renderNeossat();
+}
+
+function renderNeossat() {
+  const ul = e4.neossat;
+  if (ex.neo === 'loading') return ul.replaceChildren(el('li', 'muted small', t('neossatLoading')));
+  if (ex.neo === 'fail') return ul.replaceChildren(el('li', 'muted small', t('neossatFail')));
+  if (!Array.isArray(ex.neo) || !ex.neo.length) return ul.replaceChildren(el('li', 'muted small', t('neossatNone')));
+  ul.replaceChildren(...ex.neo.slice(0, 12).map(o => {
+    const li = el('li', 'small');
+    const a = el('a', '', `${mjdDate(o.mjd)}${o.target ? ' · ' + o.target : ''}`);
+    a.href = o.cadc_url; a.target = '_blank'; a.rel = 'noopener';
+    li.append(a, el('span', 'muted', o.exptime ? ` ${o.exptime.toFixed(0)} s` : ''));
+    return li;
+  }));
+  if (ex.neo.length > 12) ul.append(el('li', 'muted small', `+${ex.neo.length - 12}`));
+}
+
+// ------------------------------------------------------------------ Aladin Lite context view
+const ALADIN_JS = 'https://cdn.jsdelivr.net/npm/aladin-lite@3.6.5/dist/aladin.js';
+
+async function updateAladin() {
+  if (!state.data || !state.data.grid) return;
+  try {
+    if (!window.A) window.A = (await import(ALADIN_JS)).default;
+    await window.A.init;
+    const g = state.data.grid;
+    if (!ex.aladin) {
+      ex.aladin = window.A.aladin('#aladin', { fov: g.fov / 3600 * 3, target: `${g.ra} ${g.dec}`,
+        cooFrame: 'ICRS', showReticle: false, showFullscreenControl: true, showLayersControl: true });
+      ex.ovl = window.A.graphicOverlay({ color: '#ffb347', lineWidth: 2 });
+      ex.aladin.addOverlay(ex.ovl);
+    } else {
+      ex.aladin.gotoRaDec(g.ra, g.dec);
+      ex.aladin.setFoV(g.fov / 3600 * 3);
+    }
+    setSurvey();
+    ex.ovl.removeAll();
+    const n = g.n;
+    ex.ovl.add(window.A.polygon([[-0.5, -0.5], [n - 0.5, -0.5], [n - 0.5, n - 0.5], [-0.5, n - 0.5]].map(([x, y]) => pixToSky(x, y, g))));
+    setAladinCats();
+  } catch (err) {
+    toast('Aladin: ' + err.message, true);
+  }
+}
+
+function setSurvey() {
+  const opt = e4.ctxSurvey.selectedOptions[0];
+  try {
+    ex.aladin.setImageSurvey(window.A.imageHiPS(opt.value, { name: opt.textContent }));
+  } catch (err) { toast('Aladin: ' + err.message, true); }
+}
+
+function setAladinCats() {
+  const g = state.data.grid;
+  for (const c of ex.cats || []) { try { ex.aladin.removeLayer(c); } catch { try { c.hide(); } catch { /* ignore */ } } }
+  ex.cats = [];
+  if (e4.ctxGaia.checked && ex.gaia.length) {        // Gaia DR3 from our own /api/gaia (ESA archive), at epoch J2016
+    const c = window.A.catalog({ name: 'Gaia DR3', color: '#7ee0c3', sourceSize: 10, onClick: 'showPopup' });
+    c.addSources(ex.gaia.map(s => window.A.source(s.ra, s.dec, { G: s.g?.toFixed(2), pmra: s.pmra?.toFixed(1), pmdec: s.pmdec?.toFixed(1), source_id: s.id })));
+    ex.aladin.addCatalog(c);
+    ex.cats.push(c);
+  }
+  if (e4.ctxCatwise.checked) {
+    const c = window.A.catalogFromVizieR('II/365/catwise', `${g.ra} ${g.dec}`, g.fov / 3600 * 2.2, { onClick: 'showPopup', color: '#d55181', sourceSize: 10 });
+    ex.aladin.addCatalog(c);
+    ex.cats.push(c);
+  }
+}
+
+e4.ctx.addEventListener('toggle', () => { if (e4.ctx.open) updateAladin(); });
+e4.ctxSurvey.onchange = () => ex.aladin && setSurvey();
+e4.ctxGaia.onchange = e4.ctxCatwise.onchange = () => ex.aladin && setAladinCats();
+
+// ------------------------------------------------------------------ start
 buildDetChips();
 let startLang = parseState(location.search).lang;
 try { startLang = startLang || localStorage.getItem('radians-lang'); } catch { /* private mode */ }
-applyLang(startLang || (navigator.language || '').startsWith('tr') ? (startLang || 'tr') : 'en');
+applyLang(startLang || ((navigator.language || '').startsWith('tr') ? 'tr' : 'en'));
 fromUrl();
+window.radians = { state, ex };   // handle for debugging in the console
