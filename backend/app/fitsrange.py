@@ -301,12 +301,23 @@ def wave_table(url: str, detector: int) -> fits.BinTableHDU:
     return tab
 
 
-def wavelength_at(header: fits.Header, table: fits.BinTableHDU, x: float, y: float):
-    """(wavelength, bandwidth) in micron at 0-based detector pixel (x, y)."""
-    hdul = fits.HDUList([fits.PrimaryHDU(), table])
-    h = header.copy()
-    for k in [k for k in h if k.split("_")[0] in ("A", "B", "AP", "BP")]:
-        del h[k]                                   # SIP belongs to the celestial WCS only
-    w = WCS(h, fobj=hdul, key="W")
+_wwcs: dict = {}
+
+
+def wavelength_at(header, table: fits.BinTableHDU, x: float, y: float):
+    """(wavelength, bandwidth) in micron at 0-based detector pixel (x, y). header: Header or its text.
+    The spectral WCS (alternate key W, a lookup table) is the same for every exposure of a detector,
+    so it is built once per distinct set of W keywords."""
+    if isinstance(header, str):
+        header = fits.Header.fromstring(header)
+    cards = [c for c in header.cards if c.keyword.endswith("W") or c.keyword in ("NAXIS", "NAXIS1", "NAXIS2")]
+    key = (id(table), tuple((c.keyword, str(c.value)) for c in cards))
+    w = _wwcs.get(key)
+    if w is None:
+        hdul = fits.HDUList([fits.PrimaryHDU(), table])
+        w = WCS(fits.Header(cards), fobj=hdul, key="W")
+        _wwcs[key] = w
+        if len(_wwcs) > 64:
+            _wwcs.pop(next(iter(_wwcs)))
     lam, bw = w.wcs_pix2world([[x, y]], 0)[0]
     return float(lam), float(bw)

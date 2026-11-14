@@ -5,11 +5,13 @@ import base64
 import hashlib
 import math
 import pickle
+import threading
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 import numpy as np
+from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 from astropy.time import Time
 from astropy.wcs import WCS
@@ -156,11 +158,28 @@ def measure(img, var, flg, px, py, r=config.APERTURE_PX):
     return out
 
 
+_wcs_cache: dict = {}
+_wcs_lock = threading.Lock()
+
+
+def frame_wcs(f: "Frame") -> WCS:
+    """Detector WCS of an exposure, parsed once (parsing ~20 ms is most of a spectrum's cost)."""
+    key = (f.exp.obs_id, f.exp.detector)
+    w = _wcs_cache.get(key)
+    if w is None:
+        w = WCS(f.header)
+        with _wcs_lock:
+            _wcs_cache[key] = w
+            while len(_wcs_cache) > 4000:
+                _wcs_cache.pop(next(iter(_wcs_cache)))
+    return w
+
+
 def wavelength_for(f: "Frame", ra, dec):
     """Wavelength SPHEREx saw at sky position (ra, dec) in this exposure (linear-variable filter)."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        dx, dy = WCS(f.header).all_world2pix([[ra, dec]], 0, quiet=True)[0]
+        dx, dy = frame_wcs(f).all_world2pix([[ra, dec]], 0, quiet=True)[0]
         try:
             tab = fitsrange.wave_table(f.exp.url, f.exp.detector)
             return fitsrange.wavelength_at(f.header, tab, float(dx), float(dy))
@@ -200,7 +219,7 @@ def build_frame(exp: Exposure, ra, dec, n, wout, target) -> Frame | None:
     if np.isfinite(img).sum() < 0.2 * n * n:
         return None
     img = (img - _background(img)).astype(np.float32)
-    f = Frame(exp, img, var.astype(np.float32), flg, header=cut.header)
+    f = Frame(exp, img, var.astype(np.float32), flg, header=cut.header.tostring())   # text: ~10x less memory
 
     # where is the (moving) target on the detector and on our grid at this exposure?
     tra, tdec = target(exp.mjd)

@@ -90,6 +90,41 @@ def observations(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., g
 # The last few prepared frame sets stay in memory, so clicking a star for its spectrum or
 # switching views does not re-read hundreds of exposures.
 _built: OrderedDict = OrderedDict()
+_pinned: set = set()          # demo views baked into the image: never evicted
+
+
+def _evict(keep=6):
+    extra = [k for k in _built if k not in _pinned]
+    for k in extra[:max(0, len(extra) - keep)]:
+        del _built[k]
+
+
+def load_demo():
+    """Load the demo targets baked by scripts/bake_demo.py: aligned frames into memory, small
+    look-up caches into CACHE_DIR (without overwriting newer files)."""
+    import gzip
+    import pickle
+    import shutil
+    demo = Path(__file__).resolve().parents[1] / "demo"
+    src = demo / "cache"
+    if src.exists():
+        for f in src.rglob("*"):
+            if f.is_file():
+                d = config.CACHE_DIR / f.relative_to(src)
+                if not d.exists():
+                    d.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(f, d)
+    path = demo / "built.pkl.gz"
+    if path.exists():
+        t0 = time.time()
+        with gzip.open(path, "rb") as fh:
+            built = pickle.load(fh)
+        with _built_lock:
+            for k, v in built.items():
+                _built[k] = v
+                _pinned.add(k)
+        print(f"demo: {len(built)} views loaded in {time.time() - t0:.1f}s", flush=True)
+
 _built_lock = threading.Lock()
 # progress of running /api/frames requests, keyed by a client-chosen job id (polled by the page)
 _progress: OrderedDict = OrderedDict()
@@ -141,8 +176,7 @@ def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job=N
     built = {"frs": frs, "n": n, "ra": cra, "dec": cdec, "w": stack.output_wcs(cra, cdec, n)}
     with _built_lock:
         _built[key] = built
-        while len(_built) > 6:
-            _built.popitem(last=False)
+        _evict()
     return built
 
 
@@ -286,5 +320,9 @@ def warm(targets=DEMO, fov=240):
 
 @app.on_event("startup")
 def _warm_on_start():
+    try:
+        load_demo()
+    except Exception as e:                       # a broken demo file must never stop the server
+        print("demo load failed:", repr(e), flush=True)
     if os.getenv("WARM_ON_START", "0") == "1":
         threading.Thread(target=warm, name="warm", daemon=True).start()
