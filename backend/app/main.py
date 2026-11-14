@@ -120,6 +120,32 @@ def observations(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., g
         for e, k in zip(exps, ep)]}
 
 
+def coverage_summary(exps):
+    """How SPHEREx covered a spot, from its exposure list alone (no pixels): how many exposures, since
+    when, in which sky passes and in which detector bands."""
+    ep = stack.epochs([e.mjd for e in exps])
+    passes = []
+    for e, k in zip(exps, ep):
+        if not passes or passes[-1]["epoch"] != k + 1:
+            passes.append({"epoch": k + 1, "start": stack.mjd_iso(e.mjd_start)[:10], "end": "", "n": 0})
+        passes[-1]["end"] = stack.mjd_iso(e.mjd_end)[:10]
+        passes[-1]["n"] += 1
+    per = {str(d): 0 for d in config.DETECTORS}
+    for e in exps:
+        per[str(e.detector)] = per.get(str(e.detector), 0) + 1
+    span = exps[-1].mjd_end - exps[0].mjd_start if exps else 0.0
+    return {"count": len(exps), "first": passes[0]["start"] if passes else None,
+            "last": passes[-1]["end"] if passes else None, "span_days": round(span, 1),
+            "passes": passes, "detectors": per}
+
+
+@app.get("/api/coverage")
+def coverage(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90)):
+    """Has SPHEREx seen this spot, how often and in which bands? One archive search, cached under the same
+    key a blink of the same coordinates uses, so "Blink this spot" does not ask IRSA again."""
+    return coverage_summary(_exposures(round(ra, 5), round(dec, 5)))
+
+
 # The last few prepared frame sets stay in memory, so clicking a star for its spectrum or
 # switching views does not re-read hundreds of exposures.
 _built: OrderedDict = OrderedDict()
