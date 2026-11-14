@@ -294,7 +294,7 @@ const story = { i: -1 };
 function storyCard() { return $('story'); }
 function storyGo(i) {
   story.i = i;
-  document.documentElement.classList.add('story');
+  document.documentElement.classList.add('story-on');
   const s = STORY[i], tr = L();
   const card = storyCard();
   card.hidden = false;
@@ -316,7 +316,7 @@ function storyGo(i) {
 function storyEnd() {
   story.i = -1;
   storyCard().hidden = true;
-  document.documentElement.classList.remove('story');
+  document.documentElement.classList.remove('story-on');
 }
 export function startStory() { storyGo(0); }
 $('storyNext').onclick = () => (story.i >= STORY.length - 1 ? storyEnd() : storyGo(story.i + 1));
