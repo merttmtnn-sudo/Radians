@@ -4,6 +4,15 @@
 const NS = 'http://www.w3.org/2000/svg';
 export const SERIES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#0ca30c'];
 
+// 0.75-5 µm mapped onto a blue -> red ramp (log wavelength), the way an infrared false-colour image is shown
+const RAMP = [[0x5b, 0x7c, 0xff], [0x36, 0xc5, 0xf0], [0x3d, 0xdc, 0x97], [0xe6, 0xd8, 0x4a], [0xff, 0xb3, 0x47], [0xff, 0x5c, 0x5c]];
+export function wlColor(um) {
+  const f = Math.min(1, Math.max(0, Math.log(um / 0.75) / Math.log(5 / 0.75))) * (RAMP.length - 1);
+  const i = Math.min(RAMP.length - 2, Math.floor(f)), u = f - i;
+  const c = RAMP[i].map((a, k) => Math.round(a + (RAMP[i + 1][k] - a) * u));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
 function svg(tag, attrs = {}, parent) {
   const e = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
@@ -50,7 +59,7 @@ export function scatterChart(host, opts) {
     }
     host.append(lg);
   }
-  const pts = series.flatMap(s => s.points.map(p => ({ ...p, color: s.color, series: s.name })))
+  const pts = series.flatMap(s => s.points.map(p => ({ ...p, color: p.color || s.color, series: p.series || s.name })))
     .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (!pts.length) {
     const e = document.createElement('p');
@@ -59,8 +68,8 @@ export function scatterChart(host, opts) {
     host.append(e);
     return;
   }
-  const W = Math.max(280, host.clientWidth || 600), H = opts.height || 260;
-  const m = { l: 68, r: 14, t: 10, b: 42 };
+  const W = Math.max(280, host.clientWidth || 600), H = opts.height || 290;
+  const m = { l: 68, r: 14, t: opts.marks || opts.bands ? 22 : 10, b: opts.strip ? 58 : 42 };
   const xs = extent(pts.map(p => p.x), 0.03);
   // y range from the values (robust to a few wild error bars)
   const ys = extent(pts.map(p => p.y), 0.08);
@@ -79,6 +88,36 @@ export function scatterChart(host, opts) {
   }
   svg('line', { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, class: 'axis' }, g);
   svg('text', { x: (m.l + W - m.r) / 2, y: H - 6, 'text-anchor': 'middle', class: 'label' }, g).textContent = opts.xLabel;
+  // shaded x ranges (e.g. SPHEREx visits on a light curve), drawn behind everything
+  if (opts.bands) {
+    const bg = svg('g', {}, g);
+    g.prepend(bg);
+    for (const b of opts.bands) {
+      const x0 = Math.max(m.l, X(b.x0)), x1 = Math.min(W - m.r, X(b.x1));
+      if (x1 < m.l || x0 > W - m.r) continue;
+      const w = Math.max(3, x1 - x0), cx = x0 + (x1 - x0) / 2;
+      svg('rect', { x: cx - w / 2, y: m.t, width: w, height: H - m.t - m.b, class: 'band' }, bg);
+      svg('text', { x: cx, y: m.t - 7, 'text-anchor': 'middle', class: 'bandlabel' }, bg).textContent = b.label;
+    }
+  }
+  // labelled vertical markers (e.g. molecular bands on a spectrum)
+  if (opts.marks) {
+    for (const k of opts.marks) {
+      if (k.x <= xs[0] || k.x >= xs[1]) continue;
+      svg('line', { x1: X(k.x), x2: X(k.x), y1: m.t, y2: H - m.b, class: 'mark' }, g);
+      svg('text', { x: X(k.x), y: m.t - 7, 'text-anchor': 'middle', class: 'marklabel' }, g).textContent = k.label;
+    }
+  }
+  // colour strip under the x axis: what each wavelength looks like in the chart's colours
+  if (opts.strip) {
+    const id = 'grad' + Math.random().toString(36).slice(2, 8);
+    const lg = svg('linearGradient', { id, x1: 0, x2: 1, y1: 0, y2: 0 }, svg('defs', {}, root));
+    for (let i = 0; i <= 20; i++) {
+      const v = xs[0] + (xs[1] - xs[0]) * i / 20;
+      svg('stop', { offset: `${i * 5}%`, 'stop-color': opts.strip(v) }, lg);
+    }
+    svg('rect', { x: m.l, y: H - m.b + 22, width: W - m.l - m.r, height: 6, rx: 3, fill: `url(#${id})` }, g);
+  }
   svg('text', { x: 14, y: (m.t + H - m.b) / 2, 'text-anchor': 'middle', class: 'label', transform: `rotate(-90 14 ${(m.t + H - m.b) / 2})` }, g).textContent = opts.yLabel;
   if (opts.refLine !== undefined && opts.refLine > ys[0] && opts.refLine < ys[1]) {
     svg('line', { x1: m.l, x2: W - m.r, y1: Y(opts.refLine), y2: Y(opts.refLine), class: 'ref' }, g);

@@ -65,7 +65,7 @@ code { font-family: var(--mono); font-size: .9em; background: var(--panel-2); pa
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 input[type=range] { accent-color: var(--fg); }
 input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
-svg { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.btn svg, .searchicon, #themeBtn svg { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---------------------------------------------------------------- buttons, fields */
 .btn, .controls button, .timeline button, .detchip, .linkbtn.btnlike {
@@ -103,7 +103,7 @@ svg { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round
 .top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 20px; padding: 12px 24px;
   background: var(--head-bg); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 9px; text-decoration: none; font-weight: 700; font-size: 19px; letter-spacing: -.01em; }
-.brand svg { width: 24px; height: 24px; fill: var(--accent); stroke: var(--accent); stroke-width: 2; }
+.brand svg { width: 24px; height: 24px; fill: var(--accent); stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
 .brand svg path { fill: none; }
 .nav { display: flex; gap: 4px; }
 .nav a { text-decoration: none; color: var(--fg-2); font-size: 14px; padding: 6px 10px; border-radius: 999px; }
@@ -314,3 +314,29 @@ details summary { cursor: pointer; color: var(--fg-2); }
 body.embed .top, body.embed .side, body.embed .foot, body.embed .timeline, body.embed .analysis, body.embed .context, body.embed .viewbar, body.embed .viewhelp { display: none !important; }
 body.embed .layout { grid-template-columns: 1fr !important; padding: 8px; }
 body.embed .stage { max-height: calc(100vh - 70px); }
+
+/* ---------------------------------------------------------------- candidate visuals + chart extras */
+.cvis { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 12px; padding: 0 12px 12px; align-items: start; }
+.cuts { display: flex; gap: 6px; }
+.cuts figure { margin: 0; display: flex; flex-direction: column; gap: 3px; align-items: center; }
+.cut { width: 52px; height: 52px; image-rendering: pixelated; border-radius: 6px; border: 1px solid var(--line-2); background: #000; }
+.cuts figcaption { font-size: 10px; color: var(--fg-3); }
+.cright { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.spark { width: 100%; height: 34px; }
+.spark path { stroke: var(--fg-3); stroke-width: 1.3; fill: none; }
+.spark circle { fill: var(--fg-2); stroke: none; }
+.spark circle.hi { fill: var(--accent); }
+.track { width: 70px; height: 70px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.track .trk { stroke: var(--accent); stroke-width: 1.4; fill: none; }
+.track circle { fill: var(--fg-2); stroke: none; }
+.track circle.last { fill: var(--accent); }
+.track .cat { stroke: var(--fg-3); stroke-dasharray: 3 3; stroke-width: 1; }
+.cmp { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 1px 8px; font-size: 11px; white-space: nowrap; }
+.cmp .k { color: var(--fg-3); }
+.conf { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+.conf .bar { height: 5px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+.conf .bar i { display: block; height: 100%; background: var(--fg); border-radius: 3px; }
+.conf.low .bar i { background: var(--accent); }
+.chart .band { fill: var(--panel-2); }
+.chart .bandlabel, .chart .marklabel { fill: var(--fg-3); stroke: none; font-size: 10px; font-family: var(--mono); }
+.chart .mark { stroke: var(--line-2); stroke-dasharray: 2 3; stroke-width: 1; }

@@ -3,7 +3,7 @@ import {
   flagNames, parseState, computeView, isDiffView, skyToPix, stackImage,
 } from './sky.js';
 import { t, setLang, getLang } from './i18n.js';
-import { scatterChart, chartTable, SERIES } from './charts.js';
+import { scatterChart, chartTable, SERIES, wlColor } from './charts.js';
 import { encodeGif } from './gif.js';
 
 const $ = (id) => document.getElementById(id);
@@ -359,9 +359,10 @@ function renderCandidates() {
     if (c.is_target) tags.append(el('span', 'tag', t('isTarget')));
     if (known === 'unchecked') { /* Gaia not loaded (yet): say nothing */ }
     else if (known) tags.append(el('span', 'tag', t('knownGaia', { g: known.g?.toFixed(1) ?? '?', pm: (Math.hypot(known.pmra || 0, known.pmdec || 0) / 1000).toFixed(2) })));
-    else tags.append(el('span', 'tag new', t('notInGaia')));
+    else if (!c.is_target) tags.append(el('span', 'tag new', t('notInGaia')));   // your own target: say nothing
     if (c.low_confidence) tags.append(el('span', 'tag warn', t('lowConf')));
     if (tags.childElementCount) li.append(tags);
+    try { li.append(candVisual(c, known)); } catch (err) { console.warn('candidate visual', err); }
     if (i === state.selected) {
       const d = el('div', 'canddetail small');
       d.append(el('div', '', `${formatRA(c.ra)} ${formatDec(c.dec)}`));
@@ -383,6 +384,150 @@ function renderCandidates() {
 }
 
 els.showCands.onchange = drawOverlay;
+
+// ------------------------------------------------------------------ candidate card visuals
+// Position of a candidate in frame i (movers follow their fitted track; the rest stay put).
+function candPos(c, i) {
+  const f = state.data.frames[i];
+  if (c.type !== 'moving' || !c.points?.length) return [c.x, c.y];
+  let best = c.points[0];
+  for (const p of c.points) if (Math.abs(p.mjd - f.mjd) < Math.abs(best.mjd - f.mjd)) best = p;
+  return [best.x, best.y];
+}
+
+// 3x3-pixel sum around (x, y) in frame i: a quick brightness for the sparkline
+function quickFlux(i, x, y) {
+  const n = state.data.grid.n, img = state.images[i];
+  const ix = Math.round(x), iy = Math.round(y);
+  let s = 0, k = 0;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const xx = ix + dx, yy = iy + dy;
+    if (xx < 0 || yy < 0 || xx >= n || yy >= n) continue;
+    const v = img[yy * n + xx];
+    if (Number.isFinite(v)) { s += v; k++; }
+  }
+  return k ? s * 9 / k : NaN;
+}
+
+// small greyscale cut-out (2*R+1 px) of frame i centred on (x, y)
+const CUT_R = 6;
+function cutout(i, x, y, lo, hi) {
+  const n = state.data.grid.n, img = state.images[i], S = 2 * CUT_R + 1;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const ctx = cv.getContext('2d'), out = ctx.createImageData(S, S);
+  const cx = Math.round(x), cy = Math.round(y);
+  for (let r = 0; r < S; r++) for (let q = 0; q < S; q++) {
+    const xx = cx - CUT_R + q, yy = cy + CUT_R - r;              // canvas row 0 = top = highest FITS y
+    const v = xx >= 0 && yy >= 0 && xx < n && yy < n ? img[yy * n + xx] : NaN;
+    const tv = stretchValue(v, lo, hi, 'asinh');
+    const g = Number.isNaN(tv) ? 25 : Math.round(tv * 255), o = (r * S + q) * 4;
+    out.data[o] = out.data[o + 1] = out.data[o + 2] = g; out.data[o + 3] = 255;
+  }
+  ctx.putImageData(out, 0, 0);
+  cv.className = 'cut';
+  return cv;
+}
+
+function sparkline(vals, hi) {
+  const W = 120, H = 34, ok = vals.map((v, i) => [i, v]).filter(([, v]) => Number.isFinite(v));
+  const NS = 'http://www.w3.org/2000/svg', svgEl = document.createElementNS(NS, 'svg');
+  svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`); svgEl.setAttribute('class', 'spark');
+  if (ok.length < 2) return svgEl;
+  const lo = Math.min(...ok.map(o => o[1])), top = Math.max(...ok.map(o => o[1]));
+  const X = i => 6 + i / Math.max(1, vals.length - 1) * (W - 12), Y = v => H - 5 - (v - lo) / ((top - lo) || 1) * (H - 10);
+  const path = document.createElementNS(NS, 'path');
+  path.setAttribute('d', ok.map(([i, v], j) => `${j ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(''));
+  svgEl.append(path);
+  for (const [i, v] of ok) {
+    const d = document.createElementNS(NS, 'circle');
+    d.setAttribute('cx', X(i)); d.setAttribute('cy', Y(v)); d.setAttribute('r', i === hi ? 3.2 : 2.2);
+    if (i === hi) d.setAttribute('class', 'hi');
+    svgEl.append(d);
+  }
+  return svgEl;
+}
+
+// the track of a mover, scaled up, with the catalogue direction for comparison
+function trackPlot(c, catPa) {
+  const NS = 'http://www.w3.org/2000/svg', W = 70, svgEl = document.createElementNS(NS, 'svg');
+  svgEl.setAttribute('viewBox', `0 0 ${W} ${W}`); svgEl.setAttribute('class', 'track');
+  const pts = c.points;
+  const mx = pts.reduce((a, p) => a + p.x, 0) / pts.length, my = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+  const span = Math.max(0.6, ...pts.map(p => Math.hypot(p.x - mx, p.y - my))) * 2.4;
+  const P = p => [W / 2 + (p.x - mx) / span * W * 0.8, W / 2 - (p.y - my) / span * W * 0.8];   // as on the image: +x right (west), +y up (north)
+  const mk = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); svgEl.append(e); return e; };
+  if (catPa !== null && catPa !== undefined) {           // PA is east of north: east = -x on our grid
+    const a = catPa * Math.PI / 180, L = W * 0.38;
+    mk('line', { x1: W / 2 + Math.sin(a) * L, y1: W / 2 + Math.cos(a) * L, x2: W / 2 - Math.sin(a) * L, y2: W / 2 - Math.cos(a) * L, class: 'cat' });
+  }
+  const q = pts.map(P);
+  mk('path', { d: q.map(([x, y], j) => `${j ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(''), class: 'trk' });
+  q.forEach(([x, y], j) => mk('circle', { cx: x, cy: y, r: j === q.length - 1 ? 3.4 : 2.4, class: j === q.length - 1 ? 'last' : '' }));
+  return svgEl;
+}
+
+function candVisual(c, known) {
+  const box = el('div', 'cvis');
+  const F = state.data.frames.length;
+  if (!F || F > 60 || !state.images.length) return box;
+  const pos = state.data.frames.map((_, i) => candPos(c, i));
+  const flux = pos.map(([x, y], i) => quickFlux(i, x, y));
+  // which two frames to compare
+  let a = 0, b = F - 1;
+  if (c.type === 'variable') {
+    const ok = flux.map((v, i) => [i, v]).filter(([, v]) => Number.isFinite(v));
+    if (ok.length >= 2) { a = ok.reduce((m, o) => (o[1] < m[1] ? o : m))[0]; b = ok.reduce((m, o) => (o[1] > m[1] ? o : m))[0]; }
+  } else if (c.type === 'transient') {
+    b = Math.max(0, state.data.frames.findIndex(f => f.epoch === c.epoch));
+    a = b === 0 ? Math.min(1, F - 1) : 0;
+  }
+  // shared stretch for both cut-outs, so a brightness change is real
+  const vals = [];
+  for (const i of [a, b]) {
+    const [x, y] = pos[i], n = state.data.grid.n, img = state.images[i];
+    for (let dy = -CUT_R; dy <= CUT_R; dy++) for (let dx = -CUT_R; dx <= CUT_R; dx++) {
+      const xx = Math.round(x) + dx, yy = Math.round(y) + dy;
+      if (xx >= 0 && yy >= 0 && xx < n && yy < n && Number.isFinite(img[yy * n + xx])) vals.push(img[yy * n + xx]);
+    }
+  }
+  vals.sort((p, q) => p - q);
+  const lo = vals[Math.floor(vals.length * 0.05)] ?? 0, hi = vals[Math.floor(vals.length * 0.995)] ?? 1;
+  const cuts = el('div', 'cuts');
+  for (const [i, lab] of [[a, 'cutA'], [b, 'cutB']]) {
+    const fig = el('figure', '');
+    fig.append(cutout(i, ...pos[i], lo, hi), el('figcaption', 'mono', `E${state.data.frames[i].epoch} · ${state.data.frames[i].date_start.slice(0, 7)}`));
+    fig.title = t(lab);
+    cuts.append(fig);
+  }
+  box.append(cuts);
+  const right = el('div', 'cright');
+  if (c.type === 'moving') {
+    const tg = state.target;
+    const catPm = c.is_target && tg && Number.isFinite(tg.pmra) ? Math.hypot(tg.pmra, tg.pmdec) / 1000
+      : known && known !== 'unchecked' ? Math.hypot(known.pmra || 0, known.pmdec || 0) / 1000 : null;
+    const catPa = c.is_target && tg && Number.isFinite(tg.pmra) ? (Math.atan2(tg.pmra, tg.pmdec) * 180 / Math.PI + 360) % 360
+      : known && known !== 'unchecked' ? (Math.atan2(known.pmra || 0, known.pmdec || 0) * 180 / Math.PI + 360) % 360 : null;
+    right.append(trackPlot(c, catPa));
+    if (catPm) {
+      const cmp = el('div', 'cmp mono');
+      cmp.append(el('span', 'k', t('cmpRadians')), el('span', '', `${c.rate_arcsec_yr.toFixed(2)}″/yr`),
+        el('span', 'k', c.is_target ? t('cmpCatalogue') : 'Gaia DR3'), el('span', '', `${catPm.toFixed(2)}″/yr`));
+      right.append(cmp);
+    }
+  } else {
+    right.append(sparkline(flux, b));
+  }
+  box.append(right);
+  // confidence: significance on a 0-30σ scale; doubtful pixels shown in amber
+  const conf = el('div', 'conf' + (c.low_confidence ? ' low' : ''));
+  const bar = el('div', 'bar'), fill = el('i', '');
+  fill.style.width = `${Math.min(100, (c.significance || 0) / 30 * 100)}%`;
+  bar.append(fill);
+  conf.append(el('span', 'small dim', t('confidence')), bar, el('span', 'small mono', `${(c.significance || 0).toFixed(1)}σ`));
+  box.append(conf);
+  return box;
+}
 
 // Is this candidate a star Gaia DR3 already lists? (Gaia moved to the candidate's date; a mover must
 // also move like the Gaia star.) Returns the Gaia source, null (not in Gaia) or 'unchecked'.
@@ -666,6 +811,9 @@ const ex = { phot: null, click: null, tab: 'spectrum', gaia: [], sso: [], neo: n
 const e4 = Object.fromEntries(['analysis', 'photSource', 'photMode', 'photFlagged', 'chart', 'chartNote', 'ovGaia', 'ovSso',
   'ovStatus', 'neossat', 'ctx', 'ctxSurvey', 'ctxGaia', 'ctxCatwise', 'aladin'].map(id => [id, $(id)]));
 const MJD_J2016 = 57388.5;
+// absorption bands that shape cool stars, brown dwarfs and ices in SPHEREx's range
+const SPECTRAL_BANDS = [{ x: 1.4, label: 'H₂O' }, { x: 1.9, label: 'H₂O' }, { x: 2.7, label: 'H₂O' },
+  { x: 3.3, label: 'CH₄' }, { x: 4.27, label: 'CO₂' }, { x: 4.67, label: 'CO' }];
 const DET_RANGE = { 1: '0.75–1.09', 2: '1.10–1.62', 3: '1.63–2.42', 4: '2.42–3.82', 5: '3.83–4.41', 6: '4.42–5.00' };
 const mjdDate = (m) => new Date((m - 40587) * 86400000).toISOString().slice(0, 10);
 
@@ -717,6 +865,16 @@ async function photAt(x, y) {
   }
 }
 
+function visitBands() {
+  const eps = new Map();
+  for (const f of state.data.frames) {
+    const b = eps.get(f.epoch) || { x0: f.mjd_start, x1: f.mjd_end, label: `E${f.epoch}` };
+    b.x0 = Math.min(b.x0, f.mjd_start); b.x1 = Math.max(b.x1, f.mjd_end);
+    eps.set(f.epoch, b);
+  }
+  return [...eps.values()];
+}
+
 function epochIndex(points) {
   const ms = [...new Set(points.map(p => p.mjd))].sort((a, b) => a - b);
   const map = new Map();
@@ -759,10 +917,11 @@ function renderAnalysis() {
     const byEp = new Map();
     for (const p of pts) { const k = eps.get(p.mjd); if (!byEp.has(k)) byEp.set(k, []); byEp.get(k).push(p); }
     scatterChart(e4.chart, {
-      series: [...byEp.keys()].sort((a, b) => a - b).map(k => ({
-        name: `${t('epochN', { n: k })} · ${mjdDate(byEp.get(k)[0].mjd).slice(0, 7)}`, color: SERIES[(k - 1) % SERIES.length],
-        points: byEp.get(k).map(p => ({ x: p.wavelength, y: valueOf(p), err: wings ? null : p.err_ujy, hollow: p.flagged, tip: tipFor(p, k) })),
-      })),
+      // one series, every point in the colour of its wavelength; the visit is in the tooltip
+      series: [{ name: 'SPHEREx', color: '#888', points: [...byEp.keys()].sort((a, b) => a - b).flatMap(k => byEp.get(k).map(p => ({
+        x: p.wavelength, y: valueOf(p), err: wings ? null : p.err_ujy, hollow: p.flagged, color: wlColor(p.wavelength),
+        series: `${t('epochN', { n: k })} · ${mjdDate(p.mjd).slice(0, 7)}`, tip: tipFor(p, k) }))) }],
+      marks: SPECTRAL_BANDS, strip: wlColor,
       xLabel: t('specX'), yLabel: wings ? t('wingY') : t('specY'), xFmt: v => v.toFixed(1), yFmt,
     });
     e4.chartNote.textContent = (wings ? t('chartNoteWings') + ' ' : '') + t('chartNoteSpec');
@@ -780,6 +939,7 @@ function renderAnalysis() {
             hollow: p.flagged, tip: tipFor(p, eps.get(p.mjd)) })),
         };
       }),
+      bands: visitBands(),
       xLabel: t('lcX'), yLabel: t('lcY'), refLine: 1, xFmt: v => mjdDate(v).slice(0, 7), yFmt: v => v.toFixed(2),
     });
     e4.chartNote.textContent = (wings ? t('chartNoteWings') + ' ' : '') + t('chartNoteLc');

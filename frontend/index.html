@@ -13,7 +13,8 @@
   <link rel="stylesheet" href="static/styles.css">
   <script>
     // theme before first paint (no flash): saved choice, else dark
-    try { const t = localStorage.getItem('radians-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) { /* private mode */ }
+    try { const t = new URLSearchParams(location.search).get('theme') || localStorage.getItem('radians-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) { /* private mode */ }
+    if (/[?&]tour=0/.test(location.search)) try { localStorage.setItem('radians-tour', 'done'); } catch (e) { /* private mode */ }
     // a shared link opens straight in the viewer
     if (/[?&](q|ra)=/.test(location.search)) document.documentElement.classList.add('in-app');
   </script>

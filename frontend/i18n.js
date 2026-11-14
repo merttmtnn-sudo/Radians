@@ -3,6 +3,11 @@
 
 const STRINGS = {
   en: {
+    cutA: "Earlier / fainter frame",
+    cutB: "Later / brighter frame",
+    cmpRadians: "Radians",
+    cmpCatalogue: "Catalogue",
+    confidence: "Significance",
     navHow: "How it works",
     navResults: "Results",
     navTeam: "Team",
@@ -99,7 +104,7 @@ const STRINGS = {
     photLoading: 'Measuring every exposure at this position…', clickHint: 'Click any star in the image to get its spectrum.',
     specX: 'Wavelength (µm)', specY: 'Brightness (µJy)', wingY: 'PSF-wing brightness (µJy, relative)',
     lcX: 'Date', lcY: 'Brightness ÷ median of the same detector',
-    chartNoteSpec: 'Each point is one SPHEREx exposure: its linear-variable filter saw this position at one wavelength. Colours are epochs; hollow points are flagged.',
+    chartNoteSpec: 'Each point is one SPHEREx exposure: its linear-variable filter saw this position at one wavelength. Points are coloured by wavelength (strip under the axis); hollow points are flagged; dashed lines mark water, methane, CO₂ and CO bands.',
     chartNoteLc: 'Each detector is divided by its own median, so all six line up at 1: points that move together away from 1 mean the source really changed.',
     chartNoteWings: 'Saturated core: brightness measured in a ring around it (2.5–4.5 px), which still follows the star.',
     epochN: 'Epoch {n}', colDate: 'Date (UTC)', colDet: 'Det', colWl: 'λ (µm)', colFlux: 'Flux (µJy)', colErr: '± (µJy)',
@@ -115,6 +120,11 @@ const STRINGS = {
     contextHelp: 'The orange box is the Radians field. Switch surveys to compare SPHEREx with 2MASS, WISE and optical images.',
   },
   tr: {
+    cutA: "Önceki / sönük kare",
+    cutB: "Sonraki / parlak kare",
+    cmpRadians: "Radians",
+    cmpCatalogue: "Katalog",
+    confidence: "Anlamlılık",
     navHow: "Nasıl çalışır",
     navResults: "Sonuçlar",
     navTeam: "Ekip",
@@ -211,7 +221,7 @@ const STRINGS = {
     photLoading: 'Bu konum her pozda ölçülüyor…', clickHint: 'Spektrumu için görüntüdeki herhangi bir yıldıza tıklayın.',
     specX: 'Dalga boyu (µm)', specY: 'Parlaklık (µJy)', wingY: 'PSF kanadı parlaklığı (µJy, göreli)',
     lcX: 'Tarih', lcY: 'Parlaklık ÷ aynı dedektörün medyanı',
-    chartNoteSpec: 'Her nokta bir SPHEREx pozu: doğrusal değişken filtresi bu konumu tek bir dalga boyunda gördü. Renkler epokları, içi boş noktalar işaretli ölçümleri gösterir.',
+    chartNoteSpec: 'Her nokta bir SPHEREx pozu: doğrusal değişken filtresi bu konumu tek bir dalga boyunda gördü. Noktalar dalga boyuna göre renkli (eksen altındaki şerit); içi boş noktalar işaretli; kesikli çizgiler su, metan, CO₂ ve CO bantlarını gösterir.',
     chartNoteLc: 'Her dedektör kendi medyanına bölünür, böylece altısı da 1’de buluşur: birlikte 1’den uzaklaşan noktalar kaynağın gerçekten değiştiğini gösterir.',
     chartNoteWings: 'Çekirdek doymuş: parlaklık çevresindeki halkada (2,5–4,5 piksel) ölçülür; bu halka yıldızı izlemeye devam eder.',
     epochN: '{n}. epok', colDate: 'Tarih (UTC)', colDet: 'Ded', colWl: 'λ (µm)', colFlux: 'Akı (µJy)', colErr: '± (µJy)',
