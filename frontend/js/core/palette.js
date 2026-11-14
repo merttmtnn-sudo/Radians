@@ -4,7 +4,7 @@
 import { PALETTE_STOPS } from '../blink/sky.js';
 
 export const MAP_PALETTES = ['gray', 'invert', 'inferno', 'viridis', 'tint', 'rgb'];
-const VIEWER = new Set(['gray', 'invert', 'heat', 'inferno', 'viridis']);
+const VIEWER = new Set(['gray', 'invert', 'heat', 'inferno', 'viridis', 'rgb']);   // rgb: three-detector colour in the blink
 const KEY = 'radians-palette';
 
 let current = 'gray';

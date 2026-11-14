@@ -375,6 +375,13 @@ def match_wavelengths(frames: list[Frame], all_detectors: bool):
     return kept, weights, info
 
 
+def in_window(frames: list[Frame], lo: float, hi: float) -> list[Frame]:
+    """Exposures that saw the target at a wavelength in [lo, hi] micron. SPHEREx's linear-variable
+    filters give each exposure its own wavelength, so this picks one slice of the 102-band spectrum
+    from data already read; the wavelength is taken at the target, which holds across a few arcminutes."""
+    return [f for f in frames if f.wavelength is not None and lo <= f.wavelength <= hi]
+
+
 def group_raw(frames: list[Frame], mode: str, matched: bool = False):
     """Group frames ('epoch', 'epoch_detector' or 'exposure') and co-add each group (arrays kept).
     matched: co-add only wavelength-matched exposures (see match_wavelengths)."""
