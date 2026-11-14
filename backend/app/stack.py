@@ -80,12 +80,12 @@ def _cutout_cached(exp: Exposure, ra, dec, half):
         c = _load(cdir / (hashlib.sha1(f"{exp.url}|{ra:.5f}|{dec:.5f}|{half}".encode()).hexdigest() + ".pkl"))
     if c is not None and _covers(c, ra, dec, half):
         if not p.exists():
-            p.write_bytes(pickle.dumps(c))
+            config.atomic_write(p, pickle.dumps(c))
         return c
     c = fitsrange.read_cutout(exp.url, ra, dec, half)
     p.parent.mkdir(parents=True, exist_ok=True)
     if c is not None:
-        p.write_bytes(pickle.dumps(c))
+        config.atomic_write(p, pickle.dumps(c))
     return c
 
 

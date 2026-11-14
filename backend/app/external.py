@@ -27,7 +27,7 @@ def _cached(kind, key, ttl, fn):
         return json.loads(p.read_text())
     out = fn()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(out))
+    config.atomic_write(p, json.dumps(out))
     return out
 
 

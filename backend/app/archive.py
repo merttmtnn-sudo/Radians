@@ -62,7 +62,7 @@ def query_exposures(ra: float, dec: float) -> list[Exposure]:
                 mjd_start=float(row["t_min"]), mjd_end=float(row["t_max"]),
                 wl_min=float(row["em_min"]) * 1e6, wl_max=float(row["em_max"]) * 1e6,
                 exptime=float(row["t_exptime"]), collection=coll))
-        path.write_text(json.dumps([asdict(e) for e in rows]))
+        config.atomic_write(path, json.dumps([asdict(e) for e in rows]))
         out += rows
     # the same exposure can appear in two releases: keep the newest collection listed first
     seen, uniq = set(), []
@@ -121,6 +121,6 @@ def resolve(query: str) -> dict:
                 return float(v) if v not in (None, "") else None
             out = {"name": res.findtext("oname") or query, "ra": float(ra), "dec": float(dec),
                    "pmra": num("pmRA"), "pmdec": num("pmDE"), "source": res.get("name", "Sesame")}
-            path.write_text(json.dumps(out))
+            config.atomic_write(path, json.dumps(out))
             return out
     raise LookupError(f"'{query}' could not be resolved")

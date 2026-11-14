@@ -44,3 +44,22 @@ RATE_FRAMES = int(os.getenv("RATE_FRAMES", "20"))           # /api/frames per vi
 RATE_PHOT = int(os.getenv("RATE_PHOT", "90"))               # /api/photometry per visitor per minute
 MAX_COLD_BUILDS = int(os.getenv("MAX_COLD_BUILDS", "2"))    # positions read from IRSA at the same time
 CACHE_MAX_MB = int(os.getenv("CACHE_MAX_MB", "4000"))       # cut-out cache size before oldest files go
+
+
+def atomic_write(path, data):
+    """Write a cache file so readers in other threads never see it half-written (they would get
+    truncated FITS/pickles, or a SIGBUS through a memory map)."""
+    import tempfile
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data.encode() if isinstance(data, str) else data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise

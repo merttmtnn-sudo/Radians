@@ -192,7 +192,7 @@ def _template(url):
              "flags_hlen": h["FLAGS"].data_start - h["FLAGS"].start,
              "var_hlen": h["VARIANCE"].data_start - h["VARIANCE"].start}
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(t))
+        config.atomic_write(path, json.dumps(t))
     with _tlock:
         _templates[key] = t
     return t
@@ -293,8 +293,8 @@ def wave_table(url: str, detector: int) -> fits.BinTableHDU:
         fits.PrimaryHDU().writeto(buf)
         buf.write(raw + b"\0" * (_padded(len(raw)) - len(raw)))
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(buf.getvalue())
-    with fits.open(path) as f:
+        config.atomic_write(path, buf.getvalue())
+    with fits.open(io.BytesIO(path.read_bytes()), memmap=False) as f:
         tab = fits.BinTableHDU(data=f[1].data.copy(), header=f[1].header.copy())
     with _wlock:
         _wave[key] = tab
