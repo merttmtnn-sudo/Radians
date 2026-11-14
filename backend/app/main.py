@@ -452,3 +452,54 @@ def _warm_on_start():
         print("demo load failed:", repr(e), flush=True)
     if os.getenv("WARM_ON_START", "0") == "1":
         threading.Thread(target=warm, name="warm", daemon=True).start()
+
+
+# ---------------------------------------------------------------- "for the curious" tools under the spectrum
+from . import curious  # noqa: E402
+
+
+def _try(fn, *args):
+    """A catalogue tool's answer, or {"reachable": false} when its service is down (never a 5xx)."""
+    try:
+        return {"reachable": True, **fn(*args)}
+    except Exception as e:  # noqa: BLE001  (optional services)
+        return {"reachable": False, "error": str(e)[:200]}
+
+
+@app.get("/api/curious/hr")
+def curious_hr(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+               gaia_id: str | None = Query(None, max_length=40)):
+    """Gaia stars within half a degree with good parallaxes (colour, absolute magnitude), and this star."""
+    out = _try(lambda: {"stars": curious.hr_field(ra, dec)})
+    if out["reachable"]:
+        out["star"] = _try(curious.gaia_star, gaia_id) if gaia_id else {"reachable": True, "found": False}
+    return out
+
+
+@app.get("/api/curious/motion")
+def curious_motion(gaia_id: str = Query(..., max_length=40)):
+    """Gaia DR3 proper motion, direction, parallax and speed across the sky of one source."""
+    return _try(curious.gaia_star, gaia_id)
+
+
+class PeriodPoint(BaseModel):
+    mjd: float | None = None
+    wavelength: float | None = None
+    value: float | None = None
+
+
+class PeriodRequest(BaseModel):
+    points: list[PeriodPoint] = Field(..., max_length=5000)
+
+
+@app.post("/api/curious/period")
+def curious_period(req: PeriodRequest):
+    """Does the light curve have a rhythm? Lomb-Scargle on brightness relative to the usual at each wavelength."""
+    return curious.period_search([p.model_dump() for p in req.points])
+
+
+@app.get("/api/curious/xmatch")
+def curious_xmatch(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+                   pmra: float = Query(0.0), pmdec: float = Query(0.0), mjd: float = Query(51544.5)):
+    """The same star in 2MASS and AllWISE (VizieR), looked for where it was when each survey saw it."""
+    return {"surveys": curious.cross_match(ra, dec, pmra, pmdec, mjd)}

@@ -77,6 +77,7 @@ Radians/
 │   │   ├── stack.py             reprojection, background subtraction, epochs, co-adds
 │   │   ├── spectype.py          spectral type from a spectrum (standards + brown-dwarf models), fingerprints
 │   │   ├── typecat.py           SIMBAD spectral type and Gaia DR3 parameters of one object
+│   │   ├── curious.py           "for the curious" tools: H-R diagram data, speed, period search, 2MASS / AllWISE
 │   │   ├── detect.py            moving / variable candidate finder
 │   │   ├── external.py          Gaia DR3, SkyBoT, NEOSSat (CADC) lookups
 │   │   ├── explorer.py          planetarium API (/api/sx/…) and the infrared-RGB HiPS tiles (/hips/spherex-color)
@@ -102,6 +103,7 @@ Radians/
 │   │   │   ├── app.js           viewer: search, playback, candidates, spectra, sharing
 │   │   │   ├── sky.js           image maths: stretch, stacking, WCS, decoding
 │   │   │   ├── typebox.js       "Type" box under the spectrum: catalogues vs our fit, fingerprints
+│   │   │   ├── curious.js       "For the curious": H-R diagram, how it moves, does it pulse, other catalogues
 │   │   │   ├── depth.js         "sharpening": the image gets cleaner as exposures pile up
 │   │   │   └── gif.js           GIF export
 │   │   ├── map/
@@ -170,6 +172,7 @@ Manual Deploy → Deploy latest commit in the dashboard.
 | `GET /api/observations?ra=&dec=` | SPHEREx exposures covering a position |
 | `GET /api/frames?ra=&dec=&fov=300&mode=epoch` | aligned frames (`epoch`, `epoch_detector`, `exposure`) + photometry + candidates |
 | `POST /api/spectype` | spectral type and molecular fingerprints of a spectrum (its points in the body); with `catalogues: true` also SIMBAD's type, Gaia DR3 parameters and whether they agree with the fit |
+| `GET /api/curious/hr`, `/api/curious/motion`, `/api/curious/xmatch`, `POST /api/curious/period` | the "for the curious" tools: Gaia neighbours for an H-R diagram, Gaia motion and speed, 2MASS / AllWISE entries, Lomb-Scargle period of a light curve |
 | `GET /api/progress?job=` | progress of a running `/api/frames?…&job=` request |
 | `GET /api/photometry?ra=&dec=&fov=&x=&y=` | per-exposure brightness and wavelength at one pixel: an on-the-fly spectrum |
 | `GET /api/gaia?ra=&dec=&radius=` | Gaia DR3 stars (ESA archive), with proper motions |
