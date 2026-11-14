@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+backend/.cache/
+explore/*.fits
+explore/*.txt
+.pytest_cache/

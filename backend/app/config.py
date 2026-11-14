@@ -1,0 +1,33 @@
+"""Runtime settings. Everything can be overridden with environment variables so a new
+SPHEREx data release only needs SPHEREX_COLLECTIONS to change (e.g. "spherex_dr2,spherex_dr1")."""
+import os
+from pathlib import Path
+
+IRSA_SIA = os.getenv("IRSA_SIA", "https://irsa.ipac.caltech.edu/SIA")
+COLLECTIONS = [c.strip() for c in os.getenv("SPHEREX_COLLECTIONS", "spherex_dr1").split(",") if c.strip()]
+SESAME = "https://cds.unistra.fr/cgi-bin/nph-sesame/-oxp/SNV"
+
+CACHE_DIR = Path(os.getenv("CACHE_DIR", Path(__file__).resolve().parents[1] / ".cache"))
+SIA_TTL_S = int(os.getenv("SIA_TTL_S", 12 * 3600))  # re-ask the archive twice a day for new data
+
+PIXEL_SCALE = 6.15          # arcsec / SPHEREx pixel
+DETECTOR_SIZE = 2040
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", 12))
+EPOCH_GAP_DAYS = 20.0       # observations further apart than this start a new epoch
+DEFAULT_FOV = 300.0         # arcsec
+MIN_FOV, MAX_FOV = 60.0, 1800.0
+APERTURE_PX = 2.0           # photometry aperture radius in output pixels
+
+# SPHEREx Level-2 FLAGS bits: MSKN/MSKD header keywords of DR1 (v27) files, as listed in the IRSA
+# SPHEREx tutorial; bits 29+ from the IRSA spectrophotometry tool notes. Authoritative: Table 16 of
+# the SPHEREx Explanatory Supplement.
+FLAG_BITS = {
+    0: "TRANSIENT", 1: "OVERFLOW", 2: "SUR_ERROR", 6: "NONFUNC", 7: "DICHROIC", 9: "MISSING_DATA",
+    10: "HOT", 11: "COLD", 12: "FULLSAMPLE", 14: "PHANMISS", 15: "NONLINEAR", 17: "PERSIST",
+    19: "OUTLIER", 20: "CROSSTALK", 21: "SOURCE", 22: "GHOST", 23: "GHOST_FPA", 24: "GHOST_EXT",
+    25: "STREAK", 26: "BLOOM", 27: "SNOWBALL", 28: "HALO", 29: "SATELLITE_HALO",
+}
+# Same exclusion list IRSA's own SPHEREx spectrophotometry tool uses for its fits.
+BAD_BITS = ["SUR_ERROR", "NONFUNC", "MISSING_DATA", "HOT", "COLD", "NONLINEAR", "PERSIST",
+            "BLOOM", "SNOWBALL", "HALO", "SATELLITE_HALO"]
+BAD_MASK = sum(1 << b for b, n in FLAG_BITS.items() if n in BAD_BITS)
