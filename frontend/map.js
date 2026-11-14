@@ -388,7 +388,7 @@ async function loadDeep() {
   }, 1500);
   try {
     const q = new URLSearchParams({ ra: ra.toFixed(6), dec: dec.toFixed(6), fov, mode: 'epoch', detectors: String(deep.det),
-      matched: 'false', candidates: 'false', quick: '1', job });
+      matched: 'false', candidates: 'false', job });
     const r = await fetch(new URL(`api/frames?${q}`, location.href));
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);

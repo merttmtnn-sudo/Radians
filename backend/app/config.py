@@ -45,11 +45,6 @@ RATE_PHOT = int(os.getenv("RATE_PHOT", "90"))               # /api/photometry pe
 MAX_COLD_BUILDS = int(os.getenv("MAX_COLD_BUILDS", "2"))    # positions read from IRSA at the same time
 CACHE_MAX_MB = int(os.getenv("CACHE_MAX_MB", "4000"))       # cut-out cache size before oldest files go
 
-# speed of a first look at a new position (measured: IRSA throttles parallel requests per client;
-# 12 in flight gave 1.3 exposures/s, 32 gave 0.6/s, 64 gave 0.3/s)
-IRSA_MAX_INFLIGHT = int(os.getenv("IRSA_MAX_INFLIGHT", "8"))  # range requests in flight, whole server
-QUICK_PER_EPOCH = int(os.getenv("QUICK_PER_EPOCH", "6"))      # quick look: exposures per epoch and detector
-
 
 def atomic_write(path, data):
     """Write a cache file so readers in other threads never see it half-written (they would get

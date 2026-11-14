@@ -11,7 +11,7 @@ const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
   'search', 'q', 'fov', 'mode', 'go', 'sky', 'overlay', 'stage', 'empty', 'loading', 'loadingMsg', 'loadingSub',
   'play', 'prev', 'next', 'scrub', 'fps', 'fpsVal', 'timeline', 'frameInfo', 'cursor', 'stretch', 'cmap', 'lo', 'hi',
-  'cross', 'flagView', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'quickNote', 'view', 'viewHelp', 'detchips',
+  'cross', 'flagView', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'view', 'viewHelp', 'detchips',
   'preset', 'loadingBar', 'wlMatch', 'zoom', 'gif', 'cands', 'candCount', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples', 'compare', 'listen',
 ].map(id => [id, $(id)]));
 
@@ -144,16 +144,11 @@ async function run(opts) {
         }
       } catch { /* progress is cosmetic */ }
     }, 1000);
-    const params = {
+    const data = await api('api/frames', {
       ra: target.ra.toFixed(6), dec: target.dec.toFixed(6), fov: opts.fov, mode: opts.mode,
-      pmra: target.pmra, pmdec: target.pmdec, detectors: [...state.dets].sort().join(','),
+      pmra: target.pmra, pmdec: target.pmdec, detectors: [...state.dets].sort().join(','), job,
       matched: els.wlMatch.checked,
-    };
-    els.quickNote.textContent = '';
-    // quick=1: a cached full view comes back as is; a new position comes back as a quick look
-    // on a time-spread subset, and fillIn() reads the rest in the background.
-    const data = await api('api/frames', { ...params, job, quick: 1 }, ctl.signal);
-    if (data.quick) fillIn(params, data, ctl);
+    }, ctl.signal);
     if (!data.frames || !data.frames.length) {
       state.data = null;
       els.empty.hidden = false;
@@ -174,35 +169,6 @@ async function run(opts) {
     clearInterval(tick);
     clearInterval(poll);
     if (state.abort === ctl) { setLoading(false); els.loadingBar.hidden = true; }
-  }
-}
-
-async function fillIn(params, quickData, ctl) {
-  const job = Math.random().toString(36).slice(2, 12);
-  const n = quickData.n_exposures_read, total = quickData.n_exposures_total;
-  // the server counts every exposure of the full read (cached ones included), so show done/total of all
-  const note = (done) => { els.quickNote.textContent = t('quickNote', { n, total, done }); };
-  note(0);
-  const poll = setInterval(async () => {
-    try {
-      const p = await api('api/progress', { job }, ctl.signal);
-      if (p.stage === 'read' && p.total) note(p.done);
-    } catch { /* progress is cosmetic */ }
-  }, 1500);
-  try {
-    const full = await api('api/frames', { ...params, job }, ctl.signal);
-    if (state.abort !== ctl || !full.frames || !full.frames.length) return;   // the visitor moved on
-    const wasPlaying = state.playing, idx = Math.min(state.idx, full.frames.length - 1);
-    const click = ex.click;                        // a star the visitor clicked during the quick look
-    load(full, idx);                               // load() → onLoaded() resets the analysis to the target…
-    if (click && !ex.click) photAt(click.x, click.y);   // …so measure their star again, now on every exposure
-    if (wasPlaying) play();
-    els.quickNote.textContent = t('quickFull', { total: full.n_exposures_read });
-    setTimeout(() => { if (state.data === full) els.quickNote.textContent = ''; }, 5000);
-  } catch (e) {
-    if (e.name !== 'AbortError') { els.quickNote.textContent = ''; toast(e.message, true); }
-  } finally {
-    clearInterval(poll);
   }
 }
 
@@ -436,7 +402,6 @@ function renderCandidates() {
   const cands = state.data?.candidates || [];
   els.candCount.textContent = state.data ? `(${cands.length})` : '';
   if (!state.data) { els.cands.replaceChildren(); return; }
-  if (state.data.quick) { els.candCount.textContent = '(…)'; els.cands.replaceChildren(el('li', 'muted small', t('candsPending'))); return; }
   if (!cands.length) { els.cands.replaceChildren(el('li', 'muted small', t('noCands'))); return; }
   els.cands.replaceChildren(...cands.map((c, i) => {
     const li = el('li', 'cand' + (i === state.selected ? ' on' : ''));

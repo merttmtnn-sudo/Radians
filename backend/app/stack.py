@@ -253,26 +253,6 @@ def build_frames(exps: list[Exposure], ra, dec, n, target, progress=None) -> lis
     return [f for f in out if f is not None]
 
 
-def quick_subset(exps: list, per: int) -> list:
-    """A first look at a new position: at most `per` exposures for every (epoch, detector), spread
-    evenly in time, so each epoch and detector is still represented. The full read reuses these
-    cut-outs from the cache, so nothing is fetched twice."""
-    if per <= 0:
-        return list(exps)
-    order = sorted(range(len(exps)), key=lambda i: exps[i].mjd)
-    ep = epochs([exps[i].mjd for i in order])
-    groups: dict = {}
-    for k, i in enumerate(order):
-        groups.setdefault((ep[k], exps[i].detector), []).append(i)
-    keep = []
-    for idx in groups.values():
-        if len(idx) <= per:
-            keep += idx
-        else:
-            keep += [idx[j] for j in sorted(set(np.linspace(0, len(idx) - 1, per).round().astype(int)))]
-    return [exps[i] for i in sorted(keep, key=lambda i: exps[i].mjd)]
-
-
 # ---------------------------------------------------------------- grouping
 def epochs(mjds: list[float]) -> list[int]:
     """Epoch index per (sorted) mjd: a gap longer than EPOCH_GAP_DAYS starts a new epoch."""

@@ -167,23 +167,15 @@ def _report(job, **kw):
             _progress.popitem(last=False)
 
 
-_building: dict = {}          # key -> Event while a build runs: a second request waits instead of reading twice
-
-
-def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job=None, quick=False):
-    """Read, align and cache the frames of one view. quick=True reads only a time-spread subset
-    (stack.quick_subset) so a new position shows a blink in about a minute; a later full request
-    reuses those cut-outs and reads the rest."""
+def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job=None):
     fov = min(max(fov, config.MIN_FOV), config.MAX_FOV)
     n = int(round(fov / config.PIXEL_SCALE)) | 1                     # odd -> target on a pixel centre
     dets = tuple(sorted({int(d) for d in detectors.split(",") if d.strip().isdigit()}))
     key = (round(ra, 6), round(dec, 6), n, dets, pmra, pmdec, ref_epoch, max_exposures)
-    qkey = key + ("quick",)
     with _built_lock:
-        for k in ((key, qkey) if quick else (key,)):                # a full view is always good enough
-            if k in _built:
-                _built.move_to_end(k)
-                return _built[k]
+        if key in _built:
+            _built.move_to_end(key)
+            return _built[key]
     _report(job, stage="search")
     exps = [e for e in _exposures(ra, dec) if e.detector in dets]
     if len(exps) > max_exposures:                                   # thin evenly in time
@@ -191,56 +183,28 @@ def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job=N
         exps = [exps[i] for i in sorted(set(idx))]
     if not exps:
         return None
-    n_total = len(exps)
-    if quick:
-        sub = stack.quick_subset(exps, config.QUICK_PER_EPOCH)
-        quick = len(sub) < len(exps)                                # nothing to skip: just do the full read
-        if quick:
-            exps = sub
-    k = qkey if quick else key
-    with _built_lock:                                               # one build per view at a time
-        ev = _building.get(k)
-        owner = ev is None
-        if owner:
-            ev = _building[k] = threading.Event()
-    if not owner:
-        _report(job, stage="queue")
-        ev.wait(timeout=900)
-        with _built_lock:
-            if k in _built:
-                return _built[k]
-        raise HTTPException(503, "The server is busy reading this position; please try again in a minute.",
+    # centre the grid on the target's mean position during the SPHEREx observations
+    mean_mjd = float(np.mean([e.mjd for e in exps]))
+    cra, cdec = stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mean_mjd)
+    target = lambda mjd: stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mjd)  # noqa: E731
+    _report(job, stage="queue")
+    if not _cold.acquire(timeout=120):
+        raise HTTPException(503, "The server is busy reading other positions; please try again in a minute.",
                             headers={"Retry-After": "60"})
     try:
-        # centre the grid on the target's mean position during the SPHEREx observations
-        mean_mjd = float(np.mean([e.mjd for e in exps]))
-        cra, cdec = stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mean_mjd)
-        target = lambda mjd: stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mjd)  # noqa: E731
-        _report(job, stage="queue")
-        if not _cold.acquire(timeout=120):
-            raise HTTPException(503, "The server is busy reading other positions; please try again in a minute.",
-                                headers={"Retry-After": "60"})
-        try:
-            _report(job, stage="read", done=0, total=len(exps), quick=quick, total_all=n_total)
-            frs = stack.build_frames(exps, cra, cdec, n, target, progress=lambda i, kk: _report(job, done=i, total=kk))
-        finally:
-            _cold.release()
-        threading.Thread(target=stack.prune_cache, daemon=True).start()
-        _report(job, stage="process")
-        if not frs:
-            raise HTTPException(502, "could not read any SPHEREx exposure for this position")
-        built = {"frs": frs, "n": n, "ra": cra, "dec": cdec, "w": stack.output_wcs(cra, cdec, n),
-                 "quick": quick, "n_total": n_total}
-        with _built_lock:
-            _built[k] = built
-            if not quick:
-                _built.pop(qkey, None)                              # the full view replaces the quick one
-            _evict()
-        return built
+        _report(job, stage="read", done=0, total=len(exps))
+        frs = stack.build_frames(exps, cra, cdec, n, target, progress=lambda i, k: _report(job, done=i, total=k))
     finally:
-        with _built_lock:
-            _building.pop(k, None)
-        ev.set()
+        _cold.release()
+    threading.Thread(target=stack.prune_cache, daemon=True).start()
+    _report(job, stage="process")
+    if not frs:
+        raise HTTPException(502, "could not read any SPHEREx exposure for this position")
+    built = {"frs": frs, "n": n, "ra": cra, "dec": cdec, "w": stack.output_wcs(cra, cdec, n)}
+    with _built_lock:
+        _built[key] = built
+        _evict()
+    return built
 
 
 @app.get("/api/frames")
@@ -257,17 +221,15 @@ def frames(
     candidates: bool = Query(True, description="run the moving / variable / transient finder"),
     job: str | None = Query(None, max_length=40, pattern=r"^[A-Za-z0-9_-]+$", description="id for /api/progress"),
     matched: bool = Query(True, description="co-add only wavelength-matched exposures (visits compared like for like)"),
-    quick: bool = Query(False, description="first look: read a time-spread subset now (call again without quick for all)"),
 ):
-    b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job, quick)
+    b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job)
     if b is None:
         return {"grid": None, "frames": [], "exposures": [], "message": "SPHEREx has not observed this position yet."}
     frs, n, w = b["frs"], b["n"], b["w"]
     raw = {m: stack.group_raw(frs, m, matched) for m in {mode, "epoch", "epoch_detector"} if m == mode or candidates}
     out_frames = stack.encode(raw[mode])
     cands = []
-    is_quick = bool(b.get("quick"))
-    if candidates and not is_quick:                # the finder needs every exposure: run it on the full read
+    if candidates:
         try:
             cands = detect.find_candidates(raw["epoch"], raw["epoch_detector"], w, ((n - 1) / 2, (n - 1) / 2))
         except Exception as e:                       # the finder is a helper, never break the viewer
@@ -281,7 +243,6 @@ def frames(
         "query": {"ra": ra, "dec": dec, "pmra": pmra, "pmdec": pmdec, "ref_epoch": ref_epoch, "mode": mode},
         "flag_bits": {str(bit): name for bit, name in config.FLAG_BITS.items()}, "bad_mask": config.BAD_MASK,
         "frames": out_frames, "exposures": phot, "n_exposures_read": len(frs),
-        "quick": is_quick, "n_exposures_total": b.get("n_total", len(frs)),
         "candidates": cands, "detectors": config.DETECTORS,
     }
 
