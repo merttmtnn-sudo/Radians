@@ -227,6 +227,16 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .candhead { display: block; width: 100%; text-align: left; background: none; border: none; padding: 10px 12px 6px; font-size: 13px; cursor: pointer; color: var(--fg-2); }
 .candhead b { margin-right: 4px; color: var(--fg); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.candrange { font-size: 12px; font-weight: 400; color: var(--fg-3); margin-left: 4px; }
+.candsub { display: block; margin-top: 2px; padding-left: 16px; }
+.candnotes { padding: 0 12px 8px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; color: var(--fg-2); }
+.candnotes p { margin: 0; }
+.candcat.new { color: var(--fg); border-left: 2px solid var(--accent); padding-left: 8px; }
+.candcat.partly, .candcat.unchecked, .candcat.wait { color: var(--fg-3); }
+.candwarn { color: var(--accent); }
+.candbtns { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 12px; }
+.cuts figure:first-child canvas { outline: 1px solid var(--fg-3); }
+.cuts figure:last-child canvas { outline: 1px solid var(--accent); }
 .tags { padding: 0 12px 8px; display: flex; gap: 4px; flex-wrap: wrap; }
 .canddetail { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .candacts { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }

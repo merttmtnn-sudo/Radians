@@ -9,6 +9,7 @@ import { CUBE_URL, nearestSlice } from '../core/cube.js';
 import { depthStart, depthLive, depthLoad, depthHide } from './depth.js';
 import { getPalette, setPalette, viewerCmap } from '../core/palette.js';
 import { curated } from '../content/facts.js';
+import { headline, clarity, catalogueStatus, nearestAt, tooFast, cleanId, CAT_NAMES } from './finds.js';
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
@@ -16,7 +17,7 @@ const els = Object.fromEntries([
   'play', 'prev', 'next', 'scrub', 'fps', 'fpsVal', 'timeline', 'frameInfo', 'cursor', 'stretch', 'cmap', 'lo', 'hi',
   'wlWin', 'wlBox', 'wlC', 'wlW', 'wlLab', 'rgbNote',
   'cross', 'flagView', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'view', 'viewHelp', 'detchips',
-  'preset', 'loadingBar', 'wlMatch', 'zoom', 'gif', 'cands', 'candCount', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples', 'compare', 'listen',
+  'preset', 'loadingBar', 'wlMatch', 'zoom', 'gif', 'cands', 'candCount', 'candRange', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples', 'compare', 'listen',
 ].map(id => [id, $(id)]));
 
 const ALL_DETS = [1, 2, 3, 4, 5, 6];
@@ -446,29 +447,97 @@ function candText(c) {
   return t('transientDesc', { epoch: c.epoch, sig: c.significance });
 }
 
+function monthLabel(iso) {
+  const d = new Date(String(iso).slice(0, 10) + 'T00:00:00Z');
+  return Number.isNaN(d.getTime()) ? String(iso).slice(0, 7)
+    : d.toLocaleDateString(getLang() === 'tr' ? 'tr-TR' : 'en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
+function epochMonth(e) {
+  const f = state.data.frames.find(fr => fr.epoch === e);
+  return f ? monthLabel(f.date_start) : `E${e}`;
+}
+
+// Gaia DR3, SIMBAD and CatWISE2020 for one candidate: which could be asked, and what they list here
+function catalogueHits(c) {
+  const mjd = c.mjd ?? (c.points?.length ? c.points[0].mjd : currentMjd());
+  const xm = (k) => (!ex.xm[k] ? 'wait' : ex.xm[k].ok ? 'ok' : 'fail');
+  const g = catalogMatch(c);
+  const states = { gaia: ex.gaiaState, simbad: xm('simbad'), catwise: xm('catwise') };
+  const hits = { gaia: g && g !== 'unchecked' ? g : null };
+  for (const k of ['simbad', 'catwise']) hits[k] = states[k] === 'ok' ? nearestAt(ex.xm[k].rows, c, mjd) : null;
+  return { states, hits };
+}
+
+// The two visits a variable's card shows side by side: is the later one the brighter?
+function candPair(c) {
+  const fs = state.data.frames;
+  if (c.type !== 'variable' || !state.images.length || fs.length > 60) return null;
+  try {
+    const { a, b } = candFrames(c);                              // a: fainter frame, b: brighter frame
+    if (a === b) return null;
+    const brighter = fs[b].mjd > fs[a].mjd;
+    return { brighter, from: (brighter ? fs[a] : fs[b]).epoch, to: (brighter ? fs[b] : fs[a]).epoch };
+  } catch { return null; }
+}
+
+function measureCand(c) {
+  if (c.type !== 'moving') ex.tab = 'lightcurve';
+  photAt(c.x, c.y).then(() => e4.analysis.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+}
+
 function renderCandidates() {
   const cands = state.data?.candidates || [];
   els.candCount.textContent = state.data ? `(${cands.length})` : '';
+  els.candRange.textContent = '';
   if (!state.data) { els.cands.replaceChildren(); return; }
+  const fs = state.data.frames;
+  const epochs = [...new Set(fs.map(f => f.epoch))].sort((a, b) => a - b);
+  if (epochs.length > 1) els.candRange.textContent = t('fBetween', { a: monthLabel(fs[0].date_start), b: monthLabel(fs[fs.length - 1].date_start) });
   if (!cands.length) { els.cands.replaceChildren(el('li', 'muted small', t('noCands'))); return; }
   els.cands.replaceChildren(...cands.map((c, i) => {
     const li = el('li', 'cand' + (i === state.selected ? ' on' : ''));
     const head = el('button', 'candhead');
     head.type = 'button';
+    head.title = `${t(c.type)}: ${candText(c)}`;                 // the exact numbers stay one hover away
     const dot = el('span', 'dot');
     dot.style.background = COLORS[c.type];
-    head.append(dot, el('b', '', t(c.type)), el('span', 'small', ' ' + candText(c)));
+    const hl = headline(c, epochs, candPair(c));
+    const title = t(hl.key, { ...hl.vars, dir: hl.vars.dir ? t('dir_' + hl.vars.dir) : '' });
+    const when = hl.from && hl.to && hl.from !== hl.to ? t('fBetween', { a: epochMonth(hl.from), b: epochMonth(hl.to) })
+      : hl.from || hl.to ? epochMonth(hl.from || hl.to) : t('fPasses', { n: c.points?.length ?? epochs.length });
+    const cl = clarity(c.significance);
+    head.append(dot, el('b', '', title),
+      el('span', 'candsub small', `${t(c.type)} · ${when}`),
+      el('span', 'candsub small', t(cl.key, cl.vars)));
     head.onclick = () => { state.selected = state.selected === i ? null : i; renderCandidates(); drawOverlay(); };
     li.append(head);
     const known = catalogMatch(c);
-    const tags = el('div', 'tags');
-    if (c.is_target) tags.append(el('span', 'tag', t('isTarget')));
-    if (known === 'unchecked') { /* Gaia not loaded (yet): say nothing */ }
-    else if (known) tags.append(el('span', 'tag', t('knownGaia', { g: known.g?.toFixed(1) ?? '?', pm: (Math.hypot(known.pmra || 0, known.pmdec || 0) / 1000).toFixed(2) })));
-    else if (!c.is_target) tags.append(el('span', 'tag new', t('notInGaia')));   // your own target: say nothing
-    if (c.low_confidence) tags.append(el('span', 'tag warn', t('lowConf')));
-    if (tags.childElementCount) li.append(tags);
+    const { states, hits } = catalogueHits(c);
+    const cat = catalogueStatus(c, states, hits);
+    const notes = el('div', 'candnotes small');
+    if (c.is_target) notes.append(el('span', 'tag', t('isTarget')));
+    if (cat) {
+      const line = el('p', 'candcat ' + cat.kind, t(cat.key, cat.vars));
+      if (hits.gaia) line.title = t('knownGaia', { g: hits.gaia.g?.toFixed(1) ?? '?', pm: (Math.hypot(hits.gaia.pmra || 0, hits.gaia.pmdec || 0) / 1000).toFixed(2) });
+      notes.append(line);
+    }
+    if (tooFast(c)) notes.append(el('p', 'candwarn', t('fTooFast')));
+    if (c.low_confidence) notes.append(el('p', 'candwarn', t('fSaturated')));
+    if (notes.childElementCount) li.append(notes);
     try { li.append(candVisual(c, known)); } catch (err) { console.warn('candidate visual', err); }
+    const measure = el('button', 'btn sm', t('fMeasure'));
+    measure.type = 'button';
+    measure.onclick = () => measureCand(c);
+    const rep = el('button', 'btn sm', t('copyReport'));
+    rep.type = 'button';
+    rep.onclick = async () => {
+      try { await navigator.clipboard.writeText(candReport(c, known)); toast(t('copied')); }
+      catch { toast(t('copyFail'), true); }
+    };
+    const btns = el('div', 'candbtns');
+    btns.append(measure, rep);
+    li.append(btns);
     if (i === state.selected) {
       const d = el('div', 'canddetail small');
       d.append(el('div', '', `${formatRA(c.ra)} ${formatDec(c.dec)}`));
@@ -476,17 +545,11 @@ function renderCandidates() {
       a.href = `https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=${c.ra.toFixed(5)}+${c.dec >= 0 ? '%2B' : ''}${c.dec.toFixed(5)}&Radius=15&Radius.unit=arcsec`;
       a.target = '_blank';
       a.rel = 'noopener';
-      const rep = el('button', 'linkbtn', t('copyReport'));
-      rep.type = 'button';
-      rep.onclick = async () => {
-        try { await navigator.clipboard.writeText(candReport(c, known)); toast(t('copied')); }
-        catch { toast(t('copyFail'), true); }
-      };
       const png = el('button', 'linkbtn', t('saveFinding'));
       png.type = 'button';
       png.onclick = () => saveFinding(c, known);
       const acts = el('div', 'candacts');
-      acts.append(a, rep, png);
+      acts.append(a, png);
       d.append(acts);
       li.append(d);
     }
@@ -651,21 +714,9 @@ function candVisual(c, known) {
 // Is this candidate a star Gaia DR3 already lists? (Gaia moved to the candidate's date; a mover must
 // also move like the Gaia star.) Returns the Gaia source, null (not in Gaia) or 'unchecked'.
 function catalogMatch(c) {
-  if (typeof ex === 'undefined' || !ex.gaia || !ex.gaia.length || !state.data) return 'unchecked';
+  if (ex.gaiaState !== 'ok' || !state.data) return 'unchecked';
   const mjd = c.mjd ?? (c.points?.length ? c.points[0].mjd : currentMjd());
-  const cosd = Math.cos(c.dec * Math.PI / 180);
-  let best = null, bd = 1e9;
-  for (const s of ex.gaia) {
-    const [ra, dec] = gaiaAt(s, mjd);
-    const d = Math.hypot((ra - c.ra) * cosd, dec - c.dec) * 3600;
-    if (d < bd) { bd = d; best = s; }
-  }
-  if (!best || bd > 7) return null;                        // ~1 SPHEREx pixel
-  if (c.type === 'moving') {
-    const pm = Math.hypot(best.pmra || 0, best.pmdec || 0) / 1000;
-    if (Math.abs(pm - c.rate_arcsec_yr) > Math.max(1.5, 0.3 * pm)) return null;
-  }
-  return best;
+  return nearestAt(ex.gaia, c, mjd);                       // ~1 SPHEREx pixel; movers must move alike
 }
 
 function candReport(c, known) {
@@ -677,6 +728,10 @@ function candReport(c, known) {
     `Visits: ${fs.length}, ${fs[0].date_start.slice(0, 10)} to ${fs[fs.length - 1].date_end.slice(0, 10)}; detectors ${[...state.dets].sort().map(d => 'D' + d).join(' ')}`,
     `Field: ${formatRA(g.ra)} ${formatDec(g.dec)}, ${(g.fov / 60).toFixed(1)}' wide`,
     `Gaia DR3: ${known === 'unchecked' ? 'not checked' : known ? `source ${known.id}, G ${known.g?.toFixed(2)}, pm ${(Math.hypot(known.pmra || 0, known.pmdec || 0) / 1000).toFixed(3)}"/yr` : 'no match within 7" (G < 19)'}`,
+    ...['simbad', 'catwise'].map((k) => {
+      const { states, hits } = catalogueHits(c);
+      return `${CAT_NAMES[k]}: ${states[k] !== 'ok' ? 'not checked' : hits[k] ? cleanId(hits[k].id) + (hits[k].type ? ` (${hits[k].type})` : '') : 'no match within 7"'}`;
+    }),
     `View: ${location.href}`,
     `SIMBAD: https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=${c.ra.toFixed(5)}+${c.dec >= 0 ? '%2B' : ''}${c.dec.toFixed(5)}&Radius=15&Radius.unit=arcsec`,
   ];
@@ -944,7 +999,7 @@ window.addEventListener('popstate', fromUrl);
 
 // ================================================================== phase 4
 // spectra and light curves, Gaia / SkyBoT overlays, NEOSSat archive, Aladin Lite context
-const ex = { phot: null, click: null, tab: 'spectrum', gaia: [], sso: [], neo: null, deep: null, photAbort: null, aladin: null };
+const ex = { phot: null, click: null, tab: 'spectrum', gaia: [], gaiaState: 'wait', xm: {}, sso: [], neo: null, deep: null, photAbort: null, aladin: null };
 const e4 = Object.fromEntries(['analysis', 'photSource', 'photMode', 'photFlagged', 'chart', 'chartNote', 'ovGaia', 'ovSso',
   'ovStatus', 'neossat', 'ctx', 'ctxSurvey', 'ctxGaia', 'ctxCatwise', 'aladin'].map(id => [id, $(id)]));
 const MJD_J2016 = 57388.5;
@@ -1113,13 +1168,20 @@ window.addEventListener('resize', () => { clearTimeout(ex.rt); ex.rt = setTimeou
 // ------------------------------------------------------------------ Gaia DR3 + SkyBoT overlays
 function loadCatalogues() {
   const d = state.data;
-  ex.gaia = []; ex.sso = [];
+  ex.gaia = []; ex.sso = []; ex.gaiaState = 'wait'; ex.xm = {};
   e4.ovStatus.textContent = t('ovLoading');
   const rDeg = d.grid.fov / 3600 / Math.SQRT2;
   const centre = { ra: d.grid.ra.toFixed(6), dec: d.grid.dec.toFixed(6) };
   const live = () => state.data === d;
   api('api/gaia', { ...centre, radius: rDeg.toFixed(4) })
-    .then(r => { if (live()) { ex.gaia = r.sources || []; drawOverlay(); renderCandidates(); if (ex.aladin) setAladinCats(); document.dispatchEvent(new CustomEvent('radians:catalogues')); } }).catch(() => {});
+    .then(r => { if (live()) { ex.gaia = r.sources || []; ex.gaiaState = 'ok'; drawOverlay(); renderCandidates(); if (ex.aladin) setAladinCats(); document.dispatchEvent(new CustomEvent('radians:catalogues')); } })
+    .catch(() => { if (live()) { ex.gaiaState = 'fail'; renderCandidates(); } });
+  // SIMBAD and CatWISE2020 for the candidate cards, asked one by one so a slow one does not hold the other
+  const xm = ex.xm;
+  for (const k of ['simbad', 'catwise']) {
+    const done = (v) => { if (live()) { xm[k] = v && Array.isArray(v.rows) ? v : { ok: false, rows: [] }; renderCandidates(); } };
+    api('api/crossmatch', { ...centre, radius: rDeg.toFixed(4), cat: k }).then(r => done(r[k]), () => done(null));
+  }
   api('api/sso', { ...centre, radius: Math.ceil(rDeg * 3600), mjd: d.frames.slice(0, 40).map(f => f.mjd.toFixed(3)).join(',') })
     .then(r => { if (live()) { ex.sso = r || []; drawOverlay(); } }).catch(() => {});
 }
