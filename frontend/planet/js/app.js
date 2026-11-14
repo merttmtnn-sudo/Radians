@@ -557,6 +557,32 @@ function embedBoot() {
   });
   bus.on('skytime', report);
   setInterval(report, 1000);
+  const render = sky.render.bind(sky);
+  sky.render = (now) => { holdHorizon(); return render(now); };
+}
+// The lowest view altitude at which the bottom corners of the frame (a thin strip above them) are still
+// sky: wide frames curve the horizon up at the sides, so this depends on the frame's shape and the zoom.
+// Applied before every frame, so dragging down simply stops there. Off when the ground is hidden.
+const STRIP = 0.04;
+function cornerAlt() {
+  sky.setupFrame();
+  const m = sky.unproject(0, sky.H * (1 - STRIP));
+  return m ? Math.asin(clamp(m[2], -1, 1)) * R2D : -90;
+}
+function holdHorizon() {
+  if (!sky.W || !sky.H) return;
+  // wide frames: at most ~150 degrees across, or the edges stretch and the horizon bends into a bowl
+  sky.setupFrame();
+  const P = sky.P, half = 75 * D2R;
+  const maxFov = 2 * P.gi(P.g(half) * sky.H / sky.W) * R2D;
+  if (isFinite(maxFov) && sky.view.fov > maxFov) sky.view.fov = maxFov;
+  if (!sky.layers.ground || sky.view.mount !== 'altaz') return;
+  const v = sky.view, alt0 = v.alt;
+  if (cornerAlt() >= 0) return;
+  let lo = alt0, hi = 90;
+  for (let i = 0; i < 22; i++) { v.alt = (lo + hi) / 2; if (cornerAlt() >= 0) hi = v.alt; else lo = v.alt; }
+  v.alt = hi;
+  sky.setupFrame();
 }
 window.radiansSky = {
   setTime(ms) { sky.setDate(new Date(ms)); },

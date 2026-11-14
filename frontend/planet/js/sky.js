@@ -606,7 +606,7 @@ export class Sky {
     const nad = this.hor2view([0, 0, -1]), zen = this.hor2view([0, 0, 1]);
     const groundInside = nad[2] > zen[2];
     const light = clamp((ss.sunAlt + 12) / 18, 0, 1);
-    const c1 = [12 + 40 * light, 16 + 52 * light, 14 + 30 * light], c0 = [6 + 22 * light, 9 + 30 * light, 8 + 16 * light];
+    const c1 = [16 + 36 * light, 13 + 40 * light, 11 + 30 * light], c0 = [3 + 18 * light, 3 + 20 * light, 4 + 16 * light];
     ctx.beginPath();
     if (!groundInside) { ctx.moveTo(-10, -10); ctx.lineTo(this.W + 10, -10); ctx.lineTo(this.W + 10, this.H + 10); ctx.lineTo(-10, this.H + 10); ctx.closePath(); }
     pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
@@ -616,6 +616,18 @@ export class Sky {
     if (grd) { grd.addColorStop(0, `rgb(${c1.join(',')})`); grd.addColorStop(1, `rgb(${c0.join(',')})`); ctx.fillStyle = grd; }
     else ctx.fillStyle = `rgb(${c0.join(',')})`;
     ctx.fill('evenodd');
+    // amber glow along the skyline
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,179,71,0.55)'; ctx.lineWidth = 1.4 * this.dpr;
+    ctx.shadowColor = 'rgba(255,179,71,0.8)'; ctx.shadowBlur = 14 * this.dpr;
+    ctx.beginPath();
+    let pen = false;
+    for (const p of pts) {
+      if (p[0] < -50 || p[0] > this.W + 50 || p[1] < -50 || p[1] > this.H + 50) { pen = false; continue; }
+      if (pen) ctx.lineTo(p[0], p[1]); else { ctx.moveTo(p[0], p[1]); pen = true; }
+    }
+    ctx.stroke();
+    ctx.restore();
     // horizon haze
     if (this.layers.atmosphere) {
       ctx.strokeStyle = `rgba(${160 + 60 * light},${150 + 60 * light},${140 + 80 * light},0.18)`;
