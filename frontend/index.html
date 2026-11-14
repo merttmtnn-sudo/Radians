@@ -149,7 +149,14 @@
     <a class="maplink" href="https://irsa.ipac.caltech.edu/applications/spherex/" target="_blank" rel="noopener"><span data-i18n="mapIrsa"></span></a>
   </div>
 
-  <div class="mapwrap">
+  <div class="maptools" role="toolbar" aria-labelledby="mapPalLabel">
+    <span class="maptoolslabel" id="mapPalLabel" data-i18n="mapPal"></span>
+    <div class="palchips" id="mapPals"></div>
+    <label class="palrange"><span data-i18n="mapBright"></span><input type="range" id="mapBright" min="0.5" max="2" step="0.05" value="0.95"></label>
+    <label class="palrange"><span data-i18n="mapContrast"></span><input type="range" id="mapContrast" min="0.6" max="2.5" step="0.05" value="1.3"></label>
+    <button type="button" class="btn sm ghost" id="mapPalReset" data-i18n="mapPalReset"></button>
+  </div>
+  <div class="mapwrap" id="mapWrap" data-pal="gray">
     <div id="skymapAladin"></div>
     <div class="mapdeep" id="mapDeep" role="status" aria-live="polite" hidden>
       <span id="mapDeepText"></span>
@@ -181,6 +188,8 @@
       </button>
     </div>
   </div>
+  <div class="mapcbar"><span class="muted small" data-i18n="palFaint"></span><i id="mapCbar"></i><span class="muted small" data-i18n="palBright"></span>
+    <span class="small dim" id="mapCbarName"></span></div>
 
   <section class="mapcard">
     <div class="mapbar">
@@ -455,6 +464,8 @@
         <option value="gray" selected data-i18n="cmGray"></option>
         <option value="invert" data-i18n="cmInvert"></option>
         <option value="heat" data-i18n="cmHeat"></option>
+        <option value="inferno">Inferno</option>
+        <option value="viridis">Viridis</option>
       </select>
     </label>
     <label class="field"><span data-i18n="black"></span><input id="lo" type="range" min="0" max="60" step="0.5" value="5"></label>

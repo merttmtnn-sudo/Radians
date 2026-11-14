@@ -32,9 +32,28 @@ export function stretchValue(v, lo, hi, kind) {
   }
 }
 
+// matplotlib's perceptually uniform maps, 10 evenly spaced samples (dark -> bright)
+export const PALETTE_STOPS = {
+  gray: ['#000000', '#ffffff'],
+  invert: ['#ffffff', '#000000'],
+  inferno: ['#000004', '#1b0c41', '#4a0c6b', '#781c6d', '#a52c60', '#cf4446', '#ed6925', '#fb9b06', '#f7d13d', '#fcffa4'],
+  viridis: ['#440154', '#482878', '#3e4989', '#31688e', '#26828e', '#1f9e89', '#35b779', '#6ece58', '#b5de2b', '#fde725'],
+  heat: ['#000000', '#8c0000', '#ff4d00', '#ffd21a', '#ffffff'],
+  tint: ['#000000', '#ffb347'],
+};
+function fromStops(stops) {
+  const rgb = stops.map(h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16) / 255));
+  return (t) => {
+    const f = Math.min(1, Math.max(0, t)) * (rgb.length - 1), i = Math.min(rgb.length - 2, Math.floor(f)), u = f - i;
+    return rgb[i].map((a, k) => a + (rgb[i + 1][k] - a) * u);
+  };
+}
+
 export const COLORMAPS = {
   gray: t => [t, t, t],
   invert: t => [1 - t, 1 - t, 1 - t],
+  inferno: fromStops(PALETTE_STOPS.inferno),
+  viridis: fromStops(PALETTE_STOPS.viridis),
   // black -> deep red -> orange -> pale yellow -> white
   heat: t => [Math.min(1, t * 2.2), Math.min(1, Math.max(0, t * 2 - 0.45)), Math.min(1, Math.max(0, t * 3 - 2))],
 };

@@ -3,7 +3,8 @@
 // co-adds of the first 1, 2, 4 ... all exposures in time order (/api/depth), with four companion views:
 // noise vs exposures, stars above 5 sigma, what is left to clean up (this step minus the final image) and
 // how many exposures cover each pixel.
-import { decodeB64, percentiles, stretchValue, stretchSigned, lutDiverging } from './sky.js';
+import { decodeB64, percentiles, stretchValue, stretchSigned, lutDiverging, lut } from './sky.js';
+import { viewerCmap } from './palette.js';
 import { t } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
@@ -19,12 +20,14 @@ function drawImage(cv, img, n, lo, hi) {
   cv.width = cv.height = n;
   const ctx = cv.getContext('2d');
   const out = ctx.createImageData(n, n);
+  const table = lut(viewerCmap());
   for (let y = 0; y < n; y++) {
     const row = n - 1 - y;                                   // FITS y is up, canvas y is down
     for (let x = 0; x < n; x++) {
       const o = (row * n + x) * 4, v = stretchValue(img[y * n + x], lo, hi, 'asinh');
       if (Number.isNaN(v)) { out.data[o] = 30; out.data[o + 1] = 12; out.data[o + 2] = 40; out.data[o + 3] = 255; continue; }
-      out.data[o] = out.data[o + 1] = out.data[o + 2] = Math.round(v * 255);
+      const k = Math.round(v * 255) * 3;
+      out.data[o] = table[k]; out.data[o + 1] = table[k + 1]; out.data[o + 2] = table[k + 2];
       out.data[o + 3] = 255;
     }
   }
@@ -231,3 +234,4 @@ function stopPlay() {
 el.depthPlay.onclick = () => (D.timer ? stopPlay() : play());
 el.depthScrub.oninput = () => { stopPlay(); showStep(Number(el.depthScrub.value)); };
 document.addEventListener('radians:lang', () => { if (D.steps) showStep(D.idx); });
+document.addEventListener('radians:palette', () => { if (D.steps) showStep(D.idx); });

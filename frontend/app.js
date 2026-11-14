@@ -7,6 +7,7 @@ import { scatterChart, chartTable, SERIES, wlColor } from './charts.js';
 import { encodeGif } from './gif.js';
 import { CUBE_URL, nearestSlice } from './cube.js';
 import { depthStart, depthLive, depthLoad, depthHide } from './depth.js';
+import { getPalette, setPalette, viewerCmap } from './palette.js';
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
@@ -748,6 +749,12 @@ els.next.onclick = () => { stop(); show(state.idx + 1); };
 els.scrub.oninput = () => { stop(); show(Number(els.scrub.value)); };
 els.fps.oninput = () => { els.fpsVal.textContent = els.fps.value; if (state.playing) play(); syncUrl(true); };
 for (const e of [els.stretch, els.cmap, els.cross, els.flagView]) e.onchange = () => { render(); syncUrl(true); };
+// one palette for the map, the blink and the sharpening view
+els.cmap.addEventListener('change', () => setPalette(els.cmap.value));
+document.addEventListener('radians:palette', () => {
+  if (els.cmap.value !== viewerCmap()) { els.cmap.value = viewerCmap(); render(); syncUrl(true); }
+});
+els.cmap.value = viewerCmap(getPalette());
 for (const e of [els.lo, els.hi]) e.oninput = () => { computeLevels(); render(); };
 els.view.onchange = () => { const was = state.playing; applyView(); if (was) play(); syncUrl(true); };
 

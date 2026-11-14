@@ -6,6 +6,7 @@ import { wlColor } from './charts.js';
 import { CUBE_URL, CUBE_WL, BLANK, bandOf, nearestSlice, nextSlice } from './cube.js';
 import { TARGETS, EXPLORE } from './facts.js';
 import { decodeB64, percentiles, stretchValue } from './sky.js';
+import { MAP_PALETTES, getPalette, setPalette, gradient, paletteFilters } from './palette.js';
 
 const ALADIN_JS = 'https://cdn.jsdelivr.net/npm/aladin-lite@3.6.5/dist/aladin.js';
 const $ = (id) => document.getElementById(id);
@@ -130,6 +131,7 @@ function setSlice(i) {
   $('mapWlBand').textContent = `D${bandOf(i)} · ${i + 1}/102`;
   $('mapSwatch').style.background = wlColor(w);
   if (map.tint) map.tint.style.background = `color-mix(in srgb, ${wlColor(w)} 72%, #fff)`;
+  if (getPalette() === 'tint') $('mapCbar').style.background = `linear-gradient(90deg, #000, ${wlColor(w)})`;
   for (const b of $('mapPresets').children) b.classList.toggle('on', Number(b.dataset.slice) === i);
   try { map.hips?.setSliceNumber(i); } catch { /* older Aladin: one plane only */ }
   setFill();
@@ -177,6 +179,47 @@ $('mapPlay').onclick = () => {
   $('mapPlay').setAttribute('aria-label', t('mapPause'));
   map.timer = setInterval(() => setSlice(nextSlice(map.slice)), 260);
 };
+
+// ---------------------------------------------------------------- colour palette
+const PAL_KEYS = { gray: 'palGray', invert: 'palInvert', inferno: 'palInferno', viridis: 'palViridis', tint: 'palTint' };
+const PAL_TIPS = { gray: 'palTipGray', invert: 'palTipInvert', inferno: 'palTipInferno', viridis: 'palTipViridis', tint: 'palTipTint' };
+document.body.append(paletteFilters());
+function buildPals() {
+  $('mapPals').replaceChildren(...MAP_PALETTES.map((p) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.pal = p;
+    b.title = t(PAL_TIPS[p]);
+    const sw = document.createElement('i');
+    sw.style.background = p === 'tint' ? `linear-gradient(90deg, ${[0.8, 1.5, 2.5, 3.5, 4.8].map(wlColor).join(', ')})` : gradient(p);
+    b.append(sw, document.createTextNode(t(PAL_KEYS[p])));
+    b.onclick = () => setPalette(p);
+    return b;
+  }));
+  showPal();
+}
+function showPal() {
+  const p = MAP_PALETTES.includes(getPalette()) ? getPalette() : 'gray';
+  $('mapWrap').dataset.pal = p;
+  for (const b of $('mapPals').children) b.setAttribute('aria-pressed', String(b.dataset.pal === p));
+  $('mapCbar').style.background = p === 'tint' ? `linear-gradient(90deg, #000, ${wlColor(CUBE_WL[map.slice])})` : gradient(p);
+  $('mapCbarName').textContent = t(PAL_KEYS[p]);
+}
+function setLevels(b, c) {
+  $('mapWrap').style.setProperty('--mapbright', b);
+  $('mapWrap').style.setProperty('--mapcontrast', c);
+  $('mapBright').value = b;
+  $('mapContrast').value = c;
+  try { localStorage.setItem('radians-maplevels', `${b},${c}`); } catch { /* private mode */ }
+}
+$('mapBright').oninput = () => setLevels($('mapBright').value, $('mapContrast').value);
+$('mapContrast').oninput = () => setLevels($('mapBright').value, $('mapContrast').value);
+$('mapPalReset').onclick = () => { setLevels(0.95, 1.3); setPalette('gray'); };
+try {
+  const [b, c] = (localStorage.getItem('radians-maplevels') || '').split(',').map(Number);
+  if (b > 0 && c > 0) setLevels(b, c);
+} catch { /* private mode */ }
+document.addEventListener('radians:palette', showPal);
 
 // ---------------------------------------------------------------- highlight wavelengths
 function buildPresets() {
@@ -446,5 +489,6 @@ $('mapDeepOff').onclick = () => {
 // ---------------------------------------------------------------- start
 buildPresets();
 buildChips();
+buildPals();
 if (new URLSearchParams(location.search).get('map') === '1') openMap(false);
-document.addEventListener('radians:lang', () => { buildPresets(); buildChips(); hidePop(); setSlice(map.slice); stopTour(); deepChip(); });
+document.addEventListener('radians:lang', () => { buildPresets(); buildChips(); buildPals(); hidePop(); setSlice(map.slice); stopTour(); deepChip(); });
