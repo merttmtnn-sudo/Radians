@@ -333,3 +333,10 @@ def test_lookup_endpoints_are_rate_limited():
     for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr", "/api/curious/motion",
               "/api/curious/period", "/api/curious/xmatch"):
         assert main.LIMITS[p] == config.RATE_LOOKUP
+
+
+def test_objinfo_variants_and_limit():
+    from app import main, objinfo
+    assert "M  42" in objinfo.variants("M42") and objinfo.variants("HIP 33856")[0] == "HIP 33856"
+    assert objinfo.variants("Sirius") == ["Sirius", "NAME Sirius"]
+    assert main.LIMITS["/api/object"] == config.RATE_LOOKUP

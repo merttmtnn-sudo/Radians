@@ -9,6 +9,7 @@ import { aboutHtml } from './about.js';
 import { lut } from './imaging.js';
 import { spherexSource, urlSource } from './hips.js';
 import { pageLang } from './tr.js';
+import { createInfo } from './info.js';
 
 const sky = new Sky($('#skyCanvas'), $('#skyGL'));
 const blink = new Blink();
@@ -497,36 +498,11 @@ function loop(t) { sky.tick(t); requestAnimationFrame(loop); }
 // The page around the iframe draws the controls (time, constellations, colour, place, targets) and calls
 // window.radiansSky; the sky reports its time back with postMessage. A click shows a small card instead
 // of the full info panel.
-let cardFor = null;
-function cardTitle(o) {
-  if (o.type === 'star') return [sky.starName(o.i)[0], 'Star'];
-  if (o.type === 'body') { const b = sky.objectPos(o) || o.b; return [document.documentElement.lang === 'tr' ? b.tr : b.name, b.kind === 'planet' ? (b.id === 'pluto' ? 'Dwarf planet' : 'Planet') : b.kind === 'moon' ? 'Natural satellite' : 'Star']; }
-  if (o.type === 'dso') return [o.d.id + (o.d.alt ? ' — ' + o.d.alt : ''), DSO_TYPES[o.d.type] || 'Deep-sky object'];
-  if (o.type === 'cat' || o.type === 'target') return [o.t.name, o.t.type || 'SPHEREx target'];
-  return ['Sky position', 'Selected point'];
-}
+// the quick card next to the object and the details panel live in info.js
+let infoUi = null;
 function renderCard(o) {
-  const box = $('#skyInfo');
-  if (!o) { cardFor = null; box.classList.add('hidden'); return; }
-  if (o === cardFor) return;
-  cardFor = o;
-  const pos = sky.objectPos(o);
-  if (!pos) return;
-  const [title, type] = cardTitle(o);
-  const moving = o.type === 'body';
-  const alt = altOf(pos);
-  const note = alt < 0 ? 'Below the horizon right now' : alt < 12 ? 'Low above the horizon' : '';
-  box.className = 'panel info card';
-  box.innerHTML = `<button class="x" data-a="close" aria-label="Close">×</button><div class="type">${esc(type)}</div><h2>${esc(title)}</h2>` +
-    (note ? `<p class="note">${note}</p>` : '') +
-    (moving ? '' : `<div class="actions"><button class="btn small primary" data-a="blink">Blink this</button><button class="btn small" data-a="science">Science tool ↗</button></div>`);
-  box.querySelectorAll('[data-a]').forEach(b => (b.onclick = () => {
-    const a = b.dataset.a;
-    if (a === 'close') { sky.select(null); return renderCard(null); }
-    const tr = document.documentElement.lang === 'tr' ? '&lang=tr' : '';
-    if (a === 'blink') parent.postMessage({ type: 'sky-blink', ra: pos.ra, dec: pos.dec, name: title }, location.origin);
-    if (a === 'science') window.open(`/planet/?view=blink&ra=${pos.ra.toFixed(6)}&dec=${pos.dec.toFixed(6)}&name=${encodeURIComponent(title)}&auto=1${tr}`, '_blank', 'noopener');
-  }));
+  infoUi ||= createInfo({ sky, bodyFn, fmtLocal, altOf, send: m => parent.postMessage(m, location.origin) });
+  infoUi.show(o);
 }
 function altOf(pos) {
   const h = sky.refract(A.mulv(sky.M, A.radec2v(pos.ra, pos.dec)));
@@ -567,7 +543,8 @@ function embedBoot() {
     if (!checked && sky.ss) { checked = true; if (sky.ss.sunAlt > -8 && new Date().getHours() >= 6) sky.setDate(tonightAt21()); report(); }
   });
   bus.on('skytime', report);
-  setInterval(report, 1000);
+  bus.on('skyframe', () => infoUi?.place());
+  setInterval(() => { report(); infoUi?.refreshSky(); }, 1000);
   const render = sky.render.bind(sky);
   sky.render = (now) => { holdHorizon(); return render(now); };
 }
@@ -632,7 +609,7 @@ window.radiansSky = {
     report();
   },
   async goto(kind, x) {
-    cardFor = null;
+    infoUi?.hide();
     if (kind === 'test') { const t = TEST_TARGETS.find(t => t.id === x); if (t) await choose({ kind: 'test', data: t }); }
     else if (kind === 'body') await choose({ kind: 'body', data: x });
     else if (kind === 'point') await choose({ kind: 'test', data: x });

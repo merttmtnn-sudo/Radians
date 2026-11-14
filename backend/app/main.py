@@ -29,7 +29,7 @@ _hits_lock = threading.Lock()
 LIMITS = {"/api/frames": config.RATE_FRAMES, "/api/photometry": config.RATE_PHOT}
 # endpoints that ask SIMBAD / Gaia / VizieR / IRSA for a visitor or fit on the server: one budget each
 LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr",
-                                              "/api/curious/motion", "/api/curious/period", "/api/curious/xmatch")})
+                                              "/api/curious/motion", "/api/curious/period", "/api/curious/xmatch", "/api/object")})
 
 
 def _client(request: Request) -> str:
@@ -541,3 +541,16 @@ def curious_xmatch(ra: float = Query(..., ge=0, lt=360), dec: float = Query(...,
                    pmra: float = Query(0.0), pmdec: float = Query(0.0), mjd: float = Query(51544.5)):
     """The same star in 2MASS and AllWISE (VizieR), looked for where it was when each survey saw it."""
     return {"surveys": curious.cross_match(ra, dec, pmra, pmdec, mjd)}
+
+
+# ---------------------------------------------------------------- planetarium info panel
+from . import objinfo  # noqa: E402
+
+
+@app.get("/api/object")
+def object_info(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+                id: str | None = Query(None, max_length=40), lang: str = Query("en", max_length=5),
+                kind: str = Query("star", pattern="^(star|dso|target|point)$")):
+    """SIMBAD facts and a Wikipedia summary for the object clicked in the planetarium (each part may fail alone)."""
+    return JSONResponse(objinfo.lookup((id or "").strip() or None, round(ra, 5), round(dec, 5), lang, kind),
+                        headers={"Cache-Control": "public, max-age=86400"})
