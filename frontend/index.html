@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="static/styles.css">
+  <link rel="stylesheet" href="static/css/styles.css">
   <script>
     // theme before first paint (no flash): saved choice, else dark
     try { const t = new URLSearchParams(location.search).get('theme') || localStorage.getItem('radians-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) { /* private mode */ }
@@ -581,11 +581,11 @@
     <button type="button" class="btn sm primary" id="storyNext"></button></div>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
-<script src="static/app.js" type="module"></script>
-<script src="static/ui.js" type="module"></script>
-<script src="static/about.js" type="module"></script>
-<script src="static/map.js" type="module"></script>
-<script src="static/planetsec.js" type="module"></script>
-<script src="static/funfacts.js" type="module"></script>
+<script src="static/js/blink/app.js" type="module"></script>
+<script src="static/js/core/ui.js" type="module"></script>
+<script src="static/js/content/about.js" type="module"></script>
+<script src="static/js/map/map.js" type="module"></script>
+<script src="static/js/planetarium/planetsec.js" type="module"></script>
+<script src="static/js/content/funfacts.js" type="module"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 // One colour palette for the whole site: the all-sky map, the blink viewer and the sharpening view use the
 // same choice (remembered in the browser and in ?cmap=). The map applies it as a CSS / SVG filter on Aladin's
 // image canvas; the viewer through the lookup tables in sky.js.
-import { PALETTE_STOPS } from './sky.js';
+import { PALETTE_STOPS } from '../blink/sky.js';
 
 export const MAP_PALETTES = ['gray', 'invert', 'inferno', 'viridis', 'tint', 'rgb'];
 const VIEWER = new Set(['gray', 'invert', 'heat', 'inferno', 'viridis']);

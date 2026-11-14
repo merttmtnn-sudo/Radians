@@ -2,12 +2,12 @@ import {
   decodeB64, percentiles, stretchValue, stretchSigned, lut, lutDiverging, pixToSky, formatRA, formatDec,
   flagNames, parseState, computeView, isDiffView, skyToPix, stackImage,
 } from './sky.js';
-import { t, setLang, getLang } from './i18n.js';
-import { scatterChart, chartTable, SERIES, wlColor } from './charts.js';
+import { t, setLang, getLang } from '../core/i18n.js';
+import { scatterChart, chartTable, SERIES, wlColor } from '../core/charts.js';
 import { encodeGif } from './gif.js';
-import { CUBE_URL, nearestSlice } from './cube.js';
+import { CUBE_URL, nearestSlice } from '../core/cube.js';
 import { depthStart, depthLive, depthLoad, depthHide } from './depth.js';
-import { getPalette, setPalette, viewerCmap } from './palette.js';
+import { getPalette, setPalette, viewerCmap } from '../core/palette.js';
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([

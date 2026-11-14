@@ -1,7 +1,7 @@
 // node --test frontend/tests
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { percentiles, stretchValue, pixToSky, skyToPix, formatRA, formatDec, flagNames, parseState, decodeB64 } from '../sky.js';
+import { percentiles, stretchValue, pixToSky, skyToPix, formatRA, formatDec, flagNames, parseState, decodeB64 } from '../js/blink/sky.js';
 
 test('decode float32 base64', () => {
   const a = new Float32Array([1.5, -2, NaN]);
@@ -51,7 +51,7 @@ test('url state', () => {
   assert.equal(s.embed, true); assert.equal(s.pmra, null); assert.equal(s.frame, null);
 });
 
-import { medianImage, stackImage, computeView, stretchSigned, lutDiverging } from '../sky.js';
+import { medianImage, stackImage, computeView, stretchSigned, lutDiverging } from '../js/blink/sky.js';
 
 test('median and difference views cancel static sky', () => {
   const a = new Float32Array([1, 5, NaN]), b = new Float32Array([1, 7, 2]), c = new Float32Array([1, 6, 4]);

@@ -1,7 +1,7 @@
 // "Did you know?" card in the side column: SPHEREx facts, facts about the patch of sky being looked at
 // (from the loaded data) and tips for reading the sharpening section. Turns every 8 s, stops while the
 // pointer or focus is on it; arrows step by hand.
-import { t } from './i18n.js';
+import { t } from '../core/i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const el = { card: $('facts'), body: $('factBody'), tag: $('factTag'), text: $('factText'), idx: $('factIdx'),

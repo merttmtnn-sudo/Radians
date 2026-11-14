@@ -65,6 +65,63 @@ one environment variable (`SPHEREX_COLLECTIONS=spherex_dr2,spherex_dr1`).
 | 4 | Extras: on-the-fly spectra, light curves, Gaia DR3 / SkyBoT overlays, NEOSSat archive, Aladin Lite context | ✅ |
 | 5 | Testing on challenge targets, deployment (Hugging Face Space), demo | ⏳ |
 
+## Repository layout
+
+```
+Radians/
+├── backend/                     Python (FastAPI) server: reads public NASA/IPAC IRSA data, serves the API and the site
+│   ├── app/
+│   │   ├── main.py              app, routes (/api/…), caching headers, rate limits, serves frontend/ at /static and /planet
+│   │   ├── archive.py           finds SPHEREx exposures (IRSA SIA2), resolves names (CDS Sesame)
+│   │   ├── fitsrange.py         byte-range reads of remote FITS files (only the pixels needed)
+│   │   ├── stack.py             reprojection, background subtraction, epochs, co-adds
+│   │   ├── detect.py            moving / variable candidate finder
+│   │   ├── external.py          Gaia DR3, SkyBoT, NEOSSat (CADC) lookups
+│   │   ├── explorer.py          planetarium API (/api/sx/…) and the infrared-RGB HiPS tiles (/hips/spherex-color)
+│   │   ├── config.py            settings from environment variables (data release, cache, workers)
+│   │   └── wave_seed/           pre-computed spectra for the demo targets
+│   ├── demo/cache/              cached answers for the five challenge targets (the demo works offline)
+│   ├── scripts/                 tools: cache warming (warm.py), demo media, profiling and debugging
+│   ├── tests/                   pytest suite
+│   └── requirements.txt
+├── frontend/                    the website (plain ES modules, no build step)
+│   ├── index.html               the single page: Home, Blink viewer, Map, Planetarium sections
+│   ├── slides.html              presentation slides (served at /static/slides.html)
+│   ├── css/
+│   │   └── styles.css           Radians theme (dark/light), layout of every section
+│   ├── js/
+│   │   ├── core/                shared by every section
+│   │   │   ├── i18n.js          English / Turkish texts and the language switch
+│   │   │   ├── ui.js            page chrome: landing/viewer switch, light/dark, first-visit guide
+│   │   │   ├── palette.js       colour palettes (grey, negative, inferno, viridis, wavelength, infrared RGB)
+│   │   │   ├── cube.js          SPHEREx all-sky cube: wavelengths of its 102 planes
+│   │   │   └── charts.js        SVG charts (spectra, light curves)
+│   │   ├── blink/               the Blink viewer (watch a field change between SPHEREx visits)
+│   │   │   ├── app.js           viewer: search, playback, candidates, spectra, sharing
+│   │   │   ├── sky.js           image maths: stretch, stacking, WCS, decoding
+│   │   │   ├── depth.js         "sharpening": the image gets cleaner as exposures pile up
+│   │   │   └── gif.js           GIF export
+│   │   ├── map/
+│   │   │   └── map.js           all-sky Map section (Aladin Lite + SPHEREx cube)
+│   │   ├── planetarium/
+│   │   │   └── planetsec.js     Planetarium section controls (time of night, places, targets)
+│   │   └── content/
+│   │       ├── facts.js         target facts, glossary, story texts
+│   │       ├── about.js         "About this target" panel
+│   │       └── funfacts.js      did-you-know cards
+│   ├── planet/                  planetarium engine (by Emre Bozkaya), shown inside the Planetarium section
+│   │   ├── index.html, css/     engine page (also usable on its own at /planet/)
+│   │   ├── js/                  sky renderer (sky.js), HiPS imagery (hips.js), astronomy (astro.js), app.js, tr.js
+│   │   └── data/                stars, constellations, Milky Way, deep-sky objects (d3-celestial, BSD-3)
+│   ├── media/                   GIFs and screenshots of the challenge targets
+│   └── tests/                   node --test suite for the image maths
+├── docs/                        validation report, demo script, slides PDF, figures
+├── deploy/huggingface/          Dockerfile and card for a Hugging Face Space
+├── explore/                     early probes of the IRSA archive (kept for reference)
+├── Dockerfile, render.yaml      container and Render.com deployment
+└── .github/workflows/           CI: backend and frontend tests
+```
+
 ## Run locally
 
 ```bash

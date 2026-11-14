@@ -1,8 +1,8 @@
 // Planetarium section (?sky=1): Emre Bozkaya's planetarium (frontend/planet/) in an iframe in "embed" mode,
 // with a few simple controls drawn here in the style of the map page: time of night, constellations,
 // colour, place and ready-made targets. Everything else sits behind one "Advanced" button.
-import { t, getLang } from './i18n.js';
-import { gradient } from './palette.js';
+import { t, getLang } from '../core/i18n.js';
+import { gradient } from '../core/palette.js';
 
 const $ = (id) => document.getElementById(id);
 const root = document.documentElement;

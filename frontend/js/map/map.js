@@ -1,12 +1,12 @@
 // "Map": the whole sky as SPHEREx sees it (the DR1 all-sky cube from NASA/IPAC IRSA) in Aladin Lite,
 // tinted in the colour of the chosen wavelength, with a 0.75-5 µm slider, an automatic wavelength tour,
 // highlight wavelengths, the challenge and Explore targets marked and listed, and click-anywhere-to-blink.
-import { t, getLang } from './i18n.js';
-import { wlColor } from './charts.js';
-import { CUBE_URL, CUBE_WL, BLANK, bandOf, nearestSlice, nextSlice } from './cube.js';
-import { TARGETS, EXPLORE } from './facts.js';
-import { decodeB64, percentiles, stretchValue } from './sky.js';
-import { MAP_PALETTES, getPalette, setPalette, gradient, paletteFilters } from './palette.js';
+import { t, getLang } from '../core/i18n.js';
+import { wlColor } from '../core/charts.js';
+import { CUBE_URL, CUBE_WL, BLANK, bandOf, nearestSlice, nextSlice } from '../core/cube.js';
+import { TARGETS, EXPLORE } from '../content/facts.js';
+import { decodeB64, percentiles, stretchValue } from '../blink/sky.js';
+import { MAP_PALETTES, getPalette, setPalette, gradient, paletteFilters } from '../core/palette.js';
 
 const ALADIN_JS = 'https://cdn.jsdelivr.net/npm/aladin-lite@3.6.5/dist/aladin.js';
 const $ = (id) => document.getElementById(id);

@@ -4,8 +4,8 @@
 // noise vs exposures, stars above 5 sigma, what is left to clean up (this step minus the final image) and
 // how many exposures cover each pixel.
 import { decodeB64, percentiles, stretchValue, stretchSigned, lutDiverging, lut } from './sky.js';
-import { viewerCmap } from './palette.js';
-import { t } from './i18n.js';
+import { viewerCmap } from '../core/palette.js';
+import { t } from '../core/i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const el = Object.fromEntries(['depth', 'depthSky', 'depthHud', 'depthScrub', 'depthPlay', 'depthN', 'depthStatus',

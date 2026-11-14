@@ -1,6 +1,6 @@
 // "About this target" panel (hand-written notes for the challenge targets, SIMBAD details via Sesame,
 // facts computed from the data), the mini sky map, glossary tooltips and the guided story.
-import { t, getLang } from './i18n.js';
+import { t, getLang } from '../core/i18n.js';
 import { curated, OTYPES, teffFromSp, TERMS, TERM_PATTERNS, STORY, TARGETS, EXPLORE } from './facts.js';
 
 const $ = (id) => document.getElementById(id);
