@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import archive, config, detect, explorer, external, stack
+from . import archive, config, crossmatch, detect, explorer, external, stack
 
 app = FastAPI(title="Radians", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
@@ -345,6 +345,15 @@ def gaia(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, l
          radius: float = Query(0.06, gt=0, le=0.5), gmax: float = Query(19.0, le=21)):
     """Gaia DR3 sources (ESA) with proper motions, epoch 2016.0."""
     return _external(external.gaia, ra, dec, radius, gmax)
+
+
+@app.get("/api/crossmatch")
+def crossmatch_route(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+                     radius: float = Query(0.06, gt=0, le=0.5),
+                     cat: str = Query("", pattern="^(simbad|catwise)?$")):
+    """SIMBAD and CatWISE2020 objects in the field (or only `cat`), each with its own "ok": the candidates
+    are checked against them (and Gaia DR3) in the page. A catalogue that is down does not fail the request."""
+    return crossmatch.crossmatch(round(ra, 5), round(dec, 5), round(radius, 4), cat or None)
 
 
 @app.get("/api/sso")

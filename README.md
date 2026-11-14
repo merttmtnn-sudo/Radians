@@ -30,7 +30,7 @@ Its optional ideas, and where Radians stands:
 | Add each detector's data to improve signal-to-noise; spectra on the fly | Yes. Inverse-variance co-adds per visit (and per visit and detector); a 0.75–5 µm spectrum of any pixel on request. |
 | Add or subtract images from different times | Yes. Frame − median, frame − previous, frame − first, and a deep stack. |
 | Let users choose the field of view | Yes. 2′ to 20′. |
-| Overlay Gaia or WISE | Yes. Gaia DR3 drawn on the image at each frame's date; every candidate is checked against Gaia; Aladin Lite with AllWISE, 2MASS, CatWISE2020 and SPHEREx maps. |
+| Overlay Gaia or WISE | Yes. Gaia DR3 drawn on the image at each frame's date; every candidate is checked against Gaia DR3, SIMBAD and CatWISE2020 (a catalogue that cannot be reached is named as "could not check"); Aladin Lite with AllWISE, 2MASS, CatWISE2020 and SPHEREx maps. |
 | Coordinates in the URL, embeddable | Yes. Every view is a link (`?ra=&dec=&fov=&det=&view=…`); `embed=1` hides the page chrome. |
 | Contamination flags | Yes. Per-pixel SPHEREx flags shown on demand, summarised per frame, and used to mark doubtful measurements. |
 | Public tools (Astropy, Aladin) | Astropy and PyVO throughout; Aladin Lite (CDS) for the wider view. |
@@ -76,6 +76,7 @@ Radians/
 │   │   ├── fitsrange.py         byte-range reads of remote FITS files (only the pixels needed)
 │   │   ├── stack.py             reprojection, background subtraction, epochs, co-adds
 │   │   ├── detect.py            moving / variable candidate finder
+│   │   ├── crossmatch.py        SIMBAD + CatWISE2020 for the candidate cards
 │   │   ├── external.py          Gaia DR3, SkyBoT, NEOSSat (CADC) lookups
 │   │   ├── explorer.py          planetarium API (/api/sx/…) and the infrared-RGB HiPS tiles (/hips/spherex-color)
 │   │   ├── config.py            settings from environment variables (data release, cache, workers)
@@ -98,6 +99,7 @@ Radians/
 │   │   │   └── charts.js        SVG charts (spectra, light curves)
 │   │   ├── blink/               the Blink viewer (watch a field change between SPHEREx visits)
 │   │   │   ├── app.js           viewer: search, playback, candidates, spectra, sharing
+│   │   │   ├── finds.js         plain words for the candidate cards, catalogue check
 │   │   │   ├── sky.js           image maths: stretch, stacking, WCS, decoding
 │   │   │   ├── depth.js         "sharpening": the image gets cleaner as exposures pile up
 │   │   │   └── gif.js           GIF export
@@ -169,6 +171,7 @@ Manual Deploy → Deploy latest commit in the dashboard.
 | `GET /api/progress?job=` | progress of a running `/api/frames?…&job=` request |
 | `GET /api/photometry?ra=&dec=&fov=&x=&y=` | per-exposure brightness and wavelength at one pixel: an on-the-fly spectrum |
 | `GET /api/gaia?ra=&dec=&radius=` | Gaia DR3 stars (ESA archive), with proper motions |
+| `GET /api/crossmatch?ra=&dec=&radius=&cat=` | SIMBAD and CatWISE2020 objects in the field, each with its own `ok` (one being down does not fail the request) |
 | `GET /api/sso?ra=&dec=&radius=&mjd=` | known asteroids and comets in the field at each date (IMCCE SkyBoT) |
 | `GET /api/neossat?ra=&dec=&radius=` | archived NEOSSat images of the area (CSA, via CADC) |
 | `GET /api/sx/images`, `/api/sx/cutout`, `/api/sx/catalog`, `/api/sx/simbad`, `/api/sx/resolve`, `/api/sx/hips-properties` | the planetarium and its time-lapse / spectra tool (see below) |
