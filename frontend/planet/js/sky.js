@@ -12,7 +12,23 @@ const PROJ = {
   // cylindrical (equirectangular around the mount): the horizon is a straight line at any frame shape.
   // Not radial, so project/unproject handle it separately; g/gi only set the scale (k = pixels per radian).
   cyl: { g: t => t, gi: r => r, max: 179 * D2R, maxFov: 110, cyl: true },
+  // Hammer-Aitoff: the whole sky in an ellipse (like the Map page). Not radial either; k = pixels per radian
+  // at the centre, so g/gi are the identity. maxFov is generous so a tall phone can zoom out to the whole ellipse.
+  ait: { g: t => t, gi: r => r, max: Math.PI, maxFov: 600, ait: true },
 };
+// Hammer projection of a view-frame direction (z to the centre, x right, y up) -> projection units, and back
+function hammer(v) {
+  const lon = Math.atan2(v[0], v[2]), lat = Math.asin(clamp(v[1] / (Math.hypot(v[0], v[1], v[2]) || 1), -1, 1));
+  const d = Math.sqrt(1 + Math.cos(lat) * Math.cos(lon / 2));
+  return [2 * Math.SQRT2 * Math.cos(lat) * Math.sin(lon / 2) / d, Math.SQRT2 * Math.sin(lat) / d];
+}
+function hammerInv(X, Y) {
+  if ((X * X) / 8 + (Y * Y) / 2 > 1) return null;
+  const z = Math.sqrt(Math.max(0, 1 - (X / 4) ** 2 - (Y / 2) ** 2));
+  const lon = 2 * Math.atan2(z * X, 2 * (2 * z * z - 1)), lat = Math.asin(clamp(z * Y, -1, 1));
+  return [Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon)];
+}
+const EQ2GAL = A.transpose(A.GAL2EQ);
 const RATES = [-1e6, -1e5, -1e4, -1e3, -100, -10, -1, 0, 1, 10, 100, 1000, 1e4, 1e5, 1e6];
 const GREEK = { 'α': 'alpha', 'β': 'beta', 'γ': 'gamma', 'δ': 'delta', 'ε': 'epsilon', 'ζ': 'zeta', 'η': 'eta', 'θ': 'theta', 'ι': 'iota', 'κ': 'kappa',
   'λ': 'lambda', 'μ': 'mu', 'ν': 'nu', 'ξ': 'xi', 'ο': 'omicron', 'π': 'pi', 'ρ': 'rho', 'σ': 'sigma', 'τ': 'tau', 'υ': 'upsilon', 'φ': 'phi',
@@ -177,9 +193,11 @@ export class Sky {
       return [[-Math.sin(z), Math.cos(z), 0], [-Math.sin(a) * Math.cos(z), -Math.sin(a) * Math.sin(z), Math.cos(a)],
         [Math.cos(a) * Math.cos(z), Math.cos(a) * Math.sin(z), Math.sin(a)]];
     }
+    // equatorial mount: view.ra/dec; galactic mount: view.ra/dec hold l/b and the basis is turned into J2000
     const a = v.ra * D2R, d = v.dec * D2R;
-    return [[Math.sin(a), -Math.cos(a), 0], [-Math.sin(d) * Math.cos(a), -Math.sin(d) * Math.sin(a), Math.cos(d)],
+    const Bm = [[Math.sin(a), -Math.cos(a), 0], [-Math.sin(d) * Math.cos(a), -Math.sin(d) * Math.sin(a), Math.cos(d)],
       [Math.cos(d) * Math.cos(a), Math.cos(d) * Math.sin(a), Math.sin(d)]];
+    return v.mount === 'gal' ? A.mul(Bm, EQ2GAL) : Bm;
   }
   setupFrame() {
     this.jdNow = this.jd;
@@ -217,6 +235,7 @@ export class Sky {
     return [h[0] / r * c, h[1] / r * c, Math.sin(alt2 * D2R)];
   }
   project(v, clampFar = false) {
+    if (this.P.ait) { const [x, y] = hammer(v); return [this.cx + x * this.k, this.cy - y * this.k]; }
     if (this.P.cyl) {
       const B = this.B;   // view -> mount (B is orthonormal)
       const m0 = B[0][0] * v[0] + B[1][0] * v[1] + B[2][0] * v[2], m1 = B[0][1] * v[0] + B[1][1] * v[1] + B[2][1] * v[2],
@@ -239,6 +258,13 @@ export class Sky {
     return [this.cx + rho * v[0] / s, this.cy - rho * v[1] / s];
   }
   unproject(px, py) {
+    if (this.P.ait) {
+      const vv = hammerInv((px - this.cx) / this.k, (this.cy - py) / this.k);
+      if (!vv) return null;
+      const B = this.B;
+      return [B[0][0] * vv[0] + B[1][0] * vv[1] + B[2][0] * vv[2], B[0][1] * vv[0] + B[1][1] * vv[1] + B[2][1] * vv[2],
+        B[0][2] * vv[0] + B[1][2] * vv[1] + B[2][2] * vv[2]];
+    }
     if (this.P.cyl) {
       const lon = this.lon0 + this.lonSign * (px - this.cx) / this.k, lat = this.lat0 + (this.cy - py) / this.k;
       if (Math.abs(lat) > Math.PI / 2 || Math.abs(px - this.cx) / this.k > this.P.max) return null;
@@ -253,6 +279,13 @@ export class Sky {
     const B = this.B;
     return [B[0][0] * vv[0] + B[1][0] * vv[1] + B[2][0] * vv[2], B[0][1] * vv[0] + B[1][1] * vv[1] + B[2][1] * vv[2],
       B[0][2] * vv[0] + B[1][2] * vv[1] + B[2][2] * vv[2]];
+  }
+  // screen -> mount coordinates (az/alt, ra/dec or l/b in ra/dec), for zooming about the cursor
+  mountAt(px, py) {
+    const s = this.screenToSky(px, py);
+    if (!s || this.view.mount !== 'gal') return s;
+    const [l, b] = A.v2radec(A.mulv(EQ2GAL, A.radec2v(s.ra, s.dec)));
+    return { ra: l, dec: b };
   }
   // screen -> {ra, dec (J2000), alt, az}
   screenToSky(px, py) {
@@ -328,7 +361,7 @@ export class Sky {
     const ctx = this.ctx;
     ctx.beginPath();
     let pen = false, last = null;
-    const maxJump = Math.max(this.W, this.H) * 0.6;
+    const maxJump = this.P.ait ? 1.5 * this.k : Math.max(this.W, this.H) * 0.6;   // ellipse: break at the seam
     for (const p of points) {
       if (!p) { pen = false; continue; }
       const v = frame === 'hor' ? this.hor2view(p) : this.j2view(p, false);
@@ -370,7 +403,9 @@ export class Sky {
     this.picks = [];
     const ss = this.skyState();
     this.ss = ss;
-    const lim = clamp(ss.lim + 2.4 * Math.log10(60 / Math.min(this.view.fov, 60)) + this.opt.magBoost, -2, 8.2);
+    let lim = clamp(ss.lim + 2.4 * Math.log10(60 / Math.min(this.view.fov, 60)) + this.opt.magBoost, -2, 8.2);
+    // whole-sky ellipse: the sky is small on screen, so fewer catalogue stars (or they bury the SPHEREx image)
+    if (this.P.ait) lim = Math.min(lim, 4.6 + 2.4 * Math.log10(Math.max(1, 170 / this.view.fov)));
     this.limMag = lim;
     if (this.opt.track && this.selection) this.centerOn(this.selection, false);
 
@@ -413,7 +448,7 @@ export class Sky {
     }
 
     // deep-sky objects
-    if (L.dsos && starFade > 0.1 && !this.cinema) this.drawDsos(lim);
+    if (L.dsos && starFade > 0.1 && !this.cinema && !(this.sparse && this.view.fov > 60)) this.drawDsos(lim);
 
     // stars (catalog dots are optional on top of SPHEREx imagery; names are always available)
     this.drawStars(lim, starFade, now, ss, !imagery || this.layers.stars);
@@ -428,6 +463,7 @@ export class Sky {
     // ground
     if (L.ground) this.drawGround(ss);
     if (L.azGrid || (L.ground && !this.flatBand)) this.polyline(this.horizonLine, 'hor', 'rgba(255,160,90,0.55)', 1);
+    if (this.P.ait) this.drawAllSkyHorizon();
     if (L.cardinal && !this.cinema) this.drawCardinal();
 
     // labels (after ground)
@@ -439,7 +475,7 @@ export class Sky {
   drawImagery(on, fade) {
     if (!this.hips?.ok) return;
     const V = this.altaz ? A.mul(this.B, this.M) : this.B;
-    const projIndex = { stereo: 0, fisheye: 1, ortho: 2, gnomonic: 3, equal: 4, cyl: 5 }[this.view.proj];
+    const projIndex = { stereo: 0, fisheye: 1, ortho: 2, gnomonic: 3, equal: 4, cyl: 5, ait: 6 }[this.view.proj];
     const mnt = this.altaz ? this.Mt : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];   // mount frame -> J2000
     this.hips.opts.fade = this.layers.atmosphere ? fade : 1;
     this.hips.draw({ enabled: on, W: this.W, H: this.H, cx: this.cx, cy: this.cy, k: this.k, projIndex, maxT: this.P.max, rot: V, mnt,
@@ -506,7 +542,7 @@ export class Sky {
         vx = B[0][0] * x + B[0][1] * y + B[0][2] * z; vy = B[1][0] * x + B[1][1] * y + B[1][2] * z; vz = B[2][0] * x + B[2][1] * y + B[2][2] * z;
       }
       let px, py;
-      if (P.cyl) {
+      if (P.cyl || P.ait) {
         const q = this.project([vx, vy, vz]);
         if (!q) continue;
         [px, py] = q;
@@ -672,6 +708,41 @@ export class Sky {
       ctx.lineWidth = 3 * this.dpr; ctx.beginPath();
       pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.stroke();
     }
+  }
+
+  // All-sky ellipse: what is below the horizon at the chosen time is darkened (a low-resolution mask,
+  // smoothed when drawn), the horizon is an amber line, and a thin rim marks the edge of the ellipse.
+  drawAllSkyHorizon() {
+    const ctx = this.ctx, W = this.W, H = this.H, S = 5 * this.dpr;
+    const w = Math.ceil(W / S), h = Math.ceil(H / S);
+    const key = [w, h, this.k.toFixed(3), this.view.ra.toFixed(3), this.view.dec.toFixed(3), Math.round(this.simMs / 20000), this.loc.lat, this.loc.lon].join();
+    if (this.shadeKey !== key) {
+      this.shadeKey = key;
+      const c = this.shadeCv || (this.shadeCv = document.createElement('canvas'));
+      c.width = w; c.height = h;
+      const g = c.getContext('2d'), img = g.createImageData(w, h), d = img.data, M = this.M;
+      for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+        const e = this.unproject((i + 0.5) * S, (j + 0.5) * S);
+        if (!e) continue;
+        const z = M[2][0] * e[0] + M[2][1] * e[1] + M[2][2] * e[2];   // sin(altitude)
+        const a = clamp(-z / 0.03, 0, 1) * 0.62;
+        if (a > 0) { const o = (j * w + i) * 4; d[o] = 4; d[o + 1] = 4; d[o + 2] = 8; d[o + 3] = a * 255; }
+      }
+      g.putImageData(img, 0, 0);
+    }
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(this.shadeCv, 0, 0, w * S, h * S);
+    ctx.restore();
+    if (!this.cinema) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,179,71,0.8)'; ctx.shadowBlur = 10 * this.dpr;
+      this.polyline(this.horizonLine, 'hor', 'rgba(255,179,71,0.75)', 1.3);
+      ctx.restore();
+    }
+    ctx.beginPath();
+    ctx.ellipse(this.cx, this.cy, 2 * Math.SQRT2 * this.k, Math.SQRT2 * this.k, 0, 0, 2 * Math.PI);
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 1 * this.dpr; ctx.stroke();
   }
 
   // A ground band of fixed height along the bottom of the frame, whatever the projection: its skyline is
@@ -875,6 +946,7 @@ export class Sky {
     this.setupFrame();
     let to;
     if (this.view.mount === 'altaz') { const h = A.mulv(this.M, A.radec2v(ra, dec)); const [alt, az] = A.hor2altaz(h); to = { az, alt }; }
+    else if (this.view.mount === 'gal') { const [l, b] = A.v2radec(A.mulv(EQ2GAL, A.radec2v(ra, dec))); to = { ra: l, dec: b }; }
     else to = { ra, dec };
     if (!animate) { Object.assign(this.view, to); if (fov) this.view.fov = fov; this.dirty = true; return; }
     const from = this.view.mount === 'altaz' ? { az: this.view.az, alt: this.view.alt } : { ra: this.view.ra, dec: this.view.dec };
@@ -894,10 +966,10 @@ export class Sky {
     if (t >= 1) this.anim = null;
   }
   zoom(f, px = null, py = null) {
-    const before = px != null ? this.screenToSky(px, py) : null;
+    const before = px != null ? this.mountAt(px, py) : null;
     this.view.fov = clamp(this.view.fov * f, 0.05, PROJ[this.view.proj].maxFov);
     if (before) {
-      const after = this.screenToSky(px, py);
+      const after = this.mountAt(px, py);
       if (after) {
         if (this.view.mount === 'altaz') { this.view.az = mod(this.view.az + mod(before.az - after.az + 180, 360) - 180, 360); this.view.alt = clamp(this.view.alt + before.alt - after.alt, -90, 90); }
         else { this.view.ra = mod(this.view.ra + mod(before.ra - after.ra + 180, 360) - 180, 360); this.view.dec = clamp(this.view.dec + before.dec - after.dec, -90, 90); }

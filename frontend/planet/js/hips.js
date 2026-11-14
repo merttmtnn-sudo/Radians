@@ -104,7 +104,12 @@ void main() {
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
   float X = (p.x - uC.x) / uK, Y = (uC.y - p.y) / uK, r = length(vec2(X, Y));
   vec3 e;
-  if (uProj == 5) {
+  if (uProj == 6) {
+    if (X * X / 8.0 + Y * Y / 2.0 > 1.0) { outColor = vec4(0.0); return; }
+    float z = sqrt(max(0.0, 1.0 - X * X / 16.0 - Y * Y / 4.0));
+    float lon = 2.0 * atan(z * X, 2.0 * (2.0 * z * z - 1.0)), lat = asin(clamp(z * Y, -1.0, 1.0));
+    e = normalize(uRot * vec3(cos(lat) * sin(lon), sin(lat), cos(lat) * cos(lon)));
+  } else if (uProj == 5) {
     float lon = uLon0 + uLonSign * X, lat = uLat0 + Y;
     if (abs(lat) > PI / 2.0 || abs(X) > uMaxT) { outColor = vec4(0.0); return; }
     e = normalize(uMnt * vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat)));

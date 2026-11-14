@@ -6,10 +6,10 @@ import { gradient } from './palette.js';
 
 const $ = (id) => document.getElementById(id);
 const root = document.documentElement;
-const sky = { frame: null, api: null, state: null, pal: 'rgb', cons: true, cine: false, fast: false, adv: false, dragging: false };
-try { sky.pal = localStorage.getItem('radians-skypal') || 'rgb'; } catch { /* private mode */ }
+const sky = { frame: null, api: null, state: null, pal: 'gray', cons: true, cine: false, fast: false, adv: false, dragging: false };
+try { sky.pal = localStorage.getItem('radians-skypal2') || 'gray'; } catch { /* private mode */ }
 
-const PALS = { rgb: 'palRgb', gray: 'palGray', inferno: 'palInferno', viridis: 'palViridis' };
+const PALS = { gray: 'palGray', invert: 'palInvert', inferno: 'palInferno', viridis: 'palViridis', tint: 'palTint', rgb: 'palRgb' };
 const PLACES = [[0, 'İstanbul'], [1, 'Ankara'], [2, 'İzmir'], ['geo', null]];
 const FAMOUS = [
   { k: 'name', x: 'M42', en: 'Orion Nebula', tr: 'Orion Bulutsusu' },
@@ -130,7 +130,7 @@ function build() {
     b.append(sw, document.createTextNode(t(key)));
     b.onclick = () => {
       sky.pal = p;
-      try { localStorage.setItem('radians-skypal', p); } catch { /* private mode */ }
+      try { localStorage.setItem('radians-skypal2', p); } catch { /* private mode */ }
       for (const c of $('skyPals').children) c.setAttribute('aria-pressed', String(c.dataset.pal === p));
       sky.api?.setPalette(p);
     };

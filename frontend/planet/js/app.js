@@ -534,7 +534,12 @@ function altOf(pos) {
 }
 function setPal(p) {
   if (p === 'rgb') { $('#hxMode').value = 'rgb'; $('#hxR').value = 96; $('#hxG').value = 60; $('#hxB').value = 20; }
-  else { $('#hxMode').value = 'mono'; $('#hxFrame').value = 46; $('#hxCmap').value = p === 'gray' ? 'gray' : p; }
+  else {
+    $('#hxMode').value = 'mono'; $('#hxFrame').value = 46;   // 2.19 um, the Map's default plane
+    const sel = $('#hxCmap');
+    if (![...sel.options].some(o => o.value === p)) sel.add(new Option(p, p));
+    sel.value = p;
+  }
   sky.layers.spherex = true;
   applySpx();
 }
@@ -545,9 +550,13 @@ function report() {
 }
 function embedBoot() {
   // look south-east, a little above the horizon, with a wide field
-  sky.view.mount = 'altaz'; sky.view.proj = 'stereo';
-  sky.view.az = 170; sky.view.alt = 40;
-  sky.view.fov = 100;
+  // the whole sky in a galactic Hammer-Aitoff ellipse, like the Map page; the horizon is drawn on it
+  sky.view.mount = 'gal'; sky.view.proj = 'ait';
+  sky.view.ra = 0; sky.view.dec = 0;
+  sky.view.fov = 180;
+  sky.layers.ground = false; sky.layers.cardinal = false;
+  // softer stretch than the zoomed-in default, so the galactic bulge is not burnt out on the whole-sky map
+  $('#hxGain').value = 0.95; $('#hxGamma').value = 1.05; $('#hxBlack').value = 0.1;
   sky.opt.lang = pageLang() === 'tr' ? 'tr' : 'en';
   sky.layers.stars = true; sky.layers.atmosphere = false;
   sky.sparse = true;   // only the brightest names; faint constellation lines
@@ -567,9 +576,27 @@ function embedBoot() {
 // and the ground keeps its shape. Looking up lets the band hide less sky; dragging down stops at it.
 const BAND = 0.12;
 const DOME = 70;   // half-width of the opening view, degrees: a ~140 degree dome
+// the zoom at which the whole ellipse fits the frame (with a small margin); no zooming out past it
+function fitFov() {
+  // phones: the ellipse may be wider than the screen (drag to turn it), or it would be a thin strip
+  const kW = sky.W * 0.96 / (4 * Math.SQRT2), kH = sky.H * 0.94 / (2 * Math.SQRT2);
+  const k = Math.min(kH, sky.W < 700 * sky.dpr ? kW * 1.7 : kW);
+  sky.fitsWhole = 4 * Math.SQRT2 * k <= sky.W;
+  return 2 * (sky.H / 2) / k * R2D;
+}
 function holdHorizon() {
   if (!sky.W || !sky.H) return;
   const v = sky.view;
+  if (v.proj === 'ait') {
+    sky.flatBand = 0;
+    const f = fitFov();
+    if (!sky.domeSet) { sky.domeSet = true; v.fov = f; }
+    v.fov = Math.min(v.fov, f);
+    if (v.fov > f * 0.98 && sky.fitsWhole) { v.ra = 0; v.dec = 0; }   // fully zoomed out: keep the Milky Way centred
+    else if (v.fov > f * 0.98) v.dec = 0;
+    else v.dec = clamp(v.dec, -90, 90);
+    return;
+  }
   if (!sky.domeSet && v.proj !== 'cyl') {
     // first frame: open ~140 degrees across (vertical field from the frame shape; tall phones capped)
     sky.domeSet = true;
@@ -612,7 +639,7 @@ window.radiansSky = {
     else { const r = searchLocal(x).find(r => r.kind !== 'coord' && r.kind !== 'sesame'); await choose(r || { kind: 'sesame', data: x }); }
     // below the horizon: hide the ground so the object can still be seen (the card says so)
     const pos = sky.selection && sky.objectPos(sky.selection);
-    sky.layers.ground = !(pos && altOf(pos) < 3);
+    if (sky.view.proj !== 'ait') sky.layers.ground = !(pos && altOf(pos) < 3);
     sky.dirty = true;
   },
   advanced(on) {

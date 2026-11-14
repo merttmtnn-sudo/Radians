@@ -438,7 +438,7 @@ body.embed .stage { max-height: calc(100vh - 70px); }
   .in-sky .palchips, .in-sky .chips { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0; }
   .in-sky .palchips button, .in-sky .mapchip { flex: none; }
   .in-sky .maplabel { min-width: 0; }
-  .in-sky .skywrap iframe, .in-sky .skywrap #skyFrame { height: 62vh; min-height: 360px; }
+  .in-sky .skywrap iframe, .in-sky .skywrap #skyFrame { height: min(62vh, 400px); min-height: 340px; }
   .nav { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; max-width: 100%; }
   .nav a { white-space: nowrap; }
 }
