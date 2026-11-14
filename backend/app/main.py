@@ -72,6 +72,20 @@ def resolve(q: str = Query(..., min_length=1, max_length=200)):
         raise HTTPException(502, f"name resolver unavailable: {e}")
 
 
+@app.get("/api/about")
+def about(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+          q: str | None = Query(None, max_length=200)):
+    """What is at this position: sky context always, object details when a name is known."""
+    out = {"sky": archive.sky_context(ra, dec), "object": None}
+    if q and not archive.parse_coords(q):
+        try:
+            name = archive.resolve(q).get("name") or q
+            out["object"] = archive.details(name)
+        except Exception:
+            pass
+    return out
+
+
 def _exposures(ra, dec):
     try:
         return archive.query_exposures(ra, dec)

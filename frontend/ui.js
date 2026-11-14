@@ -99,5 +99,5 @@ $('tourSkip').onclick = endTour;
 $('tourBtn').onclick = startTour;
 addEventListener('resize', () => { if (step >= 0) placeTour(); });
 document.addEventListener('radians:loaded', () => {
-  if (store.get('radians-tour') !== 'done' && !document.body.classList.contains('embed')) setTimeout(startTour, 600);
+  if (store.get('radians-tour') !== 'done' && !document.body.classList.contains('embed') && !root.classList.contains('story')) setTimeout(startTour, 600);
 });

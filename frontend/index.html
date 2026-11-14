@@ -32,6 +32,8 @@
   </nav>
   <div class="appsearch app-only" id="appSearchSlot"></div>
   <div class="topright">
+    <button type="button" class="btn sm ghost app-only" data-explore data-i18n="exploreBtn" data-i18n-title="exploreTitle"></button>
+    <button type="button" class="btn sm ghost app-only" data-story data-i18n="storyBtn"></button>
     <button type="button" class="btn sm ghost app-only" id="tourBtn" data-i18n="tourAgain"></button>
     <button type="button" class="btn sm app-only" id="advBtn" aria-controls="adv" aria-expanded="false">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 14h14"/><circle cx="7" cy="6" r="2"/><circle cx="13" cy="14" r="2"/></svg>
@@ -86,6 +88,11 @@
         <img src="static/media/r-dra.gif" alt="" loading="lazy">
         <span class="tname">R Draconis</span><span class="tdesc" data-i18n="tRDra"></span>
       </button>
+    </div>
+    <div class="storycta">
+      <button type="button" class="btn primary" data-story><span aria-hidden="true">▶</span> <span data-i18n="storyCta"></span></button>
+      <button type="button" class="btn" data-explore><span aria-hidden="true">✦</span> <span data-i18n="exploreCta"></span></button>
+      <span class="dim small" data-i18n="storyCtaSub"></span>
     </div>
   </section>
 
@@ -174,6 +181,7 @@
       <label class="speed mono"><span id="fpsVal">2</span> fps
         <input id="fps" type="range" min="0.5" max="10" step="0.5" value="2" aria-label="Speed">
       </label>
+      <button id="compare" class="btn sm" aria-pressed="false" data-i18n="compare" data-i18n-title="compareTitle"></button>
       <button id="zoom" class="btn sm mono" aria-label="Zoom">1×</button>
       <button id="gif" class="btn sm" data-i18n="gifDl"></button>
     </div>
@@ -194,6 +202,7 @@
           </select>
         </label>
         <label class="small check"><input id="photFlagged" type="checkbox" checked> <span data-i18n="photShowFlagged"></span></label>
+        <button type="button" id="listen" class="btn sm" aria-pressed="false" data-i18n="listen" data-i18n-title="listenTitle"></button>
         <button type="button" id="photCsv" class="btn sm" data-i18n="csv"></button>
       </div>
       <div id="chart"></div>
@@ -236,6 +245,10 @@
       <label class="check small"><input id="showCands" type="checkbox" checked> <span data-i18n="showCands"></span></label>
       <ul class="cands" id="cands"></ul>
       <p class="muted small" data-i18n="candHelp"></p>
+    </section>
+    <section class="panel about" id="aboutPanel" hidden>
+      <h2 data-i18n="aboutTitle"></h2>
+      <div id="aboutBody"></div>
     </section>
     <section class="panel">
       <h2 data-i18n="cursor"></h2>
@@ -338,8 +351,17 @@
 <footer class="foot">
   <span data-i18n="footData"></span>
 </footer>
+<div class="story" id="story" hidden role="dialog" aria-live="polite" aria-labelledby="storyTitle">
+  <div class="storytop"><span class="mono small dim" id="storyStep"></span><span class="storydots" id="storyDots"></span>
+    <button type="button" class="btn icon xs ghost" id="storyClose" aria-label="Close">✕</button></div>
+  <h3 id="storyTitle"></h3>
+  <p id="storyText"></p>
+  <div class="storynav"><button type="button" class="btn sm" id="storyPrev" data-i18n="storyPrev"></button>
+    <button type="button" class="btn sm primary" id="storyNext"></button></div>
+</div>
 <div class="toast" id="toast" role="status" hidden></div>
 <script src="static/app.js" type="module"></script>
 <script src="static/ui.js" type="module"></script>
+<script src="static/about.js" type="module"></script>
 </body>
 </html>

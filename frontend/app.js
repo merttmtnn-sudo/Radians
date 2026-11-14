@@ -11,7 +11,7 @@ const els = Object.fromEntries([
   'search', 'q', 'fov', 'mode', 'go', 'sky', 'overlay', 'stage', 'empty', 'loading', 'loadingMsg', 'loadingSub',
   'play', 'prev', 'next', 'scrub', 'fps', 'fpsVal', 'timeline', 'frameInfo', 'cursor', 'stretch', 'cmap', 'lo', 'hi',
   'cross', 'flagView', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'view', 'viewHelp', 'detchips',
-  'preset', 'loadingBar', 'wlMatch', 'zoom', 'gif', 'cands', 'candCount', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples',
+  'preset', 'loadingBar', 'wlMatch', 'zoom', 'gif', 'cands', 'candCount', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples', 'compare', 'listen',
 ].map(id => [id, $(id)]));
 
 const ALL_DETS = [1, 2, 3, 4, 5, 6];
@@ -21,6 +21,7 @@ const state = {
   shown: [],                              // what the current view displays
   idx: 0, playing: false, timer: null, levels: [0, 1], abort: null,
   dets: new Set(ALL_DETS), selected: null,
+  compare: false, split: 0.5, splitDrag: false, splitMoved: false,
 };
 
 // ------------------------------------------------------------------ helpers
@@ -219,7 +220,10 @@ function render() {
   const { data } = state;
   if (!data) return;
   const n = data.grid.n;
-  const img = state.shown[state.idx];
+  const cmp = compareOn();
+  const img = state.shown[cmp ? compareB() : state.idx];
+  const imgA = cmp ? state.shown[0] : img;
+  const sx = cmp ? Math.round(state.split * n) : -1;            // columns left of this show the first visit
   const flg = frameFlags(state.idx);
   const ctx = els.sky.getContext('2d');
   const out = ctx.createImageData(n, n);
@@ -232,7 +236,8 @@ function render() {
     const row = n - 1 - y;                                   // FITS y is up, canvas y is down
     for (let x = 0; x < n; x++) {
       const i = y * n + x, o = (row * n + x) * 4;
-      const tv = diffView ? stretchSigned(img[i], hi, kind) : stretchValue(img[i], lo, hi, kind);
+      const v = x < sx ? imgA[i] : img[i];
+      const tv = diffView ? stretchSigned(v, hi, kind) : stretchValue(v, lo, hi, kind);
       if (Number.isNaN(tv)) { out.data[o] = 30; out.data[o + 1] = 12; out.data[o + 2] = 40; out.data[o + 3] = 255; continue; }
       const k = (diffView ? Math.round(128 + tv * 127) : Math.round(tv * 255)) * 3;
       out.data[o] = table[k]; out.data[o + 1] = table[k + 1]; out.data[o + 2] = table[k + 2]; out.data[o + 3] = 255;
@@ -242,6 +247,57 @@ function render() {
   ctx.putImageData(out, 0, 0);
   drawOverlay();
 }
+
+// ------------------------------------------------------------------ before / after
+const compareOn = () => state.compare && !isStack() && state.shown.length > 1;
+const compareB = () => (state.idx === 0 ? state.shown.length - 1 : state.idx);
+const frameLabel = (i) => { const f = state.data.frames[i]; return `E${f.epoch} · ${f.date_start.slice(0, 7)}`; };
+
+function drawSplit(ctx) {
+  const W = els.overlay.width, x = state.split * W, fs = Math.max(13, W / 38);
+  ctx.save();
+  ctx.strokeStyle = '#ffb347'; ctx.lineWidth = Math.max(2, W / 400);
+  ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, W); ctx.stroke();
+  ctx.fillStyle = '#ffb347';
+  ctx.beginPath(); ctx.arc(x, W / 2, fs * 0.9, 0, 2 * Math.PI); ctx.fill();
+  ctx.fillStyle = '#000'; ctx.font = `600 ${fs}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('‹ ›', x, W / 2 + 1);
+  ctx.font = `500 ${fs * 0.85}px ui-monospace, monospace`; ctx.textBaseline = 'top';
+  for (const [lab, right] of [[frameLabel(0), false], [frameLabel(compareB()), true]]) {
+    const tw = ctx.measureText(lab).width + fs, bx = right ? x + fs * 0.6 : x - fs * 0.6 - tw, by = W - fs * 2.6;
+    ctx.fillStyle = 'rgba(0,0,0,.72)'; ctx.fillRect(bx, by, tw, fs * 1.5);
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(lab, bx + tw / 2, by + fs * 0.3);
+  }
+  ctx.restore();
+}
+
+function setCompare(on) {
+  state.compare = on;
+  els.compare.setAttribute('aria-pressed', String(on));
+  els.stage.classList.toggle('comparing', on);
+  if (!state.data) return;
+  if (on) {
+    stop();
+    if (isStack()) { els.view.value = 'images'; els.view.dispatchEvent(new Event('change')); }
+    show(state.shown.length - 1);
+    toast(t('compareHint'));
+  } else show(state.idx);
+}
+els.compare.onclick = () => setCompare(!state.compare);
+
+function setSplit(e) {
+  const r = els.overlay.getBoundingClientRect();
+  state.split = Math.min(0.98, Math.max(0.02, (e.clientX - r.left) / r.width));
+  render();
+}
+els.overlay.addEventListener('pointerdown', (e) => {
+  if (!compareOn() || zoomState.z !== 1) return;
+  state.splitDrag = true; state.splitMoved = false;
+  els.overlay.setPointerCapture(e.pointerId);
+  setSplit(e);
+});
+els.overlay.addEventListener('pointermove', (e) => { if (state.splitDrag) { state.splitMoved = true; setSplit(e); } });
+els.overlay.addEventListener('pointerup', () => { state.splitDrag = false; });
 
 // ------------------------------------------------------------------ overlay
 const COLORS = { moving: '#6fc3ff', variable: '#ffb347', transient: '#ff6fb5' };
@@ -264,6 +320,7 @@ function drawOverlay() {
   if (els.cross.checked && state.target) drawTargetMarker(ctx);
   drawExtras(ctx);
   if (els.showCands.checked) for (const [i, c] of (state.data.candidates || []).entries()) drawCandidate(ctx, c, i === state.selected);
+  if (compareOn()) drawSplit(ctx);
 }
 
 function drawTargetMarker(ctx) {
@@ -376,7 +433,12 @@ function renderCandidates() {
         try { await navigator.clipboard.writeText(candReport(c, known)); toast(t('copied')); }
         catch { toast(t('copyFail'), true); }
       };
-      d.append(a, document.createTextNode(' · '), rep);
+      const png = el('button', 'linkbtn', t('saveFinding'));
+      png.type = 'button';
+      png.onclick = () => saveFinding(c, known);
+      const acts = el('div', 'candacts');
+      acts.append(a, rep, png);
+      d.append(acts);
       li.append(d);
     }
     return li;
@@ -467,10 +529,9 @@ function trackPlot(c, catPa) {
   return svgEl;
 }
 
-function candVisual(c, known) {
-  const box = el('div', 'cvis');
+// the two frames a card compares, the candidate's position and quick flux in every frame, and a shared stretch
+function candFrames(c) {
   const F = state.data.frames.length;
-  if (!F || F > 60 || !state.images.length) return box;
   const pos = state.data.frames.map((_, i) => candPos(c, i));
   const flux = pos.map(([x, y], i) => quickFlux(i, x, y));
   // which two frames to compare
@@ -493,6 +554,14 @@ function candVisual(c, known) {
   }
   vals.sort((p, q) => p - q);
   const lo = vals[Math.floor(vals.length * 0.05)] ?? 0, hi = vals[Math.floor(vals.length * 0.995)] ?? 1;
+  return { pos, flux, a, b, lo, hi };
+}
+
+function candVisual(c, known) {
+  const box = el('div', 'cvis');
+  const F = state.data.frames.length;
+  if (!F || F > 60 || !state.images.length) return box;
+  const { pos, flux, a, b, lo, hi } = candFrames(c);
   const cuts = el('div', 'cuts');
   for (const [i, lab] of [[a, 'cutA'], [b, 'cutB']]) {
     const fig = el('figure', '');
@@ -589,6 +658,7 @@ function show(i) {
     const sameDay = f.date_start.slice(0, 10) === f.date_end.slice(0, 10);
     els.hudDate.textContent = sameDay ? f.date_start.slice(0, 10) : `${f.date_start.slice(0, 10)} → ${f.date_end.slice(0, 10)}`;
     els.hudIdx.textContent = `${state.idx + 1} / ${N}`;
+    if (compareOn()) els.hudDate.textContent = `${frameLabel(0)}  ⟷  ${frameLabel(compareB())}`;
     const wl = f.wavelength_min ? (f.wavelength_min === f.wavelength_max ? `${f.wavelength_min.toFixed(3)} µm`
       : `${f.wavelength_min.toFixed(2)}–${f.wavelength_max.toFixed(2)} µm`) : '—';
     rows = [
@@ -710,6 +780,7 @@ els.overlay.addEventListener('mousemove', (e) => {
 els.overlay.addEventListener('click', (e) => {
   if (!state.data) return;
   if (zoomState.dragged) { zoomState.dragged = false; return; }
+  if (compareOn()) return;
   const cands = state.data.candidates || [];
   const rect = els.overlay.getBoundingClientRect();
   const n = state.data.grid.n;
@@ -764,6 +835,7 @@ function applyLang(l) {
   try { localStorage.setItem('radians-lang', getLang()); } catch { /* private mode */ }
   for (const b of document.querySelectorAll('[data-lang]')) b.setAttribute('aria-pressed', String(b.dataset.lang === getLang()));
   if (state.data) { applyView(state.idx); renderCandidates(); renderAnalysis(); renderNeossat(); syncUrl(true); }
+  document.dispatchEvent(new CustomEvent('radians:lang'));
 }
 for (const b of document.querySelectorAll('[data-lang]')) b.onclick = () => applyLang(b.dataset.lang);
 
@@ -978,7 +1050,7 @@ function loadCatalogues() {
   const centre = { ra: d.grid.ra.toFixed(6), dec: d.grid.dec.toFixed(6) };
   const live = () => state.data === d;
   api('api/gaia', { ...centre, radius: rDeg.toFixed(4) })
-    .then(r => { if (live()) { ex.gaia = r.sources || []; drawOverlay(); renderCandidates(); if (ex.aladin) setAladinCats(); } }).catch(() => {});
+    .then(r => { if (live()) { ex.gaia = r.sources || []; drawOverlay(); renderCandidates(); if (ex.aladin) setAladinCats(); document.dispatchEvent(new CustomEvent('radians:catalogues')); } }).catch(() => {});
   api('api/sso', { ...centre, radius: Math.ceil(rDeg * 3600), mjd: d.frames.slice(0, 40).map(f => f.mjd.toFixed(3)).join(',') })
     .then(r => { if (live()) { ex.sso = r || []; drawOverlay(); } }).catch(() => {});
 }
@@ -1227,4 +1299,126 @@ els.gif.onclick = () => {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     toast(t('gifDone'));
   }, 30);
+};
+
+// ------------------------------------------------------------------ finding card (a PNG to share)
+function saveFinding(c, known) {
+  const W = 1200, H = 630, cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  const light = document.documentElement.dataset.theme === 'light';
+  const fg = light ? '#000000' : '#ffffff', dim = light ? '#555555' : '#9a9a9a', line = light ? '#dddddd' : '#262626';
+  g.fillStyle = light ? '#ffffff' : '#000000'; g.fillRect(0, 0, W, H);
+  g.imageSmoothingEnabled = false;
+  // left: the frame as shown, with the candidate ringed
+  const n = state.data.grid.n, S = 470, X0 = 50, Y0 = 90;
+  g.drawImage(els.sky, X0, Y0, S, S);
+  g.strokeStyle = line; g.lineWidth = 1; g.strokeRect(X0 - 0.5, Y0 - 0.5, S + 1, S + 1);
+  const px = X0 + (c.x + 0.5) / n * S, py = Y0 + (n - 1 - c.y + 0.5) / n * S;
+  g.strokeStyle = COLORS[c.type] || '#ffb347'; g.lineWidth = 3;
+  g.beginPath(); g.arc(px, py, 22, 0, 2 * Math.PI); g.stroke();
+  // brand line
+  g.fillStyle = '#ffb347'; g.beginPath(); g.arc(58, 46, 7, 0, 2 * Math.PI); g.fill();
+  g.fillStyle = fg; g.font = '700 26px "Inter Tight", system-ui'; g.textBaseline = 'middle'; g.fillText('Radians', 76, 47);
+  g.fillStyle = dim; g.font = '400 16px "JetBrains Mono", monospace'; g.fillText('NASA SPHEREx · radians.onrender.com', 196, 48);
+  // right: what was found
+  const RX = 570;
+  g.textBaseline = 'alphabetic';
+  g.fillStyle = COLORS[c.type] || '#ffb347'; g.font = '600 17px "JetBrains Mono", monospace';
+  g.fillText(t('findingKicker').toUpperCase(), RX, 116);
+  g.fillStyle = fg; g.font = '700 44px "Inter Tight", system-ui';
+  g.fillText(t(c.type), RX, 166);
+  const name = (state.target.name || els.q.value || '').replace(/^(NAME|V\*|\*)\s+/, '');
+  g.fillStyle = dim; g.font = '500 22px "Inter Tight", system-ui';
+  g.fillText(c.is_target && name ? name : `${formatRA(c.ra)} ${formatDec(c.dec)}`, RX, 200);
+  g.fillStyle = fg; g.font = '400 21px "Inter Tight", system-ui';
+  wrapText(g, candText(c), RX, 242, W - RX - 50, 29);
+  // before / after cut-outs on a shared stretch
+  const { pos, a, b, lo, hi } = candFrames(c), CS = 150;
+  [[a, 0], [b, 1]].forEach(([i, k]) => {
+    const cut = cutout(i, ...pos[i], lo, hi), x = RX + k * (CS + 24), y = 320;
+    g.drawImage(cut, x, y, CS, CS);
+    g.strokeStyle = line; g.strokeRect(x - 0.5, y - 0.5, CS + 1, CS + 1);
+    g.fillStyle = dim; g.font = '400 15px "JetBrains Mono", monospace';
+    g.fillText(frameLabel(i), x, y + CS + 24);
+  });
+  const fsx = state.data.frames;
+  const facts = [
+    `${fsx.length} ${t('findingVisits')} · ${fsx[0].date_start.slice(0, 10)} → ${fsx[fsx.length - 1].date_end.slice(0, 10)}`,
+    known && known !== 'unchecked' ? `Gaia DR3 ${known.id}` : (c.is_target || known === 'unchecked' ? '' : t('notInGaia')),
+  ].filter(Boolean);
+  g.fillStyle = dim; g.font = '400 16px "JetBrains Mono", monospace';
+  facts.forEach((f, k) => g.fillText(f, RX, 540 + k * 24));
+  g.font = '400 13px "Inter Tight", system-ui';
+  g.fillText(t('findingFoot'), 50, H - 22);
+  cv.toBlob((blob) => {
+    const a2 = document.createElement('a');
+    a2.href = URL.createObjectURL(blob);
+    a2.download = `radians-${(name || 'finding').replace(/[^\w.-]+/g, '-')}-${c.type}.png`;
+    a2.click();
+    setTimeout(() => URL.revokeObjectURL(a2.href), 5000);
+  }, 'image/png');
+  const done = () => toast(t('findingSaved'));
+  if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(done, done); else done();
+}
+
+function wrapText(g, text, x, y, maxW, lh) {
+  let lineText = '';
+  for (const w of text.split(' ')) {
+    const test = lineText ? `${lineText} ${w}` : w;
+    if (g.measureText(test).width > maxW && lineText) { g.fillText(lineText, x, y); y += lh; lineText = w; }
+    else lineText = test;
+  }
+  if (lineText) g.fillText(lineText, x, y);
+}
+
+// ------------------------------------------------------------------ listen: the chart as sound
+let sound = null;
+function stopSound() {
+  if (!sound) return;
+  try { sound.ctx.close(); } catch { /* already closed */ }
+  clearTimeout(sound.timer);
+  sound = null;
+  els.listen.textContent = t('listen');
+  els.listen.setAttribute('aria-pressed', 'false');
+}
+els.listen.onclick = () => {
+  if (sound) { stopSound(); return; }
+  if (!ex.phot || ex.tab === 'table') { toast(t('listenNone')); return; }
+  const key = ex.tab === 'spectrum' ? (p) => p.wavelength : (p) => p.mjd;
+  let pts = ex.phot.filter(p => Number.isFinite(valueOf(p)) && Number.isFinite(key(p)) && (e4.photFlagged.checked || !p.flagged))
+    .sort((p, q) => key(p) - key(q));
+  if (ex.tab === 'lightcurve') {
+    // each detector divided by its own median, as on the chart
+    const med = new Map();
+    for (const d of new Set(pts.map(p => p.detector))) med.set(d, median(pts.filter(p => p.detector === d).map(valueOf)));
+    pts = pts.map(p => ({ ...p, v_: valueOf(p) / med.get(p.detector) }));
+  } else pts = pts.map(p => ({ ...p, v_: valueOf(p) }));
+  if (pts.length < 3) { toast(t('listenNone')); return; }
+  const step = Math.ceil(pts.length / 160);
+  pts = pts.filter((_, i) => i % step === 0);
+  const vs = pts.map(p => p.v_).sort((x, y) => x - y);
+  const lo = vs[Math.floor(vs.length * 0.05)], hi = vs[Math.floor(vs.length * 0.95)];
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) { toast(t('listenNone')); return; }
+  const ctx = new AC(), master = ctx.createGain();
+  master.gain.value = 0.18; master.connect(ctx.destination);
+  const dur = Math.min(9, Math.max(3, pts.length * 0.06)), dt = dur / pts.length, t0 = ctx.currentTime + 0.05;
+  pts.forEach((p, i) => {
+    const u = Math.min(1, Math.max(0, (p.v_ - lo) / ((hi - lo) || 1)));
+    const osc = ctx.createOscillator(), env = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.value = 220 * 2 ** (2.5 * u);                    // brighter = higher, over 2.5 octaves
+    const ts = t0 + i * dt;
+    env.gain.setValueAtTime(0.0001, ts);
+    env.gain.linearRampToValueAtTime(p.flagged ? 0.4 : 1, ts + 0.01);
+    env.gain.exponentialRampToValueAtTime(0.001, ts + Math.max(0.05, dt * 1.6));
+    let node = env;
+    if (ctx.createStereoPanner) { const pan = ctx.createStereoPanner(); pan.pan.value = -0.8 + 1.6 * i / pts.length; env.connect(pan); node = pan; }
+    osc.connect(env); node.connect(master);
+    osc.start(ts); osc.stop(ts + Math.max(0.06, dt * 1.8));
+  });
+  sound = { ctx, timer: setTimeout(stopSound, (dur + 0.4) * 1000) };
+  els.listen.textContent = t('listenStop');
+  els.listen.setAttribute('aria-pressed', 'true');
 };

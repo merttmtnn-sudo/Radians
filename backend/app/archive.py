@@ -124,3 +124,57 @@ def resolve(query: str) -> dict:
             config.atomic_write(path, json.dumps(out))
             return out
     raise LookupError(f"'{query}' could not be resolved")
+
+
+ALIAS_PREFIXES = ("HIP ", "HD ", "GJ ", "LHS ", "2MASS J", "Gaia DR3 ", "WISEA J", "TYC ", "BD", "IRAS ", "AAVSO ")
+
+
+def details(name: str) -> dict | None:
+    """Object type, spectral type, parallax, radial velocity and a few catalogue names (CDS Sesame / SIMBAD)."""
+    key = name.strip().lower()
+    path = _cache_path("sesamex", key)
+    if path.exists():
+        return json.loads(path.read_text())
+    root = None
+    for base in config.SESAME:
+        try:
+            r = requests.get(base.replace("/-oxp/", "/-oxpI/") + "?" + requests.utils.quote(name.strip()), timeout=12)
+            r.raise_for_status()
+            root = ET.fromstring(r.text)
+            break
+        except Exception:
+            continue
+    if root is None:
+        return None
+    for res in root.iter("Resolver"):
+        if res.findtext("jradeg") is None:
+            continue
+        def num(tag):
+            v = res.findtext(tag)
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+        aliases = [a.text for a in res.iter("alias") if a.text]
+        picked = []
+        for pre in ALIAS_PREFIXES:
+            hit = next((a for a in aliases if a.startswith(pre)), None)
+            if hit and hit not in picked:
+                picked.append(hit)
+        out = {"name": res.findtext("oname"), "otype": res.findtext("otype"), "sptype": res.findtext("spType"),
+               "plx_mas": num("plx/v"), "plx_err": num("plx/e"), "rv_kms": num("Vel/v"),
+               "pm_mas": num("pm/v"), "pm_pa": num("pm/pa"), "aliases": picked[:5], "n_aliases": len(aliases)}
+        config.atomic_write(path, json.dumps(out))
+        return out
+    return None
+
+
+def sky_context(ra: float, dec: float) -> dict:
+    """Constellation, galactic and ecliptic coordinates of a position."""
+    from astropy.coordinates import SkyCoord, get_constellation
+    import astropy.units as u
+    c = SkyCoord(ra * u.deg, dec * u.deg, frame="icrs")
+    g = c.galactic
+    e = c.barycentrictrueecliptic
+    return {"constellation": str(get_constellation(c)).replace("Ophiucus", "Ophiuchus"), "con_abbr": str(get_constellation(c, short_name=True)),
+            "l": float(g.l.deg), "b": float(g.b.deg), "elon": float(e.lon.deg), "elat": float(e.lat.deg)}
