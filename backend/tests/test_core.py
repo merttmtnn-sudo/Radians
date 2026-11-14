@@ -226,3 +226,42 @@ def test_rate_limit_trusts_only_the_proxy_entry():
     from app import main
     req = SimpleNamespace(headers={"x-forwarded-for": "1.2.3.4, 9.9.9.9"}, client=SimpleNamespace(host="10.0.0.1"))
     assert main._client(req) == "9.9.9.9"
+
+
+# ---------------------------------------------------------------- wavelength slice
+def test_in_window_keeps_exposures_seen_at_those_wavelengths():
+    class F:
+        def __init__(self, wl):
+            self.wavelength = wl
+    frs = [F(1.2), F(3.31), F(4.45), F(4.55), F(None), F(4.61)]
+    got = stack.in_window(frs, 4.4, 4.6)
+    assert [f.wavelength for f in got] == [4.45, 4.55]
+    assert stack.in_window(frs, 0.5, 5.5) == [f for f in frs if f.wavelength is not None]
+
+
+def test_frames_with_a_wavelength_window(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import main
+
+    class Exp:
+        def __init__(self, mjd, det):
+            self.mjd, self.mjd_start, self.mjd_end, self.detector = mjd, mjd - .01, mjd + .01, det
+            self.obs_id = f"o{mjd}{det}"
+
+    n = 5
+    def frame(mjd, det, wl):
+        return stack.Frame(exp=Exp(mjd, det), image=np.ones((n, n), np.float32), variance=np.ones((n, n), np.float32),
+                           flags=np.zeros((n, n), np.uint32), wavelength=wl)
+    frs = [frame(61000 + d, 6, 4.5) for d in range(3)] + [frame(61200 + d, 6, 4.52) for d in range(3)] + [frame(61000, 2, 1.3)]
+    for f in frs:
+        f.bandwidth, f.phot = 0.05, {}
+    built = {"frs": frs, "n": n, "ra": 10.0, "dec": 0.0, "w": stack.output_wcs(10.0, 0.0, n)}
+    monkeypatch.setattr(main, "_build", lambda *a, **k: built)
+    c = TestClient(main.app)
+    q = {"ra": 10, "dec": 0, "candidates": "false"}
+    d = c.get("/api/frames", params={**q, "wl_min": 4.4, "wl_max": 4.6}).json()
+    assert d["wl_window"] == [4.4, 4.6] and d["wl_range"] == [1.3, 4.52]
+    assert sum(f["n_exposures"] for f in d["frames"]) == 6 and len(d["frames"]) == 2
+    empty = c.get("/api/frames", params={**q, "wl_min": 2.0, "wl_max": 2.1}).json()
+    assert empty["frames"] == [] and "wavelength window" in empty["message"]
+    assert c.get("/api/frames", params=q).json()["wl_window"] is None

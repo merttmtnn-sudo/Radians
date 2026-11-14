@@ -221,11 +221,27 @@ def frames(
     candidates: bool = Query(True, description="run the moving / variable / transient finder"),
     job: str | None = Query(None, max_length=40, pattern=r"^[A-Za-z0-9_-]+$", description="id for /api/progress"),
     matched: bool = Query(True, description="co-add only wavelength-matched exposures (visits compared like for like)"),
+    wl_min: float | None = Query(None, ge=0.5, le=5.5, description="wavelength window, micron: keep exposures that saw the target at >= wl_min"),
+    wl_max: float | None = Query(None, ge=0.5, le=5.5, description="... and <= wl_max (no extra reads: every exposure is already read)"),
 ):
     b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job)
     if b is None:
         return {"grid": None, "frames": [], "exposures": [], "message": "SPHEREx has not observed this position yet."}
     frs, n, w = b["frs"], b["n"], b["w"]
+    wls = [f.wavelength for f in frs if f.wavelength]
+    wl_range = [round(min(wls), 3), round(max(wls), 3)] if wls else None
+    window = None
+    if wl_min is not None or wl_max is not None:
+        lo = wl_min if wl_min is not None else 0.0
+        hi = wl_max if wl_max is not None else 9.0
+        if lo > hi:
+            lo, hi = hi, lo
+        window = [lo, hi]
+        frs = stack.in_window(frs, lo, hi)
+        matched = False                            # the window already compares visits at the same wavelengths
+        if not frs:
+            return {"grid": None, "frames": [], "exposures": [], "wl_range": wl_range, "wl_window": window,
+                    "message": "No SPHEREx exposure saw this position in that wavelength window."}
     raw = {m: stack.group_raw(frs, m, matched) for m in {mode, "epoch", "epoch_detector"} if m == mode or candidates}
     out_frames = stack.encode(raw[mode])
     cands = []
@@ -243,7 +259,7 @@ def frames(
         "query": {"ra": ra, "dec": dec, "pmra": pmra, "pmdec": pmdec, "ref_epoch": ref_epoch, "mode": mode},
         "flag_bits": {str(bit): name for bit, name in config.FLAG_BITS.items()}, "bad_mask": config.BAD_MASK,
         "frames": out_frames, "exposures": phot, "n_exposures_read": len(frs),
-        "candidates": cands, "detectors": config.DETECTORS,
+        "candidates": cands, "detectors": config.DETECTORS, "wl_range": wl_range, "wl_window": window,
     }
 
 

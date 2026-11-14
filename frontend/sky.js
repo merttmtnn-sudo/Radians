@@ -118,6 +118,7 @@ export function parseState(search) {
     stretch: p.get('stretch'), cmap: p.get('cmap'),
     frame: num('frame'), embed: p.get('embed') === '1',
     det: p.get('det'), view: p.get('view'), lang: p.get('lang'), wl: p.get('wl') !== '0',
+    wlc: num('wlc'), wlw: num('wlw'),
   };
 }
 
@@ -187,4 +188,39 @@ export function stretchSigned(v, lim, kind) {
   if (!Number.isFinite(v)) return NaN;
   const s = stretchValue(Math.abs(v), 0, lim, kind);
   return v < 0 ? -s : s;
+}
+
+// ---------------------------------------------------------------- colour composite (3 detector groups)
+/** Detector groups for a false-colour image: short, middle and long SPHEREx wavelengths. */
+export const RGB_GROUPS = { b: [1, 2], g: [3, 4], r: [5, 6] };   // 0.75–1.6, 1.6–3.8, 3.8–5.0 µm
+
+/** Inverse-variance co-add of same-size images; NaN where no image has a usable pixel. */
+export function ivCoadd(images, variances) {
+  const n = images[0].length, num = new Float64Array(n), den = new Float64Array(n), out = new Float32Array(n);
+  images.forEach((img, j) => {
+    const v = variances[j];
+    for (let i = 0; i < n; i++) {
+      if (Number.isFinite(img[i]) && Number.isFinite(v[i]) && v[i] > 0) { num[i] += img[i] / v[i]; den[i] += 1 / v[i]; }
+    }
+  });
+  for (let i = 0; i < n; i++) out[i] = den[i] > 0 ? num[i] / den[i] : NaN;
+  return out;
+}
+
+/** Per-epoch red/green/blue channels from per-(epoch, detector) frames
+ *  [{epoch, detector, image, variance}], plus the same over all epochs under the key 'all'.
+ *  A channel with no data is null. */
+export function rgbChannels(frames) {
+  const out = {};
+  const build = (fs) => {
+    const ch = {};
+    for (const [c, dets] of Object.entries(RGB_GROUPS)) {
+      const sel = fs.filter(f => dets.includes(f.detector));
+      ch[c] = sel.length ? ivCoadd(sel.map(f => f.image), sel.map(f => f.variance)) : null;
+    }
+    return ch;
+  };
+  for (const e of [...new Set(frames.map(f => f.epoch))]) out[e] = build(frames.filter(f => f.epoch === e));
+  out.all = build(frames);
+  return out;
 }
