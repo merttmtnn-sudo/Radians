@@ -21,7 +21,7 @@ const TR = {
   'Real time': 'Gerçek zaman', 'real time': 'gerçek zaman', 'Faster (L)': 'Hızlı (L)', '−1 day': '−1 gün', '+1 day': '+1 gün',
   '+1 sid. day': '+1 yıldız günü', '+1 year': '+1 yıl', 'Sky & View': 'Gök & Görünüm', 'Projection': 'İzdüşüm',
   'Stereographic': 'Stereografik', 'Fisheye (equidistant)': 'Balıkgözü (eşit uzaklık)', 'Orthographic': 'Ortografik',
-  'Perspective (gnomonic)': 'Perspektif (gnomonik)', 'Equal-area (Lambert)': 'Eşit alan (Lambert)', 'Mount': 'Kundak',
+  'Perspective (gnomonic)': 'Perspektif (gnomonik)', 'Cylindrical (flat horizon)': 'Silindirik (düz ufuk)', 'Equal-area (Lambert)': 'Eşit alan (Lambert)', 'Mount': 'Kundak',
   'Alt-azimuth': 'Alt-azimut', 'Equatorial (J2000)': 'Ekvatoral (J2000)', 'Light pollution (Bortle)': 'Işık kirliliği (Bortle)',
   'Star brightness': 'Yıldız parlaklığı', 'Extra magnitude limit': 'Ek kadir sınırı', 'Constellation names': 'Takımyıldız adları',
   'English': 'İngilizce', 'Atmospheric refraction': 'Atmosferik kırılma', 'Star twinkling (scintillation)': 'Yıldız titreşmesi',

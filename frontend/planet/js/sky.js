@@ -9,6 +9,9 @@ const PROJ = {
   ortho: { g: t => Math.sin(t), gi: r => (r <= 1 ? Math.asin(r) : NaN), max: 90 * D2R, maxFov: 180 },
   gnomonic: { g: t => Math.tan(t), gi: r => Math.atan(r), max: 80 * D2R, maxFov: 120 },
   equal: { g: t => 2 * Math.sin(t / 2), gi: r => (r <= 2 ? 2 * Math.asin(r / 2) : NaN), max: 179 * D2R, maxFov: 300 },
+  // cylindrical (equirectangular around the mount): the horizon is a straight line at any frame shape.
+  // Not radial, so project/unproject handle it separately; g/gi only set the scale (k = pixels per radian).
+  cyl: { g: t => t, gi: r => r, max: 179 * D2R, maxFov: 110, cyl: true },
 };
 const RATES = [-1e6, -1e5, -1e4, -1e3, -100, -10, -1, 0, 1, 10, 100, 1000, 1e4, 1e5, 1e6];
 const GREEK = { 'α': 'alpha', 'β': 'beta', 'γ': 'gamma', 'δ': 'delta', 'ε': 'epsilon', 'ζ': 'zeta', 'η': 'eta', 'θ': 'theta', 'ι': 'iota', 'κ': 'kappa',
@@ -190,6 +193,12 @@ export class Sky {
     this.cx = this.W / 2; this.cy = this.H / 2;
     this.cosMax = Math.cos(P.max);
     this.altaz = this.view.mount === 'altaz';
+    if (P.cyl) {
+      // centre longitude / latitude of the view in the mount frame, and which way longitude runs on screen
+      const c = this.B[2];
+      this.lon0 = Math.atan2(c[1], c[0]); this.lat0 = Math.asin(clamp(c[2], -1, 1));
+      this.lonSign = this.B[0][0] * -Math.sin(this.lon0) + this.B[0][1] * Math.cos(this.lon0) >= 0 ? 1 : -1;
+    }
   }
   // J2000 vector -> view vector (with refraction in alt-az mode)
   j2view(v, refr = true) {
@@ -208,6 +217,16 @@ export class Sky {
     return [h[0] / r * c, h[1] / r * c, Math.sin(alt2 * D2R)];
   }
   project(v, clampFar = false) {
+    if (this.P.cyl) {
+      const B = this.B;   // view -> mount (B is orthonormal)
+      const m0 = B[0][0] * v[0] + B[1][0] * v[1] + B[2][0] * v[2], m1 = B[0][1] * v[0] + B[1][1] * v[1] + B[2][1] * v[2],
+        m2 = B[0][2] * v[0] + B[1][2] * v[1] + B[2][2] * v[2];
+      let dl = Math.atan2(m1, m0) - this.lon0;
+      dl = ((dl + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+      if (Math.abs(dl) > this.P.max) { if (!clampFar) return null; dl = Math.sign(dl) * this.P.max; }
+      const lat = Math.asin(clamp(m2 / (Math.hypot(m0, m1, m2) || 1), -1, 1));
+      return [this.cx + this.lonSign * dl * this.k, this.cy - (lat - this.lat0) * this.k];
+    }
     let z = v[2];
     if (z < this.cosMax) {
       if (!clampFar) return null;
@@ -220,6 +239,11 @@ export class Sky {
     return [this.cx + rho * v[0] / s, this.cy - rho * v[1] / s];
   }
   unproject(px, py) {
+    if (this.P.cyl) {
+      const lon = this.lon0 + this.lonSign * (px - this.cx) / this.k, lat = this.lat0 + (this.cy - py) / this.k;
+      if (Math.abs(lat) > Math.PI / 2 || Math.abs(px - this.cx) / this.k > this.P.max) return null;
+      return [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)];
+    }
     const X = (px - this.cx) / this.k, Y = (this.cy - py) / this.k, r = Math.hypot(X, Y);
     const t = this.P.gi(r);
     if (!isFinite(t)) return null;
@@ -412,9 +436,11 @@ export class Sky {
   drawImagery(on, fade) {
     if (!this.hips?.ok) return;
     const V = this.altaz ? A.mul(this.B, this.M) : this.B;
-    const projIndex = { stereo: 0, fisheye: 1, ortho: 2, gnomonic: 3, equal: 4 }[this.view.proj];
+    const projIndex = { stereo: 0, fisheye: 1, ortho: 2, gnomonic: 3, equal: 4, cyl: 5 }[this.view.proj];
+    const mnt = this.altaz ? this.Mt : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];   // mount frame -> J2000
     this.hips.opts.fade = this.layers.atmosphere ? fade : 1;
-    this.hips.draw({ enabled: on, W: this.W, H: this.H, cx: this.cx, cy: this.cy, k: this.k, projIndex, maxT: this.P.max, rot: V,
+    this.hips.draw({ enabled: on, W: this.W, H: this.H, cx: this.cx, cy: this.cy, k: this.k, projIndex, maxT: this.P.max, rot: V, mnt,
+      lon0: this.lon0 || 0, lat0: this.lat0 || 0, lonSign: this.lonSign || 1,
       unproject: (px, py) => { const m = this.unproject(px, py); return m && (this.altaz ? A.mulv(this.Mt, m) : m); } });
   }
   // Gaia / AllWISE / 2MASS / SIMBAD markers when zoomed in, plus the Time-Lapse field of view
@@ -476,10 +502,17 @@ export class Sky {
       } else {
         vx = B[0][0] * x + B[0][1] * y + B[0][2] * z; vy = B[1][0] * x + B[1][1] * y + B[1][2] * z; vz = B[2][0] * x + B[2][1] * y + B[2][2] * z;
       }
-      if (vz < cosMax) continue;
-      const s = Math.hypot(vx, vy);
-      const rho = P.g(Math.atan2(s, vz)) * k;
-      const px = s < 1e-12 ? cx : cx + rho * vx / s, py = s < 1e-12 ? cy : cy - rho * vy / s;
+      let px, py;
+      if (P.cyl) {
+        const q = this.project([vx, vy, vz]);
+        if (!q) continue;
+        [px, py] = q;
+      } else {
+        if (vz < cosMax) continue;
+        const s = Math.hypot(vx, vy);
+        const rho = P.g(Math.atan2(s, vz)) * k;
+        px = s < 1e-12 ? cx : cx + rho * vx / s; py = s < 1e-12 ? cy : cy - rho * vy / s;
+      }
       if (px < -20 || py < -20 || px > W + 20 || py > H + 20) continue;
       const rel = lim - mag;
       let r = (0.55 + 0.38 * rel) * sc;
@@ -602,6 +635,7 @@ export class Sky {
 
   drawGround(ss) {
     const ctx = this.ctx;
+    if (this.P.cyl) return this.drawGroundFlat(ss);
     const pts = this.hills.map(h => this.project(this.hor2view(h), true));
     const nad = this.hor2view([0, 0, -1]), zen = this.hor2view([0, 0, 1]);
     const groundInside = nad[2] > zen[2];
@@ -634,6 +668,31 @@ export class Sky {
       ctx.lineWidth = 3 * this.dpr; ctx.beginPath();
       pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.stroke();
     }
+  }
+
+  // flat horizon: the hills as a band along the bottom, from the skyline down past the frame
+  drawGroundFlat(ss) {
+    const ctx = this.ctx;
+    const pts = this.hills.map(h => this.project(this.hor2view(h))).filter(Boolean).sort((a, b) => a[0] - b[0]);
+    if (!pts.length) return;
+    const light = clamp((ss.sunAlt + 12) / 18, 0, 1);
+    const top = Math.min(...pts.map(p => p[1]));
+    const grd = ctx.createLinearGradient(0, top, 0, this.H);
+    grd.addColorStop(0, `rgb(${16 + 36 * light},${13 + 40 * light},${11 + 30 * light})`);
+    grd.addColorStop(1, `rgb(${3 + 18 * light},${3 + 20 * light},${4 + 16 * light})`);
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], this.H + 10);
+    for (const p of pts) ctx.lineTo(p[0], p[1]);
+    ctx.lineTo(pts[pts.length - 1][0], this.H + 10);
+    ctx.closePath();
+    ctx.fillStyle = grd; ctx.fill();
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,179,71,0.55)'; ctx.lineWidth = 1.4 * this.dpr;
+    ctx.shadowColor = 'rgba(255,179,71,0.8)'; ctx.shadowBlur = 14 * this.dpr;
+    ctx.beginPath();
+    pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawCardinal() {

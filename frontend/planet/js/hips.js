@@ -40,7 +40,7 @@ const FS = `#version 300 es
 precision highp float; precision highp int;
 uniform sampler2D uAtlas0, uIndex0, uAtlas1, uIndex1, uLut;
 uniform vec2 uRes, uC; uniform float uK, uMaxT; uniform int uProj;
-uniform mat3 uRot;
+uniform mat3 uRot, uMnt; uniform float uLon0, uLat0, uLonSign;
 uniform int uOrder0, uOrder1, uMode0, uMode1, uOrient; uniform float uMix, uGain, uGamma, uBlack, uFade; uniform bool uHas1;
 uniform sampler2D uMos; uniform bool uMosOn; uniform vec3 uM0, uME, uMN; uniform float uMScale, uMSize;
 out vec4 outColor;
@@ -103,10 +103,17 @@ vec3 tone(vec3 c, int mode) {
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
   float X = (p.x - uC.x) / uK, Y = (uC.y - p.y) / uK, r = length(vec2(X, Y));
-  float t = gi(r);
-  if (t < 0.0 || t > uMaxT) { outColor = vec4(0.0); return; }
-  vec3 d = r < 1e-9 ? vec3(0.0, 0.0, 1.0) : vec3(X / r * sin(t), Y / r * sin(t), cos(t));
-  vec3 e = normalize(uRot * d);
+  vec3 e;
+  if (uProj == 5) {
+    float lon = uLon0 + uLonSign * X, lat = uLat0 + Y;
+    if (abs(lat) > PI / 2.0 || abs(X) > uMaxT) { outColor = vec4(0.0); return; }
+    e = normalize(uMnt * vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat)));
+  } else {
+    float t = gi(r);
+    if (t < 0.0 || t > uMaxT) { outColor = vec4(0.0); return; }
+    vec3 d = r < 1e-9 ? vec3(0.0, 0.0, 1.0) : vec3(X / r * sin(t), Y / r * sin(t), cos(t));
+    e = normalize(uRot * d);
+  }
   vec4 c0 = sampleLayer(e, uOrder0, uAtlas0, uIndex0);
   vec3 col = c0.a > 0.0 ? tone(c0.rgb, uMode0) : vec3(0.0);
   if (uHas1 && uMix > 0.0) {
@@ -313,7 +320,7 @@ export class HipsRenderer {
     if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
     this.u = {};
     for (const n of ['uAtlas0', 'uIndex0', 'uAtlas1', 'uIndex1', 'uLut', 'uRes', 'uC', 'uK', 'uMaxT', 'uProj', 'uRot', 'uOrder0', 'uOrder1', 'uMode0', 'uMode1',
-      'uOrient', 'uMix', 'uGain', 'uGamma', 'uBlack', 'uFade', 'uHas1', 'uMos', 'uMosOn', 'uM0', 'uME', 'uMN', 'uMScale', 'uMSize']) this.u[n] = gl.getUniformLocation(pr, n);
+      'uOrient', 'uMnt', 'uLon0', 'uLat0', 'uLonSign', 'uMix', 'uGain', 'uGamma', 'uBlack', 'uFade', 'uHas1', 'uMos', 'uMosOn', 'uM0', 'uME', 'uMN', 'uMScale', 'uMSize']) this.u[n] = gl.getUniformLocation(pr, n);
     this.mosTex = gl.createTexture();
     this.mosaic = null;
     const buf = gl.createBuffer();
@@ -412,6 +419,9 @@ export class HipsRenderer {
     gl.uniform1f(u.uK, view.k); gl.uniform1f(u.uMaxT, view.maxT); gl.uniform1i(u.uProj, view.projIndex);
     const R = view.rot; // rows of the J2000->view matrix = columns of view->J2000
     gl.uniformMatrix3fv(u.uRot, false, new Float32Array([R[0][0], R[0][1], R[0][2], R[1][0], R[1][1], R[1][2], R[2][0], R[2][1], R[2][2]]));
+    const N = view.mnt || [[1, 0, 0], [0, 1, 0], [0, 0, 1]];   // column-major: columns of the mount -> J2000 matrix
+    gl.uniformMatrix3fv(u.uMnt, false, new Float32Array([N[0][0], N[1][0], N[2][0], N[0][1], N[1][1], N[2][1], N[0][2], N[1][2], N[2][2]]));
+    gl.uniform1f(u.uLon0, view.lon0 || 0); gl.uniform1f(u.uLat0, view.lat0 || 0); gl.uniform1f(u.uLonSign, view.lonSign || 1);
     gl.uniform1i(u.uOrder0, this.base.order ?? 0); gl.uniform1i(u.uOrder1, this.cmp?.order ?? 0);
     gl.uniform1i(u.uMode0, this.base.source.mono ? 0 : 1); gl.uniform1i(u.uMode1, this.cmp?.source.mono ? 0 : 1);
     gl.uniform1i(u.uOrient, this.orient);
