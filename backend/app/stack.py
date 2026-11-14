@@ -322,6 +322,8 @@ def mjd_iso(m):
 # SPHEREx resolving power per detector (bands 1-4 ~ 41, 35 at the long end of band 4; 5-6 ~ 110-130)
 RES_POWER = {1: 41, 2: 41, 3: 41, 4: 35, 5: 110, 6: 130}
 BIN_ELEMENTS = 2.0          # spectral bin width in resolution elements
+MIN_MATCHED_PER_VISIT = 4   # otherwise matching is skipped for the field
+MIN_MATCHED_FRACTION = 0.2
 
 
 def match_wavelengths(frames: list[Frame], all_detectors: bool):
@@ -363,6 +365,11 @@ def match_wavelengths(frames: list[Frame], all_detectors: bool):
         info[det] = {"shared_bins": len(shared), "kept": n_kept, "of": len(fs)}
     if {ep[id(f)] for f in kept} != visits:
         return None
+    # too little left to compare (e.g. two detectors that sampled different wavelengths each visit):
+    # an unmatched comparison of enough exposures beats a matched one of almost none
+    per_visit = [sum(1 for f in kept if ep[id(f)] == v) for v in visits]
+    if min(per_visit) < MIN_MATCHED_PER_VISIT or len(kept) < MIN_MATCHED_FRACTION * len(frames):
+        return None
     return kept, weights, info
 
 
@@ -376,6 +383,7 @@ def group_raw(frames: list[Frame], mode: str, matched: bool = False):
         m = match_wavelengths(frames, all_detectors=(mode == "epoch"))
         if m is None and mode == "epoch":      # visits share no detector: match within each detector only
             m = match_wavelengths(frames, all_detectors=False)
+        # (still None: too few exposures survive matching; co-add everything, reported as matched=False)
         if m is not None:
             frames, w, match_info = m
             weight_of = {id(f): wi for f, wi in zip(frames, w)}

@@ -6,7 +6,7 @@ moving, and variable stars changing brightness.
 
 NASA Space Apps Challenge 2026 — *Planet X and SPHEREx*.
 
-**Live:** https://radians.onrender.com (free instance: the first visit after a quiet spell wakes it up, about a minute) ·
+**Live:** https://radians.onrender.com (free instance: it sleeps after 15 quiet minutes and takes about a minute to wake; the five challenge targets are built into the server and open at once, any other position takes 2–5 minutes the first time) ·
 **Slides (PDF):** [`docs/Radians-slides.pdf`](docs/Radians-slides.pdf)
 
 <p>
@@ -93,8 +93,14 @@ Settings (environment variables): `MAX_WORKERS` (parallel IRSA reads, 32 in the 
 `WARM_ON_START=1` (prepare the demo targets in the background at start-up), `CACHE_DIR`.
 
 **Speed.** A new position needs every SPHEREx exposure that covers it (300–400), about 0.5 MB each over
-HTTP byte ranges, most of it the compressed flag rows. On a home connection this takes a few minutes, in a
-data centre seconds; the page shows how many exposures have been read. Everything is cached afterwards.
+HTTP byte ranges, most of it the compressed flag rows: 2–5 minutes, on the free Render server too (about
+2 minutes measured for Barnard's Star with an empty cache). The page shows how many exposures have been
+read. The cache lives in the container, and Render's free plan starts a fresh container on every deploy
+and wake-up, so only the five challenge targets, built into the image by `scripts/bake_demo.py`, are
+always instant.
+
+**Deploying to Render** does not happen on `git push`: the live service was created by hand, so use
+Manual Deploy → Deploy latest commit in the dashboard.
 
 ## API
 
@@ -156,8 +162,8 @@ the cut-out cache is trimmed to 4 GB, oldest first. All four are environment set
   The transient finder lists such spots; following them up is for telescopes.
 - "Not in Gaia DR3" means no Gaia star brighter than G = 19 within 7″. Infrared-only objects such as
   WISE 0855 are never in Gaia: check CatWISE2020 in the context view before calling anything new.
-- A position nobody has looked at yet takes a few minutes on the free server (all exposures are read
-  once); the demo targets are prepared at start-up.
+- A position nobody has looked at yet takes 2–5 minutes on the free server (all exposures are read
+  once), and again after the server restarts; only the five challenge targets are built in.
 
 ## Use of AI
 

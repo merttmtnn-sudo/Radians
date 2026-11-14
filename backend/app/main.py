@@ -28,8 +28,10 @@ LIMITS = {"/api/frames": config.RATE_FRAMES, "/api/photometry": config.RATE_PHOT
 
 
 def _client(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for", "")
-    return fwd.split(",")[0].strip() or (request.client.host if request.client else "?")
+    """Visitor address for rate limiting. A visitor can put anything at the left of X-Forwarded-For;
+    the hosting proxy appends the address it actually saw, so only the right-most entry is trusted."""
+    fwd = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+    return fwd[-1] if fwd else (request.client.host if request.client else "?")
 
 
 @app.middleware("http")

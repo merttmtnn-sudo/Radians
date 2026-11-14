@@ -167,7 +167,9 @@ def _wl_frame(det, mjd, wl, value=1.0):
                        np.zeros((3, 3), np.uint32), wavelength=wl)
 
 
-def test_wavelength_matching_keeps_shared_bins_only():
+def test_wavelength_matching_keeps_shared_bins_only(monkeypatch):
+    monkeypatch.setattr(stack, "MIN_MATCHED_PER_VISIT", 1)
+    monkeypatch.setattr(stack, "MIN_MATCHED_FRACTION", 0.0)
     lo = config.DETECTORS[1][0]
     # visit 1 samples a blue and a red bin of detector 1, visit 2 only the blue one: red must go
     v1 = [_wl_frame(1, 60800, lo * 1.01, 1.0), _wl_frame(1, 60800.1, lo * 1.2, 10.0)]
@@ -179,7 +181,9 @@ def test_wavelength_matching_keeps_shared_bins_only():
     assert plain[0]["n_exposures"] == 2 and not np.allclose(plain[0]["image"], 1.0)
 
 
-def test_wavelength_matching_drops_detector_missing_from_a_visit():
+def test_wavelength_matching_drops_detector_missing_from_a_visit(monkeypatch):
+    monkeypatch.setattr(stack, "MIN_MATCHED_PER_VISIT", 1)
+    monkeypatch.setattr(stack, "MIN_MATCHED_FRACTION", 0.0)
     lo1, lo2 = config.DETECTORS[1][0], config.DETECTORS[2][0]
     fr = [_wl_frame(1, 60800, lo1 * 1.01), _wl_frame(2, 60800.1, lo2 * 1.01, 5.0), _wl_frame(1, 60990, lo1 * 1.01)]
     groups = stack.group_raw(fr, "epoch", matched=True)
@@ -207,3 +211,18 @@ def test_rate_limit_answers_429():
     finally:
         main.LIMITS["/api/photometry"] = old
         main._hits.clear()
+
+
+def test_matching_skipped_when_too_little_survives():
+    lo1 = config.DETECTORS[1][0]
+    fr = [_wl_frame(1, 60800 + i * 0.01, lo1 * 1.01, 1.0) for i in range(5)] +          [_wl_frame(1, 60990 + i * 0.01, lo1 * 1.3, 1.0) for i in range(5)]
+    groups = stack.group_raw(fr, "epoch", matched=True)        # no shared wavelength: keep everything
+    assert [g["n_exposures"] for g in groups] == [5, 5] and not groups[0]["matched"]
+
+
+def test_rate_limit_trusts_only_the_proxy_entry():
+    from types import SimpleNamespace
+
+    from app import main
+    req = SimpleNamespace(headers={"x-forwarded-for": "1.2.3.4, 9.9.9.9"}, client=SimpleNamespace(host="10.0.0.1"))
+    assert main._client(req) == "9.9.9.9"

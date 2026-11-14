@@ -1,4 +1,7 @@
 # Render Blueprint: one free Docker web service built from the Dockerfile in this repo.
+# autoDeploy applies only to a service created from this Blueprint. The live radians.onrender.com was
+# created by hand from the public repository URL, so it does NOT redeploy on push: use
+# Dashboard -> Manual Deploy -> Deploy latest commit.
 services:
   - type: web
     name: radians
