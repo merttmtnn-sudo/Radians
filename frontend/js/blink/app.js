@@ -1,6 +1,6 @@
 import {
   decodeB64, percentiles, stretchValue, stretchSigned, lut, lutDiverging, pixToSky, formatRA, formatDec,
-  flagNames, parseState, computeView, isDiffView, skyToPix, stackImage,
+  flagNames, parseState, computeView, isDiffView, skyToPix, stackImage, rgbChannels,
 } from './sky.js';
 import { t, setLang, getLang } from '../core/i18n.js';
 import { scatterChart, chartTable, SERIES, wlColor } from '../core/charts.js';
@@ -13,6 +13,7 @@ const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
   'search', 'q', 'fov', 'mode', 'go', 'sky', 'overlay', 'stage', 'empty', 'loading', 'loadingMsg', 'loadingSub',
   'play', 'prev', 'next', 'scrub', 'fps', 'fpsVal', 'timeline', 'frameInfo', 'cursor', 'stretch', 'cmap', 'lo', 'hi',
+  'wlWin', 'wlBox', 'wlC', 'wlW', 'wlLab', 'rgbNote',
   'cross', 'flagView', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'view', 'viewHelp', 'detchips',
   'preset', 'loadingBar', 'wlMatch', 'zoom', 'gif', 'cands', 'candCount', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples', 'compare', 'listen',
 ].map(id => [id, $(id)]));
@@ -25,6 +26,7 @@ const state = {
   idx: 0, playing: false, timer: null, levels: [0, 1], abort: null,
   dets: new Set(ALL_DETS), selected: null,
   compare: false, split: 0.5, splitDrag: false, splitMoved: false,
+  params: null, rgb: null,                // last /api/frames query; colour channels built from it
 };
 
 // ------------------------------------------------------------------ helpers
@@ -165,11 +167,12 @@ async function run(opts) {
         }
       } catch { /* progress is cosmetic */ }
     }, 1000);
-    const query = {
+    const params = {
       ra: target.ra.toFixed(6), dec: target.dec.toFixed(6), fov: opts.fov, mode: opts.mode,
-      pmra: target.pmra, pmdec: target.pmdec, detectors: [...state.dets].sort().join(','), job,
-      matched: els.wlMatch.checked,
+      pmra: target.pmra, pmdec: target.pmdec, detectors: [...state.dets].sort().join(','),
+      matched: els.wlMatch.checked, ...wlParams(),
     };
+    const query = { ...params, job };
     // NASA's archive has short outages: wait and ask again a few times before giving up
     let data;
     for (let attempt = 1; ; attempt++) {
@@ -185,10 +188,12 @@ async function run(opts) {
         setLoading(true, t('reading'));
       }
     }
+    state.params = params;
     if (!data.frames || !data.frames.length) {
       state.data = null;
       els.empty.hidden = false;
-      els.empty.innerHTML = `<p>${t('noData')}</p>`;
+      const w = data.wl_window;
+      els.empty.innerHTML = `<p>${w ? t('wlNone', { lo: w[0].toFixed(2), hi: w[1].toFixed(2) }) : t('noData')}</p>`;
       renderCandidates();
       depthHide();
       return;
@@ -221,9 +226,11 @@ function load(data, startIdx) {
   els.sky.width = els.sky.height = n;
   els.overlay.width = els.overlay.height = Math.max(400, n * 8);      // sharper markers
   els.hudScale.textContent = `${(data.grid.fov / 60).toFixed(1)}′ × ${(data.grid.fov / 60).toFixed(1)}′`;
+  state.rgb = null;
   applyView(startIdx);
   renderCandidates();
   onLoaded();
+  syncRgb();
 }
 
 // ------------------------------------------------------------------ views
@@ -259,6 +266,7 @@ function frameFlags(i) {
 function render() {
   const { data } = state;
   if (!data) return;
+  if (rgbReady()) { renderRgb(); return; }
   const n = data.grid.n;
   const cmp = compareOn();
   const img = state.shown[cmp ? compareB() : state.idx];
@@ -780,15 +788,15 @@ els.prev.onclick = () => { stop(); show(state.idx - 1); };
 els.next.onclick = () => { stop(); show(state.idx + 1); };
 els.scrub.oninput = () => { stop(); show(Number(els.scrub.value)); };
 els.fps.oninput = () => { els.fpsVal.textContent = els.fps.value; if (state.playing) play(); syncUrl(true); };
-for (const e of [els.stretch, els.cmap, els.cross, els.flagView]) e.onchange = () => { render(); syncUrl(true); };
-// one palette for the map, the blink and the sharpening view
+for (const e of [els.stretch, els.cmap, els.cross, els.flagView]) e.onchange = () => { syncRgb(); render(); syncUrl(true); };
+// one palette for the map, the blink and the sharpening view ('rgb' = the three-detector colour composite here)
 els.cmap.addEventListener('change', () => setPalette(els.cmap.value));
 document.addEventListener('radians:palette', () => {
-  if (els.cmap.value !== viewerCmap()) { els.cmap.value = viewerCmap(); render(); syncUrl(true); }
+  if (els.cmap.value !== viewerCmap()) { els.cmap.value = viewerCmap(); syncRgb(); render(); syncUrl(true); }
 });
 els.cmap.value = viewerCmap(getPalette());
 for (const e of [els.lo, els.hi]) e.oninput = () => { computeLevels(); render(); };
-els.view.onchange = () => { const was = state.playing; applyView(); if (was) play(); syncUrl(true); };
+els.view.onchange = () => { const was = state.playing; syncRgb(); applyView(); if (was) play(); syncUrl(true); };
 
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input:not([type=range]):not([type=checkbox]), select, textarea')) return;
@@ -856,6 +864,7 @@ function syncUrl(replace = false) {
   if (els.stretch.value !== 'asinh') p.set('stretch', els.stretch.value);
   if (els.cmap.value !== 'gray') p.set('cmap', els.cmap.value);
   if (!els.wlMatch.checked) p.set('wl', '0');
+  if (els.wlWin.value) { p.set('wlc', els.wlC.value); p.set('wlw', els.wlW.value); }
   if (!state.playing && state.idx) p.set('frame', state.idx);
   if (getLang() !== 'en') p.set('lang', getLang());
   if (document.body.classList.contains('embed')) p.set('embed', '1');
@@ -899,6 +908,13 @@ function fromUrl() {
   if (s.stretch) setSelect(els.stretch, s.stretch);
   if (s.cmap) setSelect(els.cmap, s.cmap);
   els.wlMatch.checked = s.wl;
+  if (s.wlc !== null) {
+    const preset = [...els.wlWin.options].find(o => o.value && o.value !== 'custom' && Math.abs(Number(o.value) - s.wlc) < 1e-6);
+    els.wlWin.value = preset ? preset.value : 'custom';
+    els.wlC.value = s.wlc;
+    if (s.wlw !== null) setSelect(els.wlW, s.wlw);
+  }
+  syncWlBox();
   setDets(s.det ? s.det.split(',').map(Number) : ALL_DETS);
   const common = { fov: els.fov.value, mode: els.mode.value, frame: s.frame, autoplay: s.frame === null };
   if (s.ra !== null && s.dec !== null) run({ q: s.q, ra: s.ra, dec: s.dec, pmra: s.pmra, pmdec: s.pmdec, ...common });
@@ -1501,3 +1517,88 @@ $('irsaSpec').onclick = async () => {
   try { await navigator.clipboard.writeText(coo); toast(t('irsaCopied')); } catch { toast(coo); }
   window.open('https://irsa.ipac.caltech.edu/applications/spherex/tool-spectrophotometry', '_blank', 'noopener');
 };
+
+
+// ------------------------------------------------------------------ wavelength slice of the 102-band spectrum
+function wlParams() {
+  if (!els.wlWin.value) return {};
+  const c = Number(els.wlC.value), w = Number(els.wlW.value);
+  return { wl_min: (c - w / 2).toFixed(3), wl_max: (c + w / 2).toFixed(3) };
+}
+function syncWlBox() {
+  els.wlBox.hidden = !els.wlWin.value;
+  const p = wlParams();
+  els.wlLab.textContent = p.wl_min ? t('wlLab', { lo: Number(p.wl_min).toFixed(2), hi: Number(p.wl_max).toFixed(2) }) : '';
+}
+els.wlWin.onchange = () => {
+  if (els.wlWin.value && els.wlWin.value !== 'custom') els.wlC.value = els.wlWin.value;
+  syncWlBox();
+  requery();
+};
+els.wlC.oninput = () => { if (els.wlWin.value !== 'custom') els.wlWin.value = 'custom'; syncWlBox(); };
+els.wlC.onchange = els.wlW.onchange = () => { syncWlBox(); requery(); };
+syncWlBox();
+
+// ------------------------------------------------------------------ colour composite (blue D1–D2, green D3–D4, red D5–D6)
+const rgbWanted = () => els.cmap.value === 'rgb';
+const rgbPossible = () => !isDiffView(els.view.value) && els.mode.value === 'epoch';
+const rgbKey = () => JSON.stringify(state.params);
+const rgbReady = () => rgbWanted() && rgbPossible() && state.rgb && state.rgb.key === rgbKey() && state.rgb.ch;
+
+async function syncRgb() {
+  els.rgbNote.hidden = !rgbWanted();
+  if (!rgbWanted() || !state.data || !state.params) return;
+  if (!rgbPossible()) { els.rgbNote.textContent = t('rgbNeeds'); return; }
+  const key = rgbKey();
+  if (state.rgb && state.rgb.key === key) { noteRgb(); return; }
+  state.rgb = { key, ch: null };
+  els.rgbNote.textContent = t('rgbLoading');
+  try {
+    // the per-visit, per-detector co-adds the server already makes (no extra IRSA reads)
+    const d = await api('api/frames', { ...state.params, mode: 'epoch_detector', candidates: false });
+    if (!state.rgb || state.rgb.key !== key) return;                   // the view changed meanwhile
+    const frames = (d.frames || []).map(f => ({ epoch: f.epoch, detector: f.detector,
+      image: decodeB64(f.image, Float32Array), variance: decodeB64(f.variance, Float32Array) }));
+    state.rgb.ch = rgbChannels(frames);
+    noteRgb();
+    render();
+  } catch (e) {
+    if (e.name !== 'AbortError') { els.rgbNote.textContent = e.message; state.rgb = null; }
+  }
+}
+function noteRgb() {
+  const all = state.rgb && state.rgb.ch && state.rgb.ch.all;
+  const missing = all ? Object.entries({ b: 'D1–D2', g: 'D3–D4', r: 'D5–D6' }).filter(([c]) => !all[c]).map(([, d]) => d) : [];
+  els.rgbNote.textContent = missing.length ? `${t('rgbHelp')} ${t('rgbMissing', { c: missing.join(', ') })}` : t('rgbHelp');
+}
+
+function renderRgb() {
+  const { data } = state, n = data.grid.n, ch = state.rgb.ch;
+  const epochOf = (i) => (isStack() ? 'all' : (data.frames[i] || {}).epoch);
+  const cmp = compareOn();
+  const right = ch[epochOf(cmp ? compareB() : state.idx)] || ch.all;
+  const left = cmp ? (ch[epochOf(0)] || ch.all) : right;
+  const sx = cmp ? Math.round(state.split * n) : -1;
+  // one set of levels per colour across every visit, so a colour change between visits is real
+  const lv = {};
+  for (const c of ['r', 'g', 'b']) {
+    const arrs = Object.entries(ch).filter(([k, v]) => k !== 'all' && v[c]).map(([, v]) => v[c]);
+    lv[c] = arrs.length ? percentiles(arrs, [Number(els.lo.value), Number(els.hi.value)]) : [0, 1];
+  }
+  const kind = els.stretch.value, showFlags = els.flagView.checked, flg = frameFlags(state.idx);
+  const ctx = els.sky.getContext('2d'), out = ctx.createImageData(n, n);
+  for (let y = 0; y < n; y++) {
+    const row = n - 1 - y;
+    for (let x = 0; x < n; x++) {
+      const i = y * n + x, o = (row * n + x) * 4, src = x < sx ? left : right;
+      for (const [k, c] of [[0, 'r'], [1, 'g'], [2, 'b']]) {
+        const v = src[c] ? stretchValue(src[c][i], lv[c][0], lv[c][1], kind) : 0;
+        out.data[o + k] = Number.isNaN(v) ? 0 : Math.round(v * 255);
+      }
+      out.data[o + 3] = 255;
+      if (showFlags && flg && (flg[i] & data.bad_mask)) { out.data[o] = 255; out.data[o + 1] *= 0.4; out.data[o + 2] *= 0.4; }
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+  drawOverlay();
+}

@@ -405,7 +405,9 @@ body.embed .stage { max-height: calc(100vh - 70px); }
 .explorenote::before { content: '✦ '; color: var(--accent); }
 
 /* ---------------------------------------------------------------- map page */
-[hidden] { display: none !important; }      /* a component's own display rule must never beat [hidden] */
+[hidden] { display: none !important; }
+.wlbox { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; align-items: center; margin-top: 6px; }
+.wlbox p { grid-column: 1 / -1; margin: 0; }      /* a component's own display rule must never beat [hidden] */
 .map-only { display: none !important; }
 .in-map .map-only { display: block !important; }
 .sky-only { display: none; }

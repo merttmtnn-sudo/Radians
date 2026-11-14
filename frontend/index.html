@@ -514,6 +514,26 @@
     </div>
     <label class="check"><input id="wlMatch" type="checkbox" checked> <span data-i18n="wlMatch"></span></label>
     <p class="muted small" data-i18n="wlMatchHelp"></p>
+    <div class="field"><span data-i18n="wlWin"></span>
+      <select id="wlWin" class="input sm">
+        <option value="" selected data-i18n="wlAll"></option>
+        <option value="1.25" data-i18n="wlJ"></option>
+        <option value="2.2" data-i18n="wlK"></option>
+        <option value="3.3" data-i18n="wlPah"></option>
+        <option value="4.5" data-i18n="wlBd"></option>
+        <option value="custom" data-i18n="wlCustom"></option>
+      </select>
+      <div id="wlBox" class="wlbox" hidden>
+        <input id="wlC" type="range" min="0.8" max="4.95" step="0.05" value="4.5" aria-label="Wavelength (µm)">
+        <select id="wlW" class="input sm" aria-label="Window width">
+          <option value="0.1">± 0.05 µm</option>
+          <option value="0.2" selected>± 0.1 µm</option>
+          <option value="0.5">± 0.25 µm</option>
+        </select>
+        <p class="muted small mono" id="wlLab"></p>
+      </div>
+      <p class="muted small" data-i18n="wlWinHelp"></p>
+    </div>
   </section>
 
   <section>
@@ -533,8 +553,10 @@
         <option value="heat" data-i18n="cmHeat"></option>
         <option value="inferno">Inferno</option>
         <option value="viridis">Viridis</option>
+        <option value="rgb" data-i18n="cmRgb"></option>
       </select>
     </label>
+    <p class="muted small" id="rgbNote" hidden></p>
     <label class="field"><span data-i18n="black"></span><input id="lo" type="range" min="0" max="60" step="0.5" value="5"></label>
     <label class="field"><span data-i18n="white"></span><input id="hi" type="range" min="90" max="100" step="0.05" value="99.7"></label>
     <label class="check"><input id="cross" type="checkbox" checked> <span data-i18n="marker"></span></label>

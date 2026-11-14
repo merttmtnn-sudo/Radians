@@ -76,3 +76,30 @@ test('signed stretch and diverging lut', () => {
   assert.deepEqual([l[128 * 3], l[128 * 3 + 1], l[128 * 3 + 2]], [0, 0, 0]);
   assert.equal(l[255 * 3], 255); assert.equal(l[2], 255);
 });
+
+// ---------------------------------------------------------------- colour composite
+import { ivCoadd, rgbChannels, RGB_GROUPS } from '../js/blink/sky.js';
+
+test('ivCoadd weights by inverse variance and leaves empty pixels NaN', () => {
+  const a = Float32Array.from([1, NaN, 5]), b = Float32Array.from([4, NaN, NaN]);
+  const va = Float32Array.from([1, 1, 1]), vb = Float32Array.from([0.5, 1, 1]);
+  const c = ivCoadd([a, b], [va, vb]);
+  assert.ok(Math.abs(c[0] - 3) < 1e-6);            // (1/1 + 4/0.5) / (1 + 2) = 3
+  assert.ok(Number.isNaN(c[1]));
+  assert.equal(c[2], 5);
+});
+
+test('rgbChannels groups detectors into blue / green / red per epoch', () => {
+  const img = (v) => Float32Array.from([v, v]), one = Float32Array.from([1, 1]);
+  const frames = [
+    { epoch: 1, detector: 1, image: img(10), variance: one }, { epoch: 1, detector: 2, image: img(20), variance: one },
+    { epoch: 1, detector: 6, image: img(7), variance: one }, { epoch: 2, detector: 4, image: img(3), variance: one },
+  ];
+  const ch = rgbChannels(frames);
+  assert.deepEqual(Object.keys(RGB_GROUPS), ['b', 'g', 'r']);
+  assert.equal(ch[1].b[0], 15);                     // D1 + D2 averaged
+  assert.equal(ch[1].g, null);                      // no D3/D4 in epoch 1
+  assert.equal(ch[1].r[0], 7);
+  assert.equal(ch[2].g[0], 3);
+  assert.equal(ch.all.b[0], 15);
+});
