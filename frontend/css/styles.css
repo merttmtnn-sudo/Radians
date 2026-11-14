@@ -640,3 +640,7 @@ body.embed .depth { display: none !important; }
 .looknote { margin: 10px 0 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent, #ffb347) 55%, transparent);
   border-radius: 14px; background: color-mix(in srgb, var(--accent, #ffb347) 9%, transparent); }
 .looknote p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.45; }
+
+/* quick look: what is shown while the rest is read */
+.hud-quick { bottom: 44px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); text-align: center; white-space: normal; }
+.hud-quick[hidden] { display: none; }

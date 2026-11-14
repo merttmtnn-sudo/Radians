@@ -326,3 +326,90 @@ def test_frames_with_a_wavelength_window(monkeypatch):
     empty = c.get("/api/frames", params={**q, "wl_min": 2.0, "wl_max": 2.1}).json()
     assert empty["frames"] == [] and "wavelength window" in empty["message"]
     assert c.get("/api/frames", params=q).json()["wl_window"] is None
+
+
+# ---------------------------------------------------------------- quick first look (faster new positions)
+def _exps(epochs=3, dets=(5, 6), per=20, gap=180.0):
+    out = []
+    for e in range(epochs):
+        for d in dets:
+            for k in range(per):
+                m = 61000.0 + e * gap + k * 0.5
+                out.append(Exposure(f"e{e}d{d}k{k}", d, f"u{e}{d}{k}", m, m + 0.01, 1.0, 2.0, 100.0, "test"))
+    return sorted(out, key=lambda x: x.mjd)
+
+
+def test_quick_subset_keeps_every_epoch_and_detector():
+    exps = _exps()
+    sub = stack.quick_subset(exps, 6)
+    assert len(sub) == 3 * 2 * 6
+    groups = {(int((x.mjd - 61000) // 180), x.detector) for x in sub}
+    assert groups == {(e, d) for e in range(3) for d in (5, 6)}           # nothing dropped entirely
+    assert [x.mjd for x in sub] == sorted(x.mjd for x in sub)
+    first = [x for x in sub if x.detector == 5 and x.mjd < 61100]
+    assert first[0].obs_id == "e0d5k0" and first[-1].obs_id == "e0d5k19"   # spread over the whole epoch
+
+
+def test_quick_subset_leaves_small_sets_alone():
+    exps = _exps(per=4)
+    assert stack.quick_subset(exps, 6) == exps
+    assert stack.quick_subset(exps, 0) == exps
+
+
+def test_irsa_requests_in_flight_are_capped(monkeypatch):
+    import threading
+    import time
+    state = {"now": 0, "max": 0}
+    lock = threading.Lock()
+
+    class Resp:
+        status_code = 206
+        content = b"x" * 10
+        headers = {"Content-Type": "application/octet-stream", "Content-Range": "bytes 0-9/100"}
+
+        def raise_for_status(self):
+            pass
+
+        def close(self):
+            pass
+
+    class Sess:
+        def get(self, *a, **k):
+            with lock:
+                state["now"] += 1
+                state["max"] = max(state["max"], state["now"])
+            time.sleep(0.02)
+            with lock:
+                state["now"] -= 1
+            return Resp()
+
+    monkeypatch.setattr(fitsrange, "session", lambda: Sess())
+    monkeypatch.setattr(fitsrange, "IRSA_SLOTS", threading.BoundedSemaphore(3))
+    threads = [threading.Thread(target=fitsrange._get, args=("u", [(0, 10)])) for _ in range(20)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert 1 <= state["max"] <= 3
+
+
+def test_quick_build_then_full_view(monkeypatch):
+    from app import main
+    exps = _exps(per=20)
+    read = []
+
+    def fake_build_frames(ex, ra, dec, n, target, progress=None, on_frame=None):
+        read.append(len(ex))
+        return [object() for _ in ex]
+
+    monkeypatch.setattr(main, "_exposures", lambda ra, dec: exps)
+    monkeypatch.setattr(stack, "build_frames", fake_build_frames)
+    monkeypatch.setattr(stack, "prune_cache", lambda *a, **k: None)
+    args = (12.345678, 1.5, 120, "5,6", None, None, 2000.0, 400)
+    q = main._build(*args, quick=True)
+    assert q["quick"] and len(q["frs"]) == 3 * 2 * config.QUICK_PER_EPOCH and q["n_total"] == len(exps)
+    assert main._build(*args, quick=True) is q                             # cached quick look
+    f = main._build(*args)
+    assert not f["quick"] and len(f["frs"]) == len(exps)
+    assert main._build(*args, quick=True) is f                             # once the full view exists, quick returns it
+    assert read == [36, len(exps)]

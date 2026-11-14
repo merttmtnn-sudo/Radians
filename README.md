@@ -152,7 +152,12 @@ Settings (environment variables): `MAX_WORKERS` (parallel IRSA reads, 32 in the 
 **Speed.** A new position needs every SPHEREx exposure that covers it (300–400), about 0.5 MB each over
 HTTP byte ranges, most of it the compressed flag rows: 2–5 minutes, on the free Render server too (about
 2 minutes measured for Barnard's Star with an empty cache). The page shows how many exposures have been
-read. The cache lives in the container, and Render's free plan starts a fresh container on every deploy
+read. With **Quick look first** (on by default) a new position shows a blink from a time-spread subset
+(at most `QUICK_PER_EPOCH` = 6 exposures per visit and detector) while the rest is read in the
+background; the full view, the candidate finder and the sharpening section follow by themselves, reusing
+the cut-outs already read. One cap (`IRSA_MAX_INFLIGHT` = 10) limits the requests to IRSA from the whole
+server, blink reader and Sky Explorer cut-outs together, because IRSA slows down every request when one
+client has many in flight. The cache lives in the container, and Render's free plan starts a fresh container on every deploy
 and wake-up, so only the five challenge targets, built into the image by `scripts/bake_demo.py`, are
 always instant.
 
@@ -212,7 +217,7 @@ S/N 5 is below the finder's detection threshold (8) on purpose.
 Each visitor may ask for 20 views and 90 spectra a minute (HTTP 429 with `Retry-After` beyond that);
 at most two new positions are read from IRSA at the same time; IRSA's own `Retry-After` is honoured;
 the cut-out cache is trimmed to 4 GB, oldest first. All four are environment settings
-(`RATE_FRAMES`, `RATE_PHOT`, `MAX_COLD_BUILDS`, `CACHE_MAX_MB`).
+(`RATE_FRAMES`, `RATE_PHOT`, `MAX_COLD_BUILDS`, `CACHE_MAX_MB`), as are `IRSA_MAX_INFLIGHT` and `QUICK_PER_EPOCH`.
 
 ## Limitations
 

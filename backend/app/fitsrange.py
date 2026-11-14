@@ -66,13 +66,24 @@ def _parse_multipart(body: bytes, ctype: str):
     return pieces
 
 
+# One cap on IRSA requests for the whole server, however many visitors and worker threads there
+# are: IRSA slows every request down when one client has many in flight (see config). The
+# explorer's cut-outs (explorer.py) share it.
+IRSA_SLOTS = threading.BoundedSemaphore(max(1, config.IRSA_MAX_INFLIGHT))
+
+
 def _get(url, merged, timeout=60):
     spec = ",".join(f"{a}-{b - 1}" for a, b in merged)
     last = None
     for attempt in range(4):
         try:
-            r = session().get(url, headers={"Range": "bytes=" + spec}, timeout=timeout, stream=True)
-            if r.status_code in (429, 502, 503, 504):     # IRSA busy: wait as asked, then retry
+            with IRSA_SLOTS:                  # released before any retry wait below
+                r = session().get(url, headers={"Range": "bytes=" + spec}, timeout=timeout, stream=True)
+                busy = r.status_code in (429, 502, 503, 504)
+                if not busy and r.status_code != 200:
+                    r.raise_for_status()
+                    body, ctype = r.content, r.headers.get("Content-Type", "")
+            if busy:                          # IRSA busy: wait as asked, then retry
                 wait = r.headers.get("Retry-After", "")
                 r.close()
                 last = IOError(f"HTTP {r.status_code}")
@@ -83,8 +94,6 @@ def _get(url, merged, timeout=60):
                 if len(merged) == 1:
                     raise IOError(f"{url} does not support byte ranges")
                 return [p for rng in merged for p in _get(url, [rng], timeout)]
-            r.raise_for_status()
-            body, ctype = r.content, r.headers.get("Content-Type", "")
             if ctype.startswith("multipart/byteranges"):
                 return _parse_multipart(body, ctype)
             m = re.match(r"bytes (\d+)-(\d+)/", r.headers.get("Content-Range", ""))

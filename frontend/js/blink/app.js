@@ -14,7 +14,7 @@ const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
   'search', 'q', 'fov', 'mode', 'go', 'sky', 'overlay', 'stage', 'empty', 'loading', 'loadingMsg', 'loadingSub',
   'play', 'prev', 'next', 'scrub', 'fps', 'fpsVal', 'timeline', 'frameInfo', 'cursor', 'stretch', 'cmap', 'lo', 'hi',
-  'wlWin', 'wlBox', 'wlC', 'wlW', 'wlLab', 'rgbNote',
+  'wlWin', 'wlBox', 'wlC', 'wlW', 'wlLab', 'rgbNote', 'quickLook', 'quickNote',
   'cross', 'flagView', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'view', 'viewHelp', 'detchips',
   'preset', 'loadingBar', 'wlMatch', 'zoom', 'gif', 'cands', 'candCount', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples', 'compare', 'listen',
 ].map(id => [id, $(id)]));
@@ -158,7 +158,10 @@ async function run(opts) {
         const p = await api('api/progress', { job }, ctl.signal);
         if (p.stage === 'read' && p.total) {
           showProgress = true;
-          els.loadingSub.textContent = t('readingN', { done: p.done, total: p.total, pct: Math.round(100 * p.done / p.total) });
+          const pct = Math.round(100 * p.done / p.total);
+          els.loadingSub.textContent = p.quick && p.total_all
+            ? t('readingQuick', { done: p.done, total: p.total, all: p.total_all, pct })
+            : t('readingN', { done: p.done, total: p.total, pct });
           els.loadingBar.hidden = false;
           els.loadingBar.value = p.done / p.total;
         }
@@ -173,7 +176,10 @@ async function run(opts) {
       pmra: target.pmra, pmdec: target.pmdec, detectors: [...state.dets].sort().join(','),
       matched: els.wlMatch.checked, ...wlParams(),
     };
-    const query = { ...params, job };
+    els.quickNote.hidden = true;
+    // quick look: a cached full view comes back as is; a new position comes back as a quick look on a
+    // time-spread subset (a few exposures per visit and detector), and fillIn() reads the rest meanwhile
+    const query = { ...params, job, ...(els.quickLook.checked ? { quick: 1 } : {}) };
     // NASA's archive has short outages: wait and ask again a few times before giving up
     let data;
     for (let attempt = 1; ; attempt++) {
@@ -201,7 +207,8 @@ async function run(opts) {
     }
     load(data, opts.frame ?? 0);
     document.dispatchEvent(new CustomEvent('radians:loaded', { detail: data }));
-    depthLoad(gridParams(), api);
+    if (data.quick) fillIn(params, data, ctl);
+    else depthLoad(gridParams(), api);           // (after a quick look, fillIn() does this on the full read)
     syncUrl();
     if (opts.autoplay !== false) play();
   } catch (e) {
@@ -214,6 +221,37 @@ async function run(opts) {
     clearInterval(tick);
     clearInterval(poll);
     if (state.abort === ctl) { setLoading(false); els.loadingBar.hidden = true; }
+  }
+}
+
+// After a quick look: read every exposure in the background, then swap the full view in.
+async function fillIn(params, quickData, ctl) {
+  const job = Math.random().toString(36).slice(2, 12);
+  const n = quickData.n_exposures_read, total = quickData.n_exposures_total;
+  const note = (done) => { els.quickNote.hidden = false; els.quickNote.textContent = t('quickNote', { n, total, done }); };
+  note(0);
+  const poll = setInterval(async () => {
+    try {
+      const p = await api('api/progress', { job }, ctl.signal);
+      if (p.stage === 'read' && p.total) note(p.done);
+    } catch { /* progress is cosmetic */ }
+  }, 1500);
+  try {
+    const full = await api('api/frames', { ...params, job }, ctl.signal);
+    if (state.abort !== ctl || !full.frames || !full.frames.length) return;   // the visitor moved on
+    const wasPlaying = state.playing, idx = Math.min(state.idx, full.frames.length - 1);
+    const click = ex.click;                        // a star the visitor clicked during the quick look
+    load(full, idx);                               // load() -> onLoaded() resets the analysis to the target...
+    if (click) photAt(click.x, click.y);           // ...so measure their star again, now on every exposure
+    document.dispatchEvent(new CustomEvent('radians:loaded', { detail: full }));
+    depthLoad(gridParams(), api);
+    if (wasPlaying) play();
+    els.quickNote.textContent = t('quickFull', { total: full.n_exposures_read });
+    setTimeout(() => { if (state.data === full) els.quickNote.hidden = true; }, 5000);
+  } catch (e) {
+    if (e.name !== 'AbortError') { els.quickNote.hidden = true; toast(e.message, true); }
+  } finally {
+    clearInterval(poll);
   }
 }
 
@@ -450,6 +488,7 @@ function renderCandidates() {
   const cands = state.data?.candidates || [];
   els.candCount.textContent = state.data ? `(${cands.length})` : '';
   if (!state.data) { els.cands.replaceChildren(); return; }
+  if (state.data.quick) { els.candCount.textContent = '(…)'; els.cands.replaceChildren(el('li', 'muted small', t('candsPending'))); return; }
   if (!cands.length) { els.cands.replaceChildren(el('li', 'muted small', t('noCands'))); return; }
   els.cands.replaceChildren(...cands.map((c, i) => {
     const li = el('li', 'cand' + (i === state.selected ? ' on' : ''));
@@ -1561,7 +1600,8 @@ async function syncRgb() {
   els.rgbNote.textContent = t('rgbLoading');
   try {
     // the per-visit, per-detector co-adds the server already makes (no extra IRSA reads)
-    const d = await api('api/frames', { ...state.params, mode: 'epoch_detector', candidates: false });
+    const d = await api('api/frames', { ...state.params, mode: 'epoch_detector', candidates: false,
+      ...(state.data.quick ? { quick: 1 } : {}) });          // the full view reloads this once it is read
     if (!state.rgb || state.rgb.key !== key) return;                   // the view changed meanwhile
     const frames = (d.frames || []).map(f => ({ epoch: f.epoch, detector: f.detector,
       image: decodeB64(f.image, Float32Array), variance: decodeB64(f.variance, Float32Array) }));
