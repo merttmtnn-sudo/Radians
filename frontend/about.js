@@ -46,7 +46,7 @@ function computedFacts(obj, cur, sky) {
   const out = [], d = distanceLy(obj, cur), tg = state.target, tr = L();
   if (d) {
     const ly = d.ly;
-    if (ly < YEAR - 100) out.push(tr ? `Bugün gördüğünüz ışık yola yaklaşık ${nf(Math.round(YEAR - ly))} yılında çıktı.` : `The light you see left it around the year ${Math.round(YEAR - ly)}.`);
+    if (ly < YEAR - 100) out.push(tr ? `Bugün gördüğünüz ışık yola yaklaşık ${Math.round(YEAR - ly)} yılında çıktı.` : `The light you see left it around the year ${Math.round(YEAR - ly)}.`);
     else out.push(tr ? `Işığı bize yaklaşık ${nf(ly, 0)} yılda ulaşıyor.` : `Its light takes about ${nf(ly, 0)} years to reach us.`);
   }
   const pmMas = obj?.pm_mas ?? (tg && Number.isFinite(tg.pmra) ? Math.hypot(tg.pmra, tg.pmdec) : null);
@@ -145,7 +145,7 @@ function renderAbout() {
   // where in the sky
   if (sky) {
     const fig = el('figure', 'skymap');
-    fig.append(skyMap(tg.ra, tg.dec), el('figcaption', 'small dim', t('aMapCap', { con: sky.constellation, b: sky.b.toFixed(0) })));
+    fig.append(skyMap(tg.ra, tg.dec), el('figcaption', 'small dim', t('aMapCap', { con: sky.constellation, b: Math.abs(sky.b).toFixed(0) })));
     body.append(fig);
   }
 
