@@ -75,6 +75,8 @@ Radians/
 │   │   ├── archive.py           finds SPHEREx exposures (IRSA SIA2), resolves names (CDS Sesame)
 │   │   ├── fitsrange.py         byte-range reads of remote FITS files (only the pixels needed)
 │   │   ├── stack.py             reprojection, background subtraction, epochs, co-adds
+│   │   ├── spectype.py          spectral type from a spectrum (standards + brown-dwarf models), fingerprints
+│   │   ├── typecat.py           SIMBAD spectral type and Gaia DR3 parameters of one object
 │   │   ├── detect.py            moving / variable candidate finder
 │   │   ├── crossmatch.py        SIMBAD + CatWISE2020 for the candidate cards
 │   │   ├── external.py          Gaia DR3, SkyBoT, NEOSSat (CADC) lookups
@@ -101,6 +103,7 @@ Radians/
 │   │   │   ├── app.js           viewer: search, playback, candidates, spectra, sharing
 │   │   │   ├── finds.js         plain words for the candidate cards, catalogue check
 │   │   │   ├── sky.js           image maths: stretch, stacking, WCS, decoding
+│   │   │   ├── typebox.js       "Type" box under the spectrum: catalogues vs our fit, fingerprints
 │   │   │   ├── depth.js         "sharpening": the image gets cleaner as exposures pile up
 │   │   │   └── gif.js           GIF export
 │   │   ├── map/
@@ -168,6 +171,7 @@ Manual Deploy → Deploy latest commit in the dashboard.
 | `GET /api/resolve?q=Barnard's Star` | name or coordinates → RA/Dec (+ proper motion) |
 | `GET /api/observations?ra=&dec=` | SPHEREx exposures covering a position |
 | `GET /api/frames?ra=&dec=&fov=300&mode=epoch` | aligned frames (`epoch`, `epoch_detector`, `exposure`) + photometry + candidates |
+| `POST /api/spectype` | spectral type and molecular fingerprints of a spectrum (its points in the body); with `catalogues: true` also SIMBAD's type, Gaia DR3 parameters and whether they agree with the fit |
 | `GET /api/progress?job=` | progress of a running `/api/frames?…&job=` request |
 | `GET /api/photometry?ra=&dec=&fov=&x=&y=` | per-exposure brightness and wavelength at one pixel: an on-the-fly spectrum |
 | `GET /api/coverage?ra=&dec=` | has SPHEREx seen this spot: exposures, sky passes, exposures per detector band (the map card) |
@@ -267,6 +271,10 @@ SIMBAD database and Aladin, operated at CDS, Strasbourg, France, and of IMCCE's 
 - **2MASS, AllWISE, DSS2 and SPHEREx HiPS** sky maps for the Aladin Lite context view: served by IRSA.
 - **Gaia DR3**: ESA Gaia archive (TAP). **CatWISE2020**: VizieR. Gaia stars are moved to each frame's
   date with their proper motions, so fast movers line up with the SPHEREx image.
+- **Spectral types**: reference spectra from the Pickles (1998) stellar flux library, the SpeX Prism spectral
+  standards (Burgasser et al.; via the SPLAT toolkit) and the Sonora Bobcat brown-dwarf models (Marley et al.
+  2021), smoothed to SPHEREx resolution by `backend/scripts/build_spectral_library.py`. Catalogue types and
+  parameters: SIMBAD (CDS) and Gaia DR3 (ESA).
 - **Known Solar System objects**: IMCCE SkyBoT.
 - **NEOSSat** (Canadian Space Agency) archive search: CADC.
 - Name resolution by CDS Sesame (Strasbourg); sky viewer: Aladin Lite (CDS).

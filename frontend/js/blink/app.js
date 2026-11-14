@@ -5,6 +5,7 @@ import {
 import { t, setLang, getLang } from '../core/i18n.js';
 import { scatterChart, chartTable, SERIES, wlColor } from '../core/charts.js';
 import { encodeGif } from './gif.js';
+import { renderTypeBox } from './typebox.js';
 import { CUBE_URL, nearestSlice } from '../core/cube.js';
 import { depthStart, depthLive, depthLoad, depthHide } from './depth.js';
 import { getPalette, setPalette, viewerCmap } from '../core/palette.js';
@@ -1034,6 +1035,76 @@ function setPhot(points, click) {
   const sat = points.filter(p => p.saturated).length;
   e4.photMode.value = sat > points.length / 2 && points.some(p => Number.isFinite(p.wing_ujy)) ? 'wings' : 'aperture';
   renderAnalysis();
+  loadType();
+}
+
+// ------------------------------------------------------------------ spectral type box (under the spectrum)
+const typeState = { seq: 0, res: null };
+
+function drawType() {
+  const box = $('typeBox');
+  const show = !!typeState.res && ex.tab === 'spectrum' && !!ex.phot?.length;
+  box.hidden = !show;
+  if (show) renderTypeBox(box, typeState.res, t);
+}
+
+// where the measured spectrum sits on the sky (a moving target: where it is at the middle of the visits)
+function typeSpot() {
+  if (ex.click) return { ra: ex.click.ra, dec: ex.click.dec, name: null };
+  const tg = state.target, mjd = currentMjd();
+  const dt = (mjd - 51544.5) / 365.25;
+  return { ra: tg.ra + (tg.pmra || 0) * dt / 3.6e6 / Math.cos(tg.dec * Math.PI / 180), dec: tg.dec + (tg.pmdec || 0) * dt / 3.6e6,
+    name: tg.name || null, mjd };
+}
+
+// the Gaia star at that spot (Gaia stars are moved to the date of the image); null if none within a pixel
+function gaiaIdAt(spot) {
+  const mjd = spot.mjd ?? currentMjd(), cosd = Math.cos(spot.dec * Math.PI / 180);
+  let best = null, bd = 7;
+  for (const s of ex.gaia) {
+    const [ra, dec] = gaiaAt(s, mjd);
+    const d = Math.hypot((ra - spot.ra) * cosd, dec - spot.dec) * 3600;
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best ? String(best.id) : null;
+}
+
+const gaiaReady = () => (ex.gaia.length ? Promise.resolve() : new Promise((res) => {
+  const done = () => { document.removeEventListener('radians:catalogues', done); res(); };
+  document.addEventListener('radians:catalogues', done);
+  setTimeout(done, 8000);
+}));
+
+async function loadType() {
+  const seq = ++typeState.seq;
+  typeState.res = null;
+  drawType();
+  const pts = ex.phot || [];
+  if (pts.length < 12 || !state.target) return;
+  const data = state.data, spot = typeSpot();
+  const body = { ra: spot.ra, dec: spot.dec, name: spot.name,
+    points: pts.map(p => ({ wavelength: p.wavelength, flux_ujy: p.flux_ujy, err_ujy: p.err_ujy, saturated: !!p.saturated })) };
+  const ask = async (extra) => {
+    const r = await fetch(new URL('api/spectype', location.href), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, ...extra }) });
+    if (!r.ok) throw new Error(String(r.status));
+    return r.json();
+  };
+  const live = () => seq === typeState.seq && state.data === data;
+  try {
+    const r = await ask({});                               // our own fit first: it does not wait for the catalogues
+    if (!live()) return;
+    typeState.res = { ...r, pending: true };
+    drawType();
+  } catch { return; }
+  await gaiaReady();
+  if (!live()) return;
+  try {
+    const r = await ask({ catalogues: true, gaia_id: gaiaIdAt(spot) });
+    if (live()) { typeState.res = r; drawType(); }
+  } catch {
+    if (live()) { typeState.res = { ...typeState.res, pending: false, catFail: true }; drawType(); }
+  }
 }
 
 async function photAt(x, y) {
@@ -1100,6 +1171,7 @@ function tipFor(p, ep) {
 function renderAnalysis() {
   if (!state.data || !ex.phot || !ex.phot.length) { e4.analysis.hidden = true; return; }
   e4.analysis.hidden = false;
+  drawType();
   const tg = state.target;
   e4.photSource.textContent = ex.click
     ? t('photClicked', { pos: `${formatRA(ex.click.ra)} ${formatDec(ex.click.dec)}` })
