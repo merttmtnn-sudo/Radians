@@ -545,9 +545,9 @@ function report() {
 }
 function embedBoot() {
   // look south-east, a little above the horizon, with a wide field
-  sky.view.mount = 'altaz'; sky.view.proj = 'cyl';
-  sky.view.az = 170; sky.view.alt = 30;
-  sky.view.fov = 90;
+  sky.view.mount = 'altaz'; sky.view.proj = 'stereo';
+  sky.view.az = 170; sky.view.alt = 40;
+  sky.view.fov = 100;
   sky.opt.lang = pageLang() === 'tr' ? 'tr' : 'en';
   sky.layers.stars = true; sky.layers.atmosphere = false;
   sky.dirty = true;
@@ -561,21 +561,27 @@ function embedBoot() {
   const render = sky.render.bind(sky);
   sky.render = (now) => { holdHorizon(); return render(now); };
 }
-// Flat horizon (cylindrical view) with a ground band of fixed height: the horizon may not rise above
-// BAND of the frame height from the bottom, so stars right above it stay in view and the ground never
-// changes shape. Looking higher simply lets the ground slide out at the bottom. Off when the ground is hidden.
+// Dome-shaped sky (stereographic) over a flat ground band of fixed height: the view never tilts so low
+// that the horizon below the centre rises above the band, so stars right above the horizon stay in view
+// and the ground keeps its shape. Looking up lets the band hide less sky; dragging down stops at it.
 const BAND = 0.12;
 function holdHorizon() {
   if (!sky.W || !sky.H) return;
   const v = sky.view;
-  if (v.proj !== 'cyl') return;
-  // at most ~200 degrees across, so wide frames do not stretch too much
-  v.fov = Math.min(v.fov, sky.H / sky.W * 200, 110);
-  if (v.mount !== 'altaz') return;
-  const k = (sky.H / 2) / (v.fov * D2R / 2);
-  const top = 90 - v.fov / 2;                                   // the zenith at the top edge, no further
-  const low = ((sky.H * (1 - BAND) - sky.H / 2) / k) * R2D;    // horizon at the top of the ground band
-  v.alt = sky.layers.ground ? clamp(v.alt, Math.min(low, top), top) : Math.min(v.alt, top);
+  sky.flatBand = sky.layers.ground && v.mount === 'altaz' ? BAND : 0;
+  sky.setupFrame();
+  const P = sky.P;
+  if (P.cyl) v.fov = Math.min(v.fov, sky.H / sky.W * 200, 110);
+  else {
+    // wide frames: at most ~150 degrees across, or the edges stretch
+    const maxFov = 2 * P.gi(P.g(75 * D2R) * sky.H / sky.W) * R2D;
+    if (isFinite(maxFov) && v.fov > maxFov) v.fov = maxFov;
+  }
+  if (!sky.flatBand) return;
+  sky.setupFrame();
+  const r = (sky.H * (0.5 - BAND)) / sky.k;              // centre -> top of the band, in projection units
+  const low = (P.cyl ? r : P.gi(r)) * R2D;               // angle below the centre where the horizon must sit
+  if (isFinite(low)) v.alt = clamp(v.alt, low, 90);
 }
 window.radiansSky = {
   setTime(ms) { sky.setDate(new Date(ms)); },

@@ -346,6 +346,7 @@ export class Sky {
   onScreen(q, m = 40) { return q && q[0] > -m && q[1] > -m && q[0] < this.W + m && q[1] < this.H + m; }
   label(text, x, y, color, size = 12, align = 'left', force = false, bold = false) {
     const ctx = this.ctx;
+    if (this.flatBand && !force && y > this.H * (1 - this.flatBand) - 2 * this.dpr) return false;   // behind the ground band
     ctx.font = `${bold ? '600 ' : ''}${size * this.dpr}px Segoe UI, system-ui, sans-serif`;
     const w = ctx.measureText(text).width, h = size * this.dpr;
     const x0 = align === 'center' ? x - w / 2 : x;
@@ -356,7 +357,9 @@ export class Sky {
     ctx.fillText(text, x0, y);
     return true;
   }
-  isBelow(v) { return this.layers.ground && A.mulv(this.M, v)[2] < -0.002; }
+  // with a flat ground band (this.flatBand = fraction of the frame height) nothing is hidden below the true
+  // horizon: the band at the bottom is the ground
+  isBelow(v) { return this.layers.ground && !this.flatBand && A.mulv(this.M, v)[2] < -0.002; }
 
   // ------------------------------------------------------------------ main render
   render(now) {
@@ -423,7 +426,7 @@ export class Sky {
 
     // ground
     if (L.ground) this.drawGround(ss);
-    if (L.azGrid || L.ground) this.polyline(this.horizonLine, 'hor', 'rgba(255,160,90,0.55)', 1);
+    if (L.azGrid || (L.ground && !this.flatBand)) this.polyline(this.horizonLine, 'hor', 'rgba(255,160,90,0.55)', 1);
     if (L.cardinal) this.drawCardinal();
 
     // labels (after ground)
@@ -484,7 +487,7 @@ export class Sky {
 
   drawStars(lim, fade, now, ss, dots = true) {
     const ctx = this.ctx, M = this.M, B = this.B, k = this.k, sc = this.opt.starScale * this.dpr;
-    const altaz = this.altaz, ground = this.layers.ground, refr = this.opt.refraction && this.layers.atmosphere;
+    const altaz = this.altaz, ground = this.layers.ground && !this.flatBand, refr = this.opt.refraction && this.layers.atmosphere;
     const tw = this.opt.twinkle && this.layers.atmosphere ? now / 1000 : null;
     const W = this.W, H = this.H, cx = this.cx, cy = this.cy, P = this.P, cosMax = this.cosMax;
     this.starScreen = [];
@@ -635,6 +638,7 @@ export class Sky {
 
   drawGround(ss) {
     const ctx = this.ctx;
+    if (this.flatBand) return this.drawGroundBand(ss);
     if (this.P.cyl) return this.drawGroundFlat(ss);
     const pts = this.hills.map(h => this.project(this.hor2view(h), true));
     const nad = this.hor2view([0, 0, -1]), zen = this.hor2view([0, 0, 1]);
@@ -670,6 +674,36 @@ export class Sky {
     }
   }
 
+  // A ground band of fixed height along the bottom of the frame, whatever the projection: its skyline is
+  // the same hill profile as the landscape, read at the azimuth of each column, so it turns with the sky.
+  drawGroundBand(ss) {
+    const ctx = this.ctx, W = this.W, H = this.H, y0 = H * (1 - this.flatBand);
+    const light = clamp((ss.sunAlt + 12) / 18, 0, 1);
+    const hill = az => Math.max(0.15, 0.9 + 0.8 * Math.sin(az * 3 + 1) + 0.6 * Math.sin(az * 7 + 2) + 0.35 * Math.sin(az * 17) + 0.5 * Math.cos(az * 2));
+    const px = Math.min(this.k * D2R, H * 0.012);       // pixels per degree of hill height, kept modest
+    const step = 4 * this.dpr, pts = [];
+    for (let x = -step; x <= W + step; x += step) {
+      const m = this.unproject(x, y0);
+      let h = 0.9;
+      let az = null;
+      if (m) { const hz = this.altaz ? m : A.mulv(this.M, m); az = Math.atan2(hz[1], hz[0]); h = hill(az); }
+      pts.push([x, y0 - h * px, az]);
+    }
+    const grd = ctx.createLinearGradient(0, y0 - 4 * px, 0, H);
+    grd.addColorStop(0, `rgb(${16 + 36 * light},${13 + 40 * light},${11 + 30 * light})`);
+    grd.addColorStop(1, `rgb(${3 + 18 * light},${3 + 20 * light},${4 + 16 * light})`);
+    ctx.beginPath(); ctx.moveTo(-10, H + 10);
+    for (const p of pts) ctx.lineTo(p[0], p[1]);
+    ctx.lineTo(W + 10, H + 10); ctx.closePath();
+    ctx.fillStyle = grd; ctx.fill();
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,179,71,0.55)'; ctx.lineWidth = 1.4 * this.dpr;
+    ctx.shadowColor = 'rgba(255,179,71,0.8)'; ctx.shadowBlur = 14 * this.dpr;
+    ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.stroke();
+    ctx.restore();
+    this.bandPts = pts;
+  }
+
   // flat horizon: the hills as a band along the bottom, from the skyline down past the frame
   drawGroundFlat(ss) {
     const ctx = this.ctx;
@@ -698,7 +732,17 @@ export class Sky {
   drawCardinal() {
     const names = [['N', 0], ['NE', 45], ['E', 90], ['SE', 135], ['S', 180], ['SW', 225], ['W', 270], ['NW', 315]];
     for (const [n, az] of names) {
-      const q = this.project(this.hor2view(A.altaz2v(0.2, az)));
+      let q = this.project(this.hor2view(A.altaz2v(0.2, az)));
+      if (this.flatBand) {
+        // on the ground band, at the column that faces this direction
+        q = null;
+        let best = 2 * D2R;
+        for (const p of this.bandPts || []) {
+          if (p[2] === null) continue;
+          const d = Math.abs(((p[2] - az * D2R) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
+          if (d < best) { best = d; q = [p[0], this.H * (1 - this.flatBand) + 24 * this.dpr]; }
+        }
+      }
       if (!this.onScreen(q, 0)) continue;
       this.label(n, q[0], q[1] - 6 * this.dpr, n.length === 1 ? '#ffb070' : 'rgba(255,176,112,0.6)', n.length === 1 ? 17 : 12, 'center', true, true);
     }
