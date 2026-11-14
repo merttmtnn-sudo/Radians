@@ -38,3 +38,9 @@ FLAG_BITS = {
 BAD_BITS = ["SUR_ERROR", "NONFUNC", "MISSING_DATA", "HOT", "COLD", "NONLINEAR", "PERSIST",
             "BLOOM", "SNOWBALL", "HALO", "SATELLITE_HALO"]
 BAD_MASK = sum(1 << b for b, n in FLAG_BITS.items() if n in BAD_BITS)
+
+# sharing one free server between many visitors
+RATE_FRAMES = int(os.getenv("RATE_FRAMES", "20"))           # /api/frames per visitor per minute
+RATE_PHOT = int(os.getenv("RATE_PHOT", "90"))               # /api/photometry per visitor per minute
+MAX_COLD_BUILDS = int(os.getenv("MAX_COLD_BUILDS", "2"))    # positions read from IRSA at the same time
+CACHE_MAX_MB = int(os.getenv("CACHE_MAX_MB", "4000"))       # cut-out cache size before oldest files go

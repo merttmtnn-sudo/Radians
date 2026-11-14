@@ -13,7 +13,8 @@ from scipy import ndimage
 from . import config
 from .stack import _aperture
 
-POS_FLOOR = 0.08        # px, systematic floor on centroid errors
+POS_FLOOR = 0.08        # px, systematic floor on centroid errors (visit of >= FLOOR_N exposures)
+FLOOR_N = 40
 MATCH_R = 3.0           # px, how far a source may move between epochs and still be linked
 STATIC_R = 1.0          # px, alignment matches
 MIN_SNR_TRACK = 8.0
@@ -76,8 +77,12 @@ def _gauss3(l, c, r):
     return float(max(-0.5, min(0.5, (a - d) / den)))
 
 
-def _sigma_pos(snr):
-    return math.hypot(0.7 / max(snr, 1e-3), POS_FLOOR)
+def _sigma_pos(snr, n_exposures=None):
+    """Centroid error (px): photon noise plus a systematic floor. A visit co-added from few exposures
+    (or a saturated star, whose S/N says little) has a larger floor: dithering, PSF and distortion
+    errors only average down with many exposures."""
+    floor = POS_FLOOR * (max(1.0, math.sqrt(FLOOR_N / n_exposures)) if n_exposures else 1.0)
+    return math.hypot(0.7 / max(snr, 1e-3), floor)
 
 
 def _nearest(s, sources, r):
@@ -119,7 +124,7 @@ def _motion(pts):
     """Linear fit of positions vs time (years). Returns vx, ex, vy, ey, chi2, -chi2/dof, t."""
     t = np.array([p[0] for p in pts]) / 365.25
     t = t - t.mean()
-    sp = [_sigma_pos(p[1]["snr"]) for p in pts]
+    sp = [_sigma_pos(p[1]["snr"], p[1].get("n")) for p in pts]
     vx, ex, cx = _linfit(t, [p[1]["x"] for p in pts], sp)
     vy, ey, cy = _linfit(t, [p[1]["y"] for p in pts], sp)
     chi = cx + cy
@@ -132,11 +137,14 @@ def find_candidates(epoch_groups, ed_groups, wout, target_xy=None):
         return []
     for g in epoch_groups:
         g["sources"] = find_sources(g["image"], g["variance"])
-    ref_i = max(range(len(epoch_groups)), key=lambda i: len(epoch_groups[i]["sources"]))
+    # reference = the deepest visit (most exposures): a thin visit can show spurious sources next to a
+    # saturated star, which would then look "crowded" and be skipped
+    ref_i = max(range(len(epoch_groups)), key=lambda i: (epoch_groups[i].get("n_exposures") or 0, len(epoch_groups[i]["sources"])))
     ref = epoch_groups[ref_i]
     for g in epoch_groups:
         g["offset"] = (0.0, 0.0) if g is ref else _align(ref["sources"], g["sources"])
-        g["aligned"] = [{**s, "x": s["x"] - g["offset"][0], "y": s["y"] - g["offset"][1]} for s in g["sources"]]
+        g["aligned"] = [{**s, "x": s["x"] - g["offset"][0], "y": s["y"] - g["offset"][1], "n": g.get("n_exposures")}
+                        for s in g["sources"]]
 
     def sky(x, y):
         ra, dec = wout.wcs_pix2world([[x, y]], 0)[0]
@@ -251,6 +259,23 @@ def _variables(static, ed_groups, sky, is_target):
     return out
 
 
+def _ap_snr(g, x, y):
+    """Aperture S/N at (x, y) against robust noise; inf when the aperture is off the image or not finite."""
+    d = _disk(config.APERTURE_PX)
+    k = d.shape[0] // 2
+    ix, iy = int(round(x)), int(round(y))
+    img = g["image"]
+    if not (k <= ix < img.shape[1] - k and k <= iy < img.shape[0] - k):
+        return math.inf
+    cut = img[iy - k:iy + k + 1, ix - k:ix + k + 1]
+    if not np.isfinite(cut[d > 0]).all():
+        return math.inf
+    if "robust" not in g:
+        g["robust"] = robust_sigma(img)
+    noise = g["robust"] * math.sqrt(d.sum())
+    return float((cut * d).sum() / noise) if noise > 0 else math.inf
+
+
 def _transients(epoch_groups, sky, is_target):
     out = []
     for g in epoch_groups:
@@ -262,11 +287,12 @@ def _transients(epoch_groups, sky, is_target):
             if any(_nearest(s, o["aligned"], 1.5)[0] is not None for o in others):
                 continue
             # it must really be absent elsewhere, not just below the detection threshold
+            # (noise as find_sources measures it: the formal error leaves out confusion and would call
+            # every noise bump "present")
             absent = True
             for o in others:
                 ox, oy = s["x"] + o["offset"][0], s["y"] + o["offset"][1]
-                p = _aperture(o["image"], o["variance"], o["flags"], ox, oy)
-                if not p or not np.isfinite(p["flux_ujy"]) or p["err_ujy"] <= 0 or p["flux_ujy"] / p["err_ujy"] > 3:
+                if _ap_snr(o, ox, oy) > 4:
                     absent = False
                     break
             if absent:

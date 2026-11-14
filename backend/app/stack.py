@@ -245,19 +245,39 @@ def epochs(mjds: list[float]) -> list[int]:
     return out
 
 
-def coadd(frames: list[Frame]):
-    num = den = None
+def prune_cache(max_mb=None):
+    """Delete the least recently used cached cut-outs once the cache is larger than CACHE_MAX_MB."""
+    limit = (config.CACHE_MAX_MB if max_mb is None else max_mb) * 1e6
+    files = [(p.stat().st_atime, p.stat().st_size, p) for p in (config.CACHE_DIR / "cut").glob("*") if p.is_file()]
+    total = sum(f[1] for f in files)
+    for _, size, p in sorted(files):
+        if total <= limit:
+            break
+        try:
+            p.unlink()
+            total -= size
+        except OSError:
+            pass
+
+
+def coadd(frames: list[Frame], weights=None):
+    """Inverse-variance co-add; optional extra weight per frame (wavelength matching gives every
+    spectral bin the same total weight). Variance is propagated for the weighted mean."""
+    num = den = var_num = None
     flg = None
-    for f in frames:
+    for k, f in enumerate(frames):
+        c = 1.0 if weights is None else float(weights[k])
         good = np.isfinite(f.image) & np.isfinite(f.variance) & (f.variance > 0) & ((f.flags & config.BAD_MASK) == 0)
-        w = np.where(good, 1.0 / np.where(good, f.variance, 1.0), 0.0)
-        v = np.where(good, f.image, 0.0) * w
+        a = np.where(good, c / np.where(good, f.variance, 1.0), 0.0)
+        v = np.where(good, f.image, 0.0) * a
+        vv = a * a * np.where(good, f.variance, 0.0)
         num = v if num is None else num + v
-        den = w if den is None else den + w
+        den = a if den is None else den + a
+        var_num = vv if var_num is None else var_num + vv
         flg = f.flags.copy() if flg is None else flg | f.flags
     with np.errstate(invalid="ignore", divide="ignore"):
         img = np.where(den > 0, num / den, np.nan).astype(np.float32)
-        var = np.where(den > 0, 1.0 / den, np.nan).astype(np.float32)
+        var = np.where(den > 0, var_num / den ** 2, np.nan).astype(np.float32)
         # pixels where every exposure is flagged (e.g. a saturated star's core): show the plain
         # mean of what exists rather than a hole; the flags still say it is unreliable
         hole = ~(den > 0)
@@ -279,23 +299,85 @@ def mjd_iso(m):
     return Time(m, format="mjd").isot[:16].replace("T", " ")
 
 
-def group_raw(frames: list[Frame], mode: str):
-    """Group frames ('epoch', 'epoch_detector' or 'exposure') and co-add each group (arrays kept)."""
+# ---------------------------------------------------------------- wavelength matching
+# SPHEREx resolving power per detector (bands 1-4 ~ 41, 35 at the long end of band 4; 5-6 ~ 110-130)
+RES_POWER = {1: 41, 2: 41, 3: 41, 4: 35, 5: 110, 6: 130}
+BIN_ELEMENTS = 2.0          # spectral bin width in resolution elements
+
+
+def match_wavelengths(frames: list[Frame], all_detectors: bool):
+    """SPHEREx has no filters: each exposure sees a position at its own wavelength, so two visits
+    that sampled a band differently differ in colour, and colour looks like change. Keep, per
+    detector, only exposures in spectral bins (BIN_ELEMENTS resolution elements wide) that every
+    visit sampled, each bin weighted equally. With all_detectors, a detector missing from any visit
+    is dropped too (so whole-visit co-adds share the same detectors).
+    Returns (frames, weights, info) or None when matching would empty a visit."""
     frames = sorted(frames, key=lambda f: f.exp.mjd)
-    ep = epochs([f.exp.mjd for f in frames])
+    ep = dict(zip((id(f) for f in frames), epochs([f.exp.mjd for f in frames])))
+    visits = set(ep.values())
+    by_det: dict[int, list[Frame]] = {}
+    for f in frames:
+        by_det.setdefault(f.exp.detector, []).append(f)
+    kept, weights, info = [], [], {}
+    for det, fs in sorted(by_det.items()):
+        lo = config.DETECTORS.get(det, [min(f.wavelength or 1 for f in fs)])[0]
+        width = BIN_ELEMENTS / RES_POWER.get(det, 41)
+        binned: dict[tuple, list[Frame]] = {}
+        for f in fs:
+            if not f.wavelength:
+                continue
+            b = int(math.floor(math.log(f.wavelength / lo) / width))
+            binned.setdefault((ep[id(f)], b), []).append(f)
+        det_visits = {v for v, _ in binned}
+        if all_detectors and det_visits != visits:
+            info[det] = {"shared_bins": 0, "kept": 0, "of": len(fs), "dropped": "not in every visit"}
+            continue
+        bins_by_visit = [{b for v2, b in binned if v2 == v} for v in det_visits]
+        shared = set.intersection(*bins_by_visit) if bins_by_visit else set()
+        n_kept = 0
+        for (v, b), group in binned.items():
+            if b in shared:
+                for f in group:
+                    kept.append(f)
+                    weights.append(1.0 / len(group))
+                    n_kept += 1
+        info[det] = {"shared_bins": len(shared), "kept": n_kept, "of": len(fs)}
+    if {ep[id(f)] for f in kept} != visits:
+        return None
+    return kept, weights, info
+
+
+def group_raw(frames: list[Frame], mode: str, matched: bool = False):
+    """Group frames ('epoch', 'epoch_detector' or 'exposure') and co-add each group (arrays kept).
+    matched: co-add only wavelength-matched exposures (see match_wavelengths)."""
+    frames = sorted(frames, key=lambda f: f.exp.mjd)
+    visit_of = dict(zip((id(f) for f in frames), epochs([f.exp.mjd for f in frames])))   # from all frames
+    weight_of, match_info = None, None
+    if matched and mode in ("epoch", "epoch_detector"):
+        m = match_wavelengths(frames, all_detectors=(mode == "epoch"))
+        if m is None and mode == "epoch":      # visits share no detector: match within each detector only
+            m = match_wavelengths(frames, all_detectors=False)
+        if m is not None:
+            frames, w, match_info = m
+            weight_of = {id(f): wi for f, wi in zip(frames, w)}
+    frames = sorted(frames, key=lambda f: f.exp.mjd)
+    ep = [visit_of[id(f)] for f in frames]
     groups: dict[tuple, list[Frame]] = {}
     for f, e in zip(frames, ep):
         key = {"epoch": (e,), "epoch_detector": (e, f.exp.detector)}.get(mode, (e, f.exp.mjd, f.exp.detector))
         groups.setdefault(key, []).append(f)
     out = []
     for key, fs in sorted(groups.items(), key=lambda kv: (kv[0][0], min(f.exp.mjd for f in kv[1]), kv[0][1:])):
-        img, var, flg = coadd(fs) if len(fs) > 1 else (fs[0].image, fs[0].variance, fs[0].flags)
+        if len(fs) > 1 or weight_of:
+            img, var, flg = coadd(fs, [weight_of[id(f)] for f in fs] if weight_of else None)
+        else:
+            img, var, flg = fs[0].image, fs[0].variance, fs[0].flags
         m0, m1 = min(f.exp.mjd_start for f in fs), max(f.exp.mjd_end for f in fs)
         dets = sorted({f.exp.detector for f in fs})
         wls = [f.wavelength for f in fs if f.wavelength]
         out.append({
             "epoch": key[0] + 1, "detectors": dets, "detector": dets[0] if len(dets) == 1 else None,
-            "n_exposures": len(fs),
+            "n_exposures": len(fs), "matched": match_info is not None,
             "mjd": float(np.mean([f.exp.mjd for f in fs])), "mjd_start": m0, "mjd_end": m1,
             "date_start": mjd_iso(m0), "date_end": mjd_iso(m1),
             "wavelength_min": min(wls) if wls else None, "wavelength_max": max(wls) if wls else None,
@@ -303,6 +385,8 @@ def group_raw(frames: list[Frame], mode: str):
                            "wavelength": f.wavelength} for f in fs][:200],
             "image": img, "variance": var, "flags": flg.astype(np.uint32),
         })
+    if out and match_info is not None:
+        out[0]["match_info"] = {str(k): v for k, v in match_info.items()}
     return out
 
 

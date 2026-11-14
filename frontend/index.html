@@ -107,6 +107,8 @@
         <span id="fpsVal">2</span> fps
         <input id="fps" type="range" min="0.5" max="10" step="0.5" value="2" aria-label="Speed">
       </label>
+      <button id="zoom" class="small" aria-label="Zoom">1×</button>
+      <button id="gif" class="small" data-i18n="gifDl"></button>
     </div>
     <ol class="timeline" id="timeline"></ol>
 
@@ -191,6 +193,8 @@
       <label class="row"><span data-i18n="white"></span><input id="hi" type="range" min="90" max="100" step="0.05" value="99.7"></label>
       <label class="row check"><input id="cross" type="checkbox" checked> <span data-i18n="marker"></span></label>
       <label class="row check"><input id="flagView" type="checkbox"> <span data-i18n="showFlagged"></span></label>
+      <label class="row check"><input id="wlMatch" type="checkbox" checked> <span data-i18n="wlMatch"></span></label>
+      <p class="muted small" data-i18n="wlMatchHelp"></p>
     </section>
 
     <section>

@@ -159,3 +159,51 @@ def test_progress_is_reported_per_job():
 def test_parse_coords_decimal_commas():
     assert archive.parse_coords("269,45 4,69") == pytest.approx((269.45, 4.69))
     assert archive.parse_coords("269.45, 4.69") == pytest.approx((269.45, 4.69))
+
+
+def _wl_frame(det, mjd, wl, value=1.0):
+    e = Exposure(f"o{det}-{mjd}-{wl}", det, "u", mjd - 0.01, mjd + 0.01, 0, 0, 100, "c")
+    return stack.Frame(e, np.full((3, 3), value, np.float32), np.ones((3, 3), np.float32),
+                       np.zeros((3, 3), np.uint32), wavelength=wl)
+
+
+def test_wavelength_matching_keeps_shared_bins_only():
+    lo = config.DETECTORS[1][0]
+    # visit 1 samples a blue and a red bin of detector 1, visit 2 only the blue one: red must go
+    v1 = [_wl_frame(1, 60800, lo * 1.01, 1.0), _wl_frame(1, 60800.1, lo * 1.2, 10.0)]
+    v2 = [_wl_frame(1, 60990, lo * 1.012, 1.0)]
+    groups = stack.group_raw(v1 + v2, "epoch", matched=True)
+    assert [g["n_exposures"] for g in groups] == [1, 1]
+    assert np.allclose(groups[0]["image"], 1.0) and np.allclose(groups[1]["image"], 1.0)
+    plain = stack.group_raw(v1 + v2, "epoch", matched=False)
+    assert plain[0]["n_exposures"] == 2 and not np.allclose(plain[0]["image"], 1.0)
+
+
+def test_wavelength_matching_drops_detector_missing_from_a_visit():
+    lo1, lo2 = config.DETECTORS[1][0], config.DETECTORS[2][0]
+    fr = [_wl_frame(1, 60800, lo1 * 1.01), _wl_frame(2, 60800.1, lo2 * 1.01, 5.0), _wl_frame(1, 60990, lo1 * 1.01)]
+    groups = stack.group_raw(fr, "epoch", matched=True)
+    assert all(g["detectors"] == [1] for g in groups)
+
+
+def test_weighted_coadd_variance():
+    a, b = _wl_frame(1, 1, 1.0, 2.0), _wl_frame(1, 2, 1.0, 4.0)
+    img, var, _ = stack.coadd([a, b], [1.0, 0.5])
+    assert np.allclose(img, (2 + 0.5 * 4) / 1.5)
+    assert np.allclose(var, (1 + 0.25) / 1.5 ** 2)
+
+
+def test_rate_limit_answers_429():
+    from fastapi.testclient import TestClient
+
+    from app import main
+    main._hits.clear()
+    old = main.LIMITS["/api/photometry"]
+    main.LIMITS["/api/photometry"] = 2
+    try:
+        c = TestClient(main.app)
+        codes = [c.get("/api/photometry").status_code for _ in range(3)]
+        assert codes[:2] == [422, 422] and codes[2] == 429
+    finally:
+        main.LIMITS["/api/photometry"] = old
+        main._hits.clear()

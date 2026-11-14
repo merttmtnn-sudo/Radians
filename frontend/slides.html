@@ -105,7 +105,7 @@
     <div class="card"><p class="num">1</p><h3>Pick a target</h3><p class="what">Type a star name or RA/Dec, or press one of the five challenge targets.</p></div>
     <div class="card"><p class="num">2</p><h3>Watch it blink</h3><p class="what">Each frame is one SPHEREx visit. Play, step, pick detectors and field of view.</p></div>
     <div class="card"><p class="num">3</p><h3>Let it point</h3><p class="what">Difference views and an automatic finder mark what moved, changed or appeared.</p></div>
-    <div class="card"><p class="num">4</p><h3>Dig deeper</h3><p class="what">Click any star for its spectrum and light curve; copy a report; download CSV.</p></div>
+    <div class="card"><p class="num">4</p><h3>Dig deeper</h3><p class="what">Click any star for its spectrum and light curve; copy a report; download CSV or a GIF.</p></div>
   </div>
   <p>Every view is a shareable, embeddable link. Interface in English and Turkish.</p>
   <div class="foot"><span>Radians</span><span>3</span></div>
@@ -121,7 +121,7 @@
     <p class="chev">›</p>
     <div class="step"><p class="k">3 · READ</p><h3>Byte ranges</h3><p class="what">Only the rows needed: ~0.5 MB of each 65 MB file.</p></div>
     <p class="chev">›</p>
-    <div class="step"><p class="k">4 · ALIGN</p><h3>One sky grid</h3><p class="what">Reprojected, flag-masked, co-added per visit.</p></div>
+    <div class="step"><p class="k">4 · ALIGN</p><h3>One sky grid</h3><p class="what">Reprojected, flag-masked, co-added per visit at matched wavelengths.</p></div>
     <p class="chev">›</p>
     <div class="step"><p class="k">5 · CHECK</p><h3>Known sky</h3><p class="what">Gaia DR3, SkyBoT asteroids, NEOSSat archive.</p></div>
   </div>
@@ -134,13 +134,13 @@
   <h2>It finds what the challenge hid</h2>
   <table>
     <tr><th style="width:26%">Target</th><th style="width:40%">Radians measured</th><th style="width:34%">Known value</th></tr>
-    <tr><td>Barnard’s Star</td><td>moves 11.7″/yr toward PA 354°</td><td>10.4″/yr, PA 356° (saturated core)</td></tr>
-    <tr><td>ε Indi B</td><td class="ok">moves 4.69″/yr toward PA 123°</td><td>4.68″/yr, PA 122°</td></tr>
+    <tr><td>Barnard’s Star</td><td class="ok">moves 10.38″/yr toward PA 354°</td><td>10.39″/yr, PA 356°</td></tr>
+    <tr><td>ε Indi B</td><td class="ok">moves 4.65″/yr toward PA 125°</td><td>4.68″/yr, PA 123°</td></tr>
     <tr><td>WISE 0855−0714</td><td class="ok">detected at 4.4–5 µm, 9–13σ</td><td>coldest known brown dwarf</td></tr>
-    <tr><td>RW Aurigae</td><td class="ok">brightness changes ×2.1 between visits</td><td>known variable young star</td></tr>
+    <tr><td>RW Aurigae</td><td class="ok">brightness changes ×1.7 between visits</td><td>known variable young star</td></tr>
     <tr><td>R Draconis</td><td>saturated: tracked with PSF-wing light curve</td><td>Mira variable</td></tr>
   </table>
-  <p class="small">Automatic finder on public SPHEREx data, compared with catalogue values. Each find is also checked against Gaia DR3: unlisted ones are marked “possibly new”.</p>
+  <p class="small">Automatic finder on public SPHEREx data, compared with catalogue values. Tested by injecting 600 fake objects into real SPHEREx frames: movers and new sources at S/N 20 found every time, no false alarms in the five fields.</p>
   <div class="foot"><span>Radians</span><span>5</span></div>
 </section>
 

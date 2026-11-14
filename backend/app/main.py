@@ -11,15 +11,48 @@ from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import archive, config, detect, external, stack
 
 app = FastAPI(title="Radians", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+
+# ---------------------------------------------------------------- fair sharing of one server
+_hits: dict = {}
+_hits_lock = threading.Lock()
+LIMITS = {"/api/frames": config.RATE_FRAMES, "/api/photometry": config.RATE_PHOT}
+
+
+def _client(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    return fwd.split(",")[0].strip() or (request.client.host if request.client else "?")
+
+
+@app.middleware("http")
+async def _rate_limit(request: Request, call_next):
+    limit = LIMITS.get(request.url.path)
+    if limit:
+        now, key = time.time(), (_client(request), request.url.path)
+        with _hits_lock:
+            recent = [t for t in _hits.get(key, []) if now - t < 60]
+            if len(recent) >= limit:
+                wait = int(60 - (now - recent[0])) + 1
+                return JSONResponse({"detail": f"Too many requests: try again in {wait} s."}, status_code=429,
+                                    headers={"Retry-After": str(wait)})
+            recent.append(now)
+            _hits[key] = recent
+            if len(_hits) > 5000:                  # forget idle visitors
+                for k in [k for k, v in _hits.items() if now - v[-1] > 60]:
+                    del _hits[k]
+    return await call_next(request)
+
+
+# positions read from IRSA at once; more would share the bandwidth and all be slow
+_cold = threading.BoundedSemaphore(config.MAX_COLD_BUILDS)
 
 
 @app.get("/api/health")
@@ -92,8 +125,16 @@ def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job=N
     mean_mjd = float(np.mean([e.mjd for e in exps]))
     cra, cdec = stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mean_mjd)
     target = lambda mjd: stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mjd)  # noqa: E731
-    _report(job, stage="read", done=0, total=len(exps))
-    frs = stack.build_frames(exps, cra, cdec, n, target, progress=lambda i, k: _report(job, done=i, total=k))
+    _report(job, stage="queue")
+    if not _cold.acquire(timeout=120):
+        raise HTTPException(503, "The server is busy reading other positions; please try again in a minute.",
+                            headers={"Retry-After": "60"})
+    try:
+        _report(job, stage="read", done=0, total=len(exps))
+        frs = stack.build_frames(exps, cra, cdec, n, target, progress=lambda i, k: _report(job, done=i, total=k))
+    finally:
+        _cold.release()
+    threading.Thread(target=stack.prune_cache, daemon=True).start()
     _report(job, stage="process")
     if not frs:
         raise HTTPException(502, "could not read any SPHEREx exposure for this position")
@@ -118,12 +159,13 @@ def frames(
     max_exposures: int = Query(400, ge=1, le=2000),
     candidates: bool = Query(True, description="run the moving / variable / transient finder"),
     job: str | None = Query(None, max_length=40, pattern=r"^[A-Za-z0-9_-]+$", description="id for /api/progress"),
+    matched: bool = Query(True, description="co-add only wavelength-matched exposures (visits compared like for like)"),
 ):
     b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job)
     if b is None:
         return {"grid": None, "frames": [], "exposures": [], "message": "SPHEREx has not observed this position yet."}
     frs, n, w = b["frs"], b["n"], b["w"]
-    raw = {m: stack.group_raw(frs, m) for m in {mode, "epoch", "epoch_detector"} if m == mode or candidates}
+    raw = {m: stack.group_raw(frs, m, matched) for m in {mode, "epoch", "epoch_detector"} if m == mode or candidates}
     out_frames = stack.encode(raw[mode])
     cands = []
     if candidates:
@@ -226,7 +268,7 @@ def warm(targets=DEMO, fov=240):
         try:
             tg = archive.resolve(q)
             d = frames(ra=r6(tg["ra"]), dec=r6(tg["dec"]), fov=fov, mode="epoch", detectors=dets, pmra=tg.get("pmra"),
-                       pmdec=tg.get("pmdec"), ref_epoch=2000.0, max_exposures=400, candidates=True, job=None)
+                       pmdec=tg.get("pmdec"), ref_epoch=2000.0, max_exposures=400, candidates=True, job=None, matched=True)
             g = d["grid"]
             if g:
                 ra, dec, rdeg = r6(g["ra"]), r6(g["dec"]), g["fov"] / 3600 / math.sqrt(2)

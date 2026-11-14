@@ -117,7 +117,7 @@ export function parseState(search) {
     fov: num('fov'), mode: p.get('mode'), fps: num('fps'),
     stretch: p.get('stretch'), cmap: p.get('cmap'),
     frame: num('frame'), embed: p.get('embed') === '1',
-    det: p.get('det'), view: p.get('view'), lang: p.get('lang'),
+    det: p.get('det'), view: p.get('view'), lang: p.get('lang'), wl: p.get('wl') !== '0',
   };
 }
 

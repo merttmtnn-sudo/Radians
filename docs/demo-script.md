@@ -9,8 +9,8 @@ Trim to the length the submission form allows; the first 30 seconds stand on the
 | 0:00 | Radians home page | “SPHEREx photographs the whole sky in infrared every six months. Radians lets anyone flip through those pictures to see what moved.” |
 | 0:08 | Click **Barnard’s Star** in *Try*; it plays | “This is Barnard’s Star, the fastest-moving star in the sky. Each frame is one SPHEREx visit: watch it march north.” |
 | 0:18 | Switch *View* to **Frame − median** | “Subtracting the median makes the fixed stars vanish. What is left moved.” |
-| 0:26 | Point at the **Candidates** list (moving, 11.7″/yr) | “The finder measured its motion automatically, close to the catalogue value.” |
-| 0:32 | Click **ε Indi B** | “Same for a pair of nearby brown dwarfs: 4.69 arcseconds a year, matching the catalogue value.” |
+| 0:26 | Point at the **Candidates** list (moving, 10.4″/yr) | “The finder measured its motion automatically, close to the catalogue value.” |
+| 0:32 | Click **ε Indi B** | “Same for a pair of nearby brown dwarfs: 4.65 arcseconds a year, matching the catalogue value.” |
 | 0:42 | Click **WISE 0855 (D6)** | “The coldest brown dwarf known only shines at the longest SPHEREx wavelengths; Radians shows it in detector 6.” |
 | 0:52 | Click **RW Aurigae**, open **Light curve** tab | “Things also change brightness. RW Aurigae doubled between visits; every detector agrees.” |
 | 1:02 | **Spectrum** tab, then click another star in the image | “Because SPHEREx’s filters vary across the detector, every star gets a spectrum for free. Click any star.” |

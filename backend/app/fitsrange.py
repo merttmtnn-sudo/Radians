@@ -10,6 +10,7 @@ import io
 import json
 import re
 import threading
+import time
 import warnings
 from dataclasses import dataclass
 
@@ -68,9 +69,15 @@ def _parse_multipart(body: bytes, ctype: str):
 def _get(url, merged, timeout=60):
     spec = ",".join(f"{a}-{b - 1}" for a, b in merged)
     last = None
-    for _ in range(3):
+    for attempt in range(4):
         try:
             r = session().get(url, headers={"Range": "bytes=" + spec}, timeout=timeout, stream=True)
+            if r.status_code in (429, 502, 503, 504):     # IRSA busy: wait as asked, then retry
+                wait = r.headers.get("Retry-After", "")
+                r.close()
+                last = IOError(f"HTTP {r.status_code}")
+                time.sleep(min(30.0, float(wait) if wait.isdigit() else 2.0 ** attempt))
+                continue
             if r.status_code == 200:          # server ignored the ranges: never download 65 MB
                 r.close()
                 if len(merged) == 1:

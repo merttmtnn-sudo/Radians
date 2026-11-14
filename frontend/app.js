@@ -4,13 +4,14 @@ import {
 } from './sky.js';
 import { t, setLang, getLang } from './i18n.js';
 import { scatterChart, chartTable, SERIES } from './charts.js';
+import { encodeGif } from './gif.js';
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
   'search', 'q', 'fov', 'mode', 'go', 'sky', 'overlay', 'stage', 'empty', 'loading', 'loadingMsg', 'loadingSub',
   'play', 'prev', 'next', 'scrub', 'fps', 'fpsVal', 'timeline', 'frameInfo', 'cursor', 'stretch', 'cmap', 'lo', 'hi',
   'cross', 'flagView', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'view', 'viewHelp', 'detchips',
-  'preset', 'loadingBar', 'cands', 'candCount', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples',
+  'preset', 'loadingBar', 'wlMatch', 'zoom', 'gif', 'cands', 'candCount', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples',
 ].map(id => [id, $(id)]));
 
 const ALL_DETS = [1, 2, 3, 4, 5, 6];
@@ -143,6 +144,7 @@ async function run(opts) {
     const data = await api('api/frames', {
       ra: target.ra.toFixed(6), dec: target.dec.toFixed(6), fov: opts.fov, mode: opts.mode,
       pmra: target.pmra, pmdec: target.pmdec, detectors: [...state.dets].sort().join(','), job,
+      matched: els.wlMatch.checked,
     }, ctl.signal);
     if (!data.frames || !data.frames.length) {
       state.data = null;
@@ -559,6 +561,7 @@ els.overlay.addEventListener('mousemove', (e) => {
 // click a candidate on the image to select it
 els.overlay.addEventListener('click', (e) => {
   if (!state.data) return;
+  if (zoomState.dragged) { zoomState.dragged = false; return; }
   const cands = state.data.candidates || [];
   const rect = els.overlay.getBoundingClientRect();
   const n = state.data.grid.n;
@@ -586,6 +589,7 @@ function syncUrl(replace = false) {
   if (els.fps.value !== '2') p.set('fps', els.fps.value);
   if (els.stretch.value !== 'asinh') p.set('stretch', els.stretch.value);
   if (els.cmap.value !== 'gray') p.set('cmap', els.cmap.value);
+  if (!els.wlMatch.checked) p.set('wl', '0');
   if (!state.playing && state.idx) p.set('frame', state.idx);
   if (getLang() !== 'en') p.set('lang', getLang());
   if (document.body.classList.contains('embed')) p.set('embed', '1');
@@ -627,6 +631,7 @@ function fromUrl() {
   if (s.fps) { els.fps.value = s.fps; els.fpsVal.textContent = s.fps; }
   if (s.stretch) setSelect(els.stretch, s.stretch);
   if (s.cmap) setSelect(els.cmap, s.cmap);
+  els.wlMatch.checked = s.wl;
   setDets(s.det ? s.det.split(',').map(Number) : ALL_DETS);
   const common = { fov: els.fov.value, mode: els.mode.value, frame: s.frame, autoplay: s.frame === null };
   if (s.ra !== null && s.dec !== null) run({ q: s.q, ra: s.ra, dec: s.dec, pmra: s.pmra, pmdec: s.pmdec, ...common });
@@ -981,3 +986,79 @@ try { startLang = startLang || localStorage.getItem('radians-lang'); } catch { /
 applyLang(startLang || ((navigator.language || '').startsWith('tr') ? 'tr' : 'en'));
 fromUrl();
 window.radians = { state, ex };   // handle for debugging in the console
+
+
+// ------------------------------------------------------------------ wavelength matching, zoom, GIF
+els.wlMatch.onchange = () => { requery(); };
+
+const zoomState = { z: 1, tx: 0, ty: 0, drag: null, dragged: false };
+function applyZoom() {
+  const W = els.stage.clientWidth, lim = (zoomState.z - 1) * W / 2;
+  zoomState.tx = Math.max(-lim, Math.min(lim, zoomState.tx));
+  zoomState.ty = Math.max(-lim, Math.min(lim, zoomState.ty));
+  const tr = zoomState.z === 1 ? '' : `translate(${zoomState.tx}px, ${zoomState.ty}px) scale(${zoomState.z})`;
+  els.sky.style.transform = els.overlay.style.transform = tr;
+  els.zoom.textContent = `${zoomState.z}×`;
+  els.overlay.style.cursor = zoomState.z > 1 ? 'grab' : '';
+}
+els.zoom.title = t('zoomHelp');
+els.zoom.onclick = () => {
+  const z = { 1: 2, 2: 4, 4: 1 }[zoomState.z];
+  zoomState.tx *= z / zoomState.z; zoomState.ty *= z / zoomState.z; zoomState.z = z;
+  applyZoom();
+};
+els.overlay.addEventListener('pointerdown', (e) => {
+  if (zoomState.z === 1) return;
+  zoomState.drag = { x: e.clientX, y: e.clientY, tx: zoomState.tx, ty: zoomState.ty };
+  zoomState.dragged = false;
+});
+window.addEventListener('pointermove', (e) => {
+  const d = zoomState.drag;
+  if (!d) return;
+  const dx = e.clientX - d.x, dy = e.clientY - d.y;
+  if (Math.hypot(dx, dy) > 4) zoomState.dragged = true;
+  zoomState.tx = d.tx + dx; zoomState.ty = d.ty + dy;
+  applyZoom();
+});
+window.addEventListener('pointerup', () => { zoomState.drag = null; });
+
+/** Palette indices of frame i with the current view, stretch and colour map (as render() shows it). */
+function frameIndices(i, table) {
+  const n = state.data.grid.n, img = state.shown[i];
+  const diffView = isDiffView(els.view.value);
+  const [lo, hi] = state.levels, kind = els.stretch.value;
+  const px = new Uint8Array(n * n);
+  for (let y = 0; y < n; y++) {
+    const row = n - 1 - y;
+    for (let x = 0; x < n; x++) {
+      const tv = diffView ? stretchSigned(img[y * n + x], hi, kind) : stretchValue(img[y * n + x], lo, hi, kind);
+      px[row * n + x] = Number.isNaN(tv) ? 0 : (diffView ? Math.round(128 + tv * 127) : Math.round(tv * 255));
+    }
+  }
+  return px;
+}
+
+els.gif.onclick = () => {
+  if (!state.data) return;
+  toast(t('gifMaking'));
+  setTimeout(() => {
+    const n = state.data.grid.n, k = Math.max(1, Math.floor(480 / n)), W = n * k;
+    const table = isDiffView(els.view.value) ? lutDiverging() : lut(els.cmap.value);
+    const count = isStack() ? 1 : state.shown.length;
+    const frames = [];
+    for (let i = 0; i < count; i++) {
+      const src = frameIndices(i, table), big = new Uint8Array(W * W);
+      for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) big[y * W + x] = src[Math.floor(y / k) * n + Math.floor(x / k)];
+      frames.push(big);
+    }
+    const delay = Math.round(100 / Number(els.fps.value || 2));
+    const blob = new Blob([encodeGif(frames, W, W, table, delay)], { type: 'image/gif' });
+    const a = document.createElement('a');
+    const name = (state.target && (state.target.name || els.q.value) || 'radians').toString().replace(/[^\w.-]+/g, '-');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name}-spherex.gif`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast(t('gifDone'));
+  }, 30);
+};

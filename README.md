@@ -36,7 +36,8 @@ Its optional ideas, and where Radians stands:
 | Public tools (Astropy, Aladin) | Astropy and PyVO throughout; Aladin Lite (CDS) for the wider view. |
 
 Beyond the list: known asteroids from IMCCE SkyBoT, archived NEOSSat images from the Canadian Space
-Agency, a candidate report you can copy, CSV export of every measurement, English and Turkish.
+Agency, a candidate report you can copy, CSV export of every measurement, 2×/4× zoom with drag,
+animated-GIF download of any view, an injection test of the finder, English and Turkish.
 
 ## How it works
 
@@ -108,15 +109,47 @@ data centre seconds; the page shows how many exposures have been read. Everythin
 | `GET /api/sso?ra=&dec=&radius=&mjd=` | known asteroids and comets in the field at each date (IMCCE SkyBoT) |
 | `GET /api/neossat?ra=&dec=&radius=` | archived NEOSSat images of the area (CSA, via CADC) |
 
+## Validation
+
+`backend/scripts/inject_validate.py` puts fake objects into the real SPHEREx exposures of the five
+challenge fields (Gaussian PSF, σ = 0.62 px, on empty sky), runs the same finder as the app, and counts
+what comes back: 40 injections per cell, S/N per visit as the finder measures it (aperture flux over
+robust noise, which includes confusion). Details in [docs/VALIDATION.md](docs/VALIDATION.md).
+
+| Injected | S/N 5 | S/N 8 | S/N 12 | S/N 20 | S/N 40 |
+|---|---|---|---|---|---|
+| Mover, 9″/yr | 0% (0/40) | 50% (20/40) | 85% (34/40) | 100% (40/40) | 100% (40/40) |
+| Variable (×3 in one visit) | 12% (5/40) | 80% (32/40) | 90% (36/40) | 88% (35/40) | 85% (34/40) |
+| New source (one visit only) | 0% (0/40) | 42% (17/40) | 85% (34/40) | 100% (40/40) | 98% (39/40) |
+
+| Field (nothing injected) | Visits | Candidates besides the target |
+|---|---|---|
+| Barnard's Star | 5 | 0 |
+| eps Indi B | 4 | 0 |
+| WISE J085510.83-071442.5 | 4 | 0 |
+| RW Aur | 3 | 0 |
+| R Dra | 3 | 0 |
+
+With nothing injected, the finder reports no candidate besides the target in any of the five fields.
+S/N 5 is below the finder's detection threshold (8) on purpose.
+
+## Sharing one free server
+
+Each visitor may ask for 20 views and 90 spectra a minute (HTTP 429 with `Retry-After` beyond that);
+at most two new positions are read from IRSA at the same time; IRSA's own `Retry-After` is honoured;
+the cut-out cache is trimmed to 4 GB, oldest first. All four are environment settings
+(`RATE_FRAMES`, `RATE_PHOT`, `MAX_COLD_BUILDS`, `CACHE_MAX_MB`).
+
 ## Limitations
 
 - SPHEREx pixels are 6.15″: motions below about 1″ a year do not show between visits a year apart.
 - Saturated stars have no usable core. Their brightness comes from the PSF wings (relative only), and
-  motion measured on them is rough (Barnard's Star: 11.7″/yr against 10.4″/yr).
-- Each SPHEREx exposure sees a position at a different wavelength, so a visit's co-add is a mix of
-  colours. A very red or very blue star can look slightly brighter or fainter between visits that
-  sampled different wavelengths; the variability finder asks for agreement between detectors to
-  limit this, but it is not a full wavelength-matched comparison.
+  motion measured on them depends on the unsaturated wings.
+- Visits are compared only at wavelengths every visit sampled (wavelength matching, on by default).
+  When visits share few wavelengths, fewer exposures go into each co-add and the comparison is noisier;
+  when two visits share no detector at all, matching falls back to each detector on its own.
+- Completeness falls off below S/N 8 to 12 per visit (see Validation); a source fainter than that in
+  every visit will not be reported.
 - Asteroids move within a visit and blur in the co-adds; SkyBoT marks the known ones per exposure.
 - It cannot prove a Planet X: a planet hundreds of AU away moves by arcminutes between visits (mostly
   parallax), so it shows as a spot that is "new" in one visit and "gone" in another, not as one mover.
@@ -168,14 +201,16 @@ SIMBAD database and Aladin, operated at CDS, Strasbourg, France, and of IMCCE's 
 - **Detectors**: pick D1–D6 or a preset. Cold brown dwarfs such as WISE 0855 are bright only at
   4–5 µm, so try *D6 only*.
 - **Candidate finder**: every query also runs a simple search that
+  - co-adds each visit only at wavelengths every visit sampled (**wavelength matching**: SPHEREx has
+    no filters, so without it a colour difference between visits looks like a change),
   - finds sources in each epoch (Gaussian peak fits, which stay unbiased on SPHEREx's undersampled PSF),
   - removes small astrometric offsets between epochs using bright common stars,
   - fits straight-line motion through 3 or more epochs (one outlier epoch may be dropped) → **moving**,
   - compares brightness only within the same detector, and needs two detectors to agree → **variable**,
   - flags sources seen in one epoch and truly absent in the others → **one epoch only**.
 
-  On the challenge targets it recovers Barnard's Star (11.7″/yr, PA 354°; catalogue 10.4″/yr, 356°),
-  ε Indi B (4.69″/yr, PA 123°; catalogue 4.68″/yr, 122°) and the variability of RW Aurigae.
+  On the challenge targets it recovers Barnard's Star (10.38″/yr, PA 354°; catalogue 10.39″/yr, 356°),
+  ε Indi B (4.65″/yr, PA 125°; catalogue 4.68″/yr, 123°) and the variability of RW Aurigae (×1.7).
   Candidates are suggestions to check by eye, each with a SIMBAD link.
 
 ## Using the viewer
