@@ -31,7 +31,7 @@ def session() -> requests.Session:
     s = getattr(_local, "s", None)
     if s is None:
         s = requests.Session()
-        s.headers["User-Agent"] = "planetx-spherex/0.1 (NASA Space Apps 2026)"
+        s.headers["User-Agent"] = "Radians/0.1 (NASA Space Apps 2026)"
         _local.s = s
     return s
 

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import archive, config, stack
 
-app = FastAPI(title="SPHEREx sky-change viewer", version="0.1")
+app = FastAPI(title="Radians", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 
 
