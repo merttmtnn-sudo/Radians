@@ -114,6 +114,17 @@ Manual Deploy → Deploy latest commit in the dashboard.
 | `GET /api/gaia?ra=&dec=&radius=` | Gaia DR3 stars (ESA archive), with proper motions |
 | `GET /api/sso?ra=&dec=&radius=&mjd=` | known asteroids and comets in the field at each date (IMCCE SkyBoT) |
 | `GET /api/neossat?ra=&dec=&radius=` | archived NEOSSat images of the area (CSA, via CADC) |
+| `GET /api/sx/images`, `/api/sx/cutout`, `/api/sx/catalog`, `/api/sx/simbad`, `/api/sx/resolve`, `/api/sx/hips-properties` | the planetarium and its time-lapse / spectra tool (see below) |
+| `GET /hips/spherex-color/…` | SPHEREx infrared colour sky as a HiPS (B = D1+D2, G = D3+D4, R = D5+D6), used by the map's "Infrared RGB" palette |
+
+### Planetarium
+
+`/planet/` is **SPHEREx Sky Explorer** by team member Emre Bozkaya
+([EmreBozkaya127/SPHEREx-Sky-Wiever](https://github.com/EmreBozkaya127/SPHEREx-Sky-Wiever)): a planetarium for
+any place and time (Istanbul, now, by default) drawn over the SPHEREx all-sky cube, with survey comparison,
+catalogue overlays, and a time-lapse / spectrophotometry tool that works on every SPHEREx exposure of a target.
+His Node.js server was ported to Python (`backend/app/explorer.py`); HiPS tiles come straight from IRSA.
+Star, constellation and Milky Way data: d3-celestial (BSD-3, see `frontend/planet/data/LICENSE-d3-celestial.txt`).
 
 ## Validation
 
@@ -198,6 +209,8 @@ SIMBAD database and Aladin, operated at CDS, Strasbourg, France, and of IMCCE's 
 - **Known Solar System objects**: IMCCE SkyBoT.
 - **NEOSSat** (Canadian Space Agency) archive search: CADC.
 - Name resolution by CDS Sesame (Strasbourg); sky viewer: Aladin Lite (CDS).
+- Planetarium, time-lapse / spectra tool and the infrared colour recipe: Emre Bozkaya (SPHEREx Sky Explorer);
+  sky data from d3-celestial (Olaf Frohn, BSD-3).
 - Built with Astropy, PyVO, NumPy, SciPy and FastAPI; the browser side has no build step or framework.
 
 ## Finding things

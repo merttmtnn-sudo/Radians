@@ -3,7 +3,7 @@
 // image canvas; the viewer through the lookup tables in sky.js.
 import { PALETTE_STOPS } from './sky.js';
 
-export const MAP_PALETTES = ['gray', 'invert', 'inferno', 'viridis', 'tint'];
+export const MAP_PALETTES = ['gray', 'invert', 'inferno', 'viridis', 'tint', 'rgb'];
 const VIEWER = new Set(['gray', 'invert', 'heat', 'inferno', 'viridis']);
 const KEY = 'radians-palette';
 

@@ -106,6 +106,7 @@ async function initMap() {
     map.tint.className = 'maptint';
     (div.querySelector('.aladin-imageCanvas') || div.firstChild).after(map.tint);
     setSlice(map.slice);
+    setRgb(getPalette() === 'rgb');
     addMarkers();
     div.addEventListener('pointerdown', (e) => { map.down = [e.clientX, e.clientY]; map.objectHit = false; });
     div.addEventListener('pointerup', (e) => {
@@ -181,8 +182,8 @@ $('mapPlay').onclick = () => {
 };
 
 // ---------------------------------------------------------------- colour palette
-const PAL_KEYS = { gray: 'palGray', invert: 'palInvert', inferno: 'palInferno', viridis: 'palViridis', tint: 'palTint' };
-const PAL_TIPS = { gray: 'palTipGray', invert: 'palTipInvert', inferno: 'palTipInferno', viridis: 'palTipViridis', tint: 'palTipTint' };
+const PAL_KEYS = { gray: 'palGray', invert: 'palInvert', inferno: 'palInferno', viridis: 'palViridis', tint: 'palTint', rgb: 'palRgb' };
+const PAL_TIPS = { gray: 'palTipGray', invert: 'palTipInvert', inferno: 'palTipInferno', viridis: 'palTipViridis', tint: 'palTipTint', rgb: 'palTipRgb' };
 document.body.append(paletteFilters());
 function buildPals() {
   $('mapPals').replaceChildren(...MAP_PALETTES.map((p) => {
@@ -203,7 +204,23 @@ function showPal() {
   $('mapWrap').dataset.pal = p;
   for (const b of $('mapPals').children) b.setAttribute('aria-pressed', String(b.dataset.pal === p));
   $('mapCbar').style.background = p === 'tint' ? `linear-gradient(90deg, #000, ${wlColor(CUBE_WL[map.slice])})` : gradient(p);
-  $('mapCbarName').textContent = t(PAL_KEYS[p]);
+  $('mapCbarName').textContent = p === 'rgb' ? `${t(PAL_KEYS[p])} · ${t('rgbBands')}` : t(PAL_KEYS[p]);
+  setRgb(p === 'rgb');
+}
+// Infrared RGB: a colour HiPS the server builds from 12 planes of the cube (backend/app/explorer.py),
+// laid over the single-wavelength layers only while it is chosen (so nobody else loads its tiles).
+function setRgb(on) {
+  if (!map.aladin || !window.A) return;
+  try {
+    if (on && !map.rgbOn) {
+      map.rgb = map.rgb || window.A.imageHiPS('radians-spherex-rgb', { url: new URL('/hips/spherex-color', location.href).href, name: 'SPHEREx infrared RGB' });
+      map.aladin.setOverlayImageLayer(map.rgb, 'rgb');
+      map.rgbOn = true;
+    } else if (!on && map.rgbOn) {
+      map.aladin.removeImageLayer('rgb');
+      map.rgbOn = false;
+    }
+  } catch (e) { console.warn('rgb layer', e); }
 }
 function setLevels(b, c) {
   $('mapWrap').style.setProperty('--mapbright', b);

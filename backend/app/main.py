@@ -16,10 +16,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import archive, config, detect, external, stack
+from . import archive, config, detect, explorer, external, stack
 
 app = FastAPI(title="Radians", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+app.include_router(explorer.router)
+app.include_router(explorer.hips_router)
 
 # ---------------------------------------------------------------- fair sharing of one server
 _hits: dict = {}
@@ -40,7 +42,7 @@ async def _revalidate(request: Request, call_next):
     browsers keep running an old app.js / styles.css after a deploy."""
     resp = await call_next(request)
     path = request.url.path
-    if path == "/" or path.startswith("/static/"):
+    if path == "/" or path.startswith(("/static/", "/planet/")) and not path.startswith("/planet/data/"):
         resp.headers["Cache-Control"] = "no-cache"
     return resp
 
@@ -348,6 +350,8 @@ def neossat(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 if FRONTEND.exists():
     app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
+    # the planetarium (Emre Bozkaya's SPHEREx Sky Explorer) is a page of its own
+    app.mount("/planet", StaticFiles(directory=FRONTEND / "planet", html=True), name="planet")
 
     @app.get("/")
     def index():

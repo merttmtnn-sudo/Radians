@@ -431,7 +431,8 @@ body.embed .stage { max-height: calc(100vh - 70px); }
 .mapwrap[data-pal="invert"] { background: #fff; }
 .mapwrap[data-pal="inferno"] #skymapAladin .aladin-imageCanvas { filter: var(--bc) url(#pal-inferno); }
 .mapwrap[data-pal="viridis"] #skymapAladin .aladin-imageCanvas { filter: var(--bc) url(#pal-viridis); }
-.mapwrap[data-pal="tint"] #skymapAladin .aladin-imageCanvas { filter: var(--bc); }
+.mapwrap[data-pal="tint"] #skymapAladin .aladin-imageCanvas, .mapwrap[data-pal="rgb"] #skymapAladin .aladin-imageCanvas { filter: var(--bc); }
+.mapwrap[data-pal="rgb"] ~ * #mapWl, .mapwrap[data-pal="rgb"] #mapWl { opacity: .45; }
 .mapwrap:not([data-pal="tint"]) .maptint { display: none; }
 
 .maptools { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 10px;

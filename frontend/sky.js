@@ -40,6 +40,7 @@ export const PALETTE_STOPS = {
   viridis: ['#440154', '#482878', '#3e4989', '#31688e', '#26828e', '#1f9e89', '#35b779', '#6ece58', '#b5de2b', '#fde725'],
   heat: ['#000000', '#8c0000', '#ff4d00', '#ffd21a', '#ffffff'],
   tint: ['#000000', '#ffb347'],
+  rgb: ['#4d7bff', '#3ddc84', '#ff5a3d'],
 };
 function fromStops(stops) {
   const rgb = stops.map(h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16) / 255));
