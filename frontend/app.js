@@ -104,6 +104,7 @@ function requery() {
 
 // ------------------------------------------------------------------ load
 async function run(opts) {
+  document.dispatchEvent(new CustomEvent('radians:run'));       // ui.js: switch from the landing page to the viewer
   if (state.abort) state.abort.abort();
   const ctl = new AbortController();
   state.abort = ctl;
@@ -154,6 +155,7 @@ async function run(opts) {
       return;
     }
     load(data, opts.frame ?? 0);
+    document.dispatchEvent(new CustomEvent('radians:loaded'));
     syncUrl();
     if (opts.autoplay !== false) play();
   } catch (e) {
@@ -849,11 +851,11 @@ function drawExtras(ctx) {
   if (!state.data || !state.data.frames.length) return;
   const { gaia, sso } = visibleExtras();
   ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(126,224,195,.75)';
+  ctx.strokeStyle = 'rgba(126,224,195,.38)';
   for (const { s, p } of gaia) {
     const [cx, cy, k] = toCanvas(...p);
     ctx.beginPath();
-    ctx.arc(cx, cy, Math.max(3, k * (s.g < 12 ? 1.1 : 0.7)), 0, 2 * Math.PI);
+    ctx.arc(cx, cy, Math.max(3, k * (s.g < 12 ? 0.9 : 0.55)), 0, 2 * Math.PI);
     ctx.stroke();
     if (Math.hypot(s.pmra || 0, s.pmdec || 0) > 150) {      // fast movers: line = motion over the next 5 years
       const [x2, y2] = toCanvas(...skyToPix(...gaiaAt(s, currentMjd() + 5 * 365.25), state.data.grid));
@@ -986,7 +988,7 @@ e4.ctxGaia.onchange = e4.ctxCatwise.onchange = () => ex.aladin && setAladinCats(
 buildDetChips();
 let startLang = parseState(location.search).lang;
 try { startLang = startLang || localStorage.getItem('radians-lang'); } catch { /* private mode */ }
-applyLang(startLang || ((navigator.language || '').startsWith('tr') ? 'tr' : 'en'));
+applyLang(startLang || 'en');
 fromUrl();
 window.radians = { state, ex };   // handle for debugging in the console
 

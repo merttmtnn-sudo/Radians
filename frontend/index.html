@@ -1,91 +1,158 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Radians — SPHEREx sky blink</title>
-  <meta name="description" content="Watch NASA SPHEREx infrared images of any patch of sky change over time.">
+  <title>Radians — watch the infrared sky move</title>
+  <meta name="description" content="Blink NASA SPHEREx infrared images of any patch of sky and see what moved, changed or appeared.">
+  <meta name="color-scheme" content="dark light">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='5' fill='%23ffb347'/%3E%3Cpath d='M16 2v6M16 24v6M2 16h6M24 16h6' stroke='%23ffb347' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="static/styles.css">
+  <script>
+    // theme before first paint (no flash): saved choice, else dark
+    try { const t = localStorage.getItem('radians-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) { /* private mode */ }
+    // a shared link opens straight in the viewer
+    if (/[?&](q|ra)=/.test(location.search)) document.documentElement.classList.add('in-app');
+  </script>
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="./">
+  <a class="brand" href="./" aria-label="Radians home">
     <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="5"/><path d="M16 2v6M16 24v6M2 16h6M24 16h6"/></svg>
     <span>Radians</span>
   </a>
-  <p class="tagline" data-i18n="tagline"></p>
-  <div class="lang" role="group" aria-label="Language">
-    <button type="button" data-lang="en">EN</button><button type="button" data-lang="tr">TR</button>
+  <nav class="nav landing-only" aria-label="Sections">
+    <a href="#how" data-i18n="navHow"></a>
+    <a href="#results" data-i18n="navResults"></a>
+    <a href="#team" data-i18n="navTeam"></a>
+  </nav>
+  <div class="appsearch app-only" id="appSearchSlot"></div>
+  <div class="topright">
+    <button type="button" class="btn sm ghost app-only" id="tourBtn" data-i18n="tourAgain"></button>
+    <button type="button" class="btn sm app-only" id="advBtn" aria-controls="adv" aria-expanded="false">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 14h14"/><circle cx="7" cy="6" r="2"/><circle cx="13" cy="14" r="2"/></svg>
+      <span data-i18n="advanced"></span>
+    </button>
+    <div class="seg" role="group" aria-label="Language">
+      <button type="button" data-lang="en">EN</button><button type="button" data-lang="tr">TR</button>
+    </div>
+    <button type="button" class="btn sm icon" id="themeBtn" aria-label="Light or dark">
+      <svg class="sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.5"/><path d="M10 1.5v2.5M10 16v2.5M1.5 10H4M16 10h2.5M4 4l1.8 1.8M14.2 14.2 16 16M4 16l1.8-1.8M14.2 5.8 16 4"/></svg>
+      <svg class="moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 12.5A6.5 6.5 0 0 1 7.5 4.5a6.5 6.5 0 1 0 8 8Z"/></svg>
+    </button>
   </div>
 </header>
 
-<form id="search" class="search" autocomplete="off">
-  <label class="grow">
-    <span class="lbl" data-i18n="target"></span>
-    <input id="q" name="q" data-i18n-ph="targetPh" required>
-  </label>
-  <label>
-    <span class="lbl" data-i18n="fov"></span>
-    <select id="fov">
-      <option value="120">2′</option>
-      <option value="240" selected>4′</option>
-      <option value="360">6′</option>
-      <option value="600">10′</option>
-      <option value="1200">20′</option>
-    </select>
-  </label>
-  <label>
-    <span class="lbl" data-i18n="frames"></span>
-    <select id="mode">
-      <option value="epoch" selected data-i18n="modeEpoch"></option>
-      <option value="epoch_detector" data-i18n="modeEpochDet"></option>
-      <option value="exposure" data-i18n="modeExposure"></option>
-    </select>
-  </label>
-  <button type="submit" id="go" data-i18n="blink"></button>
-</form>
-<div class="dets">
-  <span class="lbl" data-i18n="detectors"></span>
-  <div class="detchips" id="detchips" role="group"></div>
-  <select id="preset" aria-label="Detector preset">
-    <option value="1,2,3,4,5,6" data-i18n="presetAll"></option>
-    <option value="1,2,3" data-i18n="presetShort"></option>
-    <option value="4,5,6" data-i18n="presetLong"></option>
-    <option value="5,6" data-i18n="presetD6"></option>
-    <option value="custom" data-i18n="presetCustom" hidden></option>
-  </select>
-</div>
-<div class="examples" id="examples">
-  <span class="lbl" data-i18n="tryLbl"></span>
-  <button data-q="Barnard's Star">Barnard's Star</button>
-  <button data-q="eps Indi B">ε Indi B</button>
-  <button data-q="WISE J085510.83-071442.5" data-det="5,6" data-wl="0">WISE 0855 (D5+D6)</button>
-  <button data-q="RW Aur">RW Aurigae</button>
-  <button data-q="R Dra">R Draconis</button>
-</div>
+<!-- ================================================================ landing -->
+<main class="landing landing-only" id="landing">
+  <section class="hero">
+    <p class="eyebrow mono">NASA SPHEREx · Space Apps 2026 · Planet X</p>
+    <h1 data-i18n="heroTitle"></h1>
+    <p class="lead" data-i18n="heroSub"></p>
+    <div id="heroSearchSlot">
+      <form id="search" class="search" autocomplete="off">
+        <svg class="searchicon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5"/></svg>
+        <input id="q" name="q" data-i18n-ph="targetPh" aria-label="Target: a name or RA Dec" required>
+        <button type="submit" id="go" class="btn primary" data-i18n="blink"></button>
+      </form>
+    </div>
+    <p class="hint muted small" data-i18n="searchHint"></p>
+  </section>
 
-<main class="layout">
+  <section class="targets" aria-labelledby="tgtTitle">
+    <h2 id="tgtTitle" class="sectiontitle" data-i18n="targetsTitle"></h2>
+    <div class="cards5" id="examples">
+      <button type="button" class="tcard" data-q="Barnard's Star">
+        <img src="static/media/barnard-s-star.gif" alt="" loading="lazy">
+        <span class="tname">Barnard's Star</span><span class="tdesc" data-i18n="tBarnard"></span>
+      </button>
+      <button type="button" class="tcard" data-q="eps Indi B">
+        <img src="static/media/eps-indi-b.gif" alt="" loading="lazy">
+        <span class="tname">ε Indi B</span><span class="tdesc" data-i18n="tEpsIndi"></span>
+      </button>
+      <button type="button" class="tcard" data-q="WISE J085510.83-071442.5" data-det="5,6" data-wl="0">
+        <img src="static/media/wise-0855.gif" alt="" loading="lazy">
+        <span class="tname">WISE 0855−0714</span><span class="tdesc" data-i18n="tWise"></span>
+      </button>
+      <button type="button" class="tcard" data-q="RW Aur">
+        <img src="static/media/rw-aur.gif" alt="" loading="lazy">
+        <span class="tname">RW Aurigae</span><span class="tdesc" data-i18n="tRwAur"></span>
+      </button>
+      <button type="button" class="tcard" data-q="R Dra">
+        <img src="static/media/r-dra.gif" alt="" loading="lazy">
+        <span class="tname">R Draconis</span><span class="tdesc" data-i18n="tRDra"></span>
+      </button>
+    </div>
+  </section>
+
+  <section class="how" id="how">
+    <h2 class="sectiontitle" data-i18n="howTitle"></h2>
+    <div class="cards3">
+      <div class="card"><span class="num mono">01</span><h3 data-i18n="how1t"></h3><p class="dim" data-i18n="how1"></p></div>
+      <div class="card"><span class="num mono">02</span><h3 data-i18n="how2t"></h3><p class="dim" data-i18n="how2"></p></div>
+      <div class="card"><span class="num mono">03</span><h3 data-i18n="how3t"></h3><p class="dim" data-i18n="how3"></p></div>
+    </div>
+  </section>
+
+  <section class="results" id="results">
+    <h2 class="sectiontitle" data-i18n="resultsTitle"></h2>
+    <p class="dim" data-i18n="resultsSub"></p>
+    <div class="tablewrap">
+      <table class="restable">
+        <thead><tr><th data-i18n="colTarget"></th><th data-i18n="colRadians"></th><th data-i18n="colCatalogue"></th></tr></thead>
+        <tbody>
+          <tr><td>Barnard's Star</td><td class="mono" data-i18n="rBarnard"></td><td class="mono" data-i18n="cBarnard"></td></tr>
+          <tr><td>ε Indi B</td><td class="mono" data-i18n="rEps"></td><td class="mono" data-i18n="cEps"></td></tr>
+          <tr><td>WISE 0855−0714</td><td class="mono" data-i18n="rWise"></td><td class="mono" data-i18n="cWise"></td></tr>
+          <tr><td>RW Aurigae</td><td class="mono" data-i18n="rRw"></td><td data-i18n="rRwCat"></td></tr>
+          <tr><td>R Draconis</td><td data-i18n="rRDra"></td><td data-i18n="rRDraCat"></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="validation panel">
+      <div class="bignum mono">100%</div>
+      <p><b data-i18n="valTitle"></b><br><span class="dim" data-i18n="valBody"></span>
+        <a href="https://github.com/merttmtnn-sudo/Radians/blob/main/docs/VALIDATION.md" target="_blank" rel="noopener" data-i18n="valLink"></a></p>
+    </div>
+  </section>
+
+  <section class="team" id="team">
+    <h2 class="sectiontitle" data-i18n="teamTitle"></h2>
+    <p class="names">Mert Metin · Efe Gönderen · Bora Hısım · Emre Bozkaya</p>
+    <p class="dim small" data-i18n="credits"></p>
+    <p class="small"><a href="https://github.com/merttmtnn-sudo/Radians" target="_blank" rel="noopener">GitHub</a> ·
+      <a href="static/slides.html" target="_blank" rel="noopener" data-i18n="slidesLink"></a> · MIT</p>
+  </section>
+</main>
+
+<!-- ================================================================ app -->
+<main class="layout app-only" id="app">
   <section class="viewer" aria-label="Sky viewer">
     <div class="viewbar">
-      <label><span class="lbl" data-i18n="view"></span>
-        <select id="view">
-          <option value="images" data-i18n="viewImages"></option>
-          <option value="diff_median" data-i18n="viewDiffMedian"></option>
-          <option value="diff_prev" data-i18n="viewDiffPrev"></option>
-          <option value="diff_first" data-i18n="viewDiffFirst"></option>
-          <option value="stack" data-i18n="viewStack"></option>
-        </select>
-      </label>
-      <p class="muted small" id="viewHelp"></p>
+      <div class="seg wide" role="group" aria-label="View" id="viewSeg">
+        <button type="button" data-view="images" data-i18n="segImages"></button>
+        <button type="button" data-view="diff_median" data-i18n="segDiff"></button>
+        <button type="button" data-view="stack" data-i18n="segStack"></button>
+      </div>
+      <select id="view" aria-label="View" class="input sm">
+        <option value="images" data-i18n="viewImages"></option>
+        <option value="diff_median" data-i18n="viewDiffMedian"></option>
+        <option value="diff_prev" data-i18n="viewDiffPrev"></option>
+        <option value="diff_first" data-i18n="viewDiffFirst"></option>
+        <option value="stack" data-i18n="viewStack"></option>
+      </select>
     </div>
+    <p class="muted small viewhelp" id="viewHelp"></p>
     <div class="stage" id="stage">
       <canvas id="sky" width="1" height="1"></canvas>
       <canvas id="overlay" width="1" height="1"></canvas>
-      <div class="hud hud-tl" id="hudDate"></div>
-      <div class="hud hud-tr" id="hudIdx"></div>
+      <div class="hud hud-tl mono" id="hudDate"></div>
+      <div class="hud hud-tr mono" id="hudIdx"></div>
       <div class="hud hud-bl compass" aria-hidden="true"><span class="n">N</span><span class="e">E</span></div>
-      <div class="hud hud-br" id="hudScale"></div>
+      <div class="hud hud-br mono" id="hudScale"></div>
       <div class="empty" id="empty">
         <p data-i18n="emptyTitle"></p>
         <p class="muted" data-i18n="emptyBody"></p>
@@ -94,25 +161,24 @@
         <div class="spinner"></div>
         <p id="loadingMsg"></p>
         <progress id="loadingBar" max="1" value="0" hidden></progress>
-        <p class="muted" id="loadingSub"></p>
+        <p class="muted small" id="loadingSub"></p>
       </div>
     </div>
 
     <div class="controls" id="controls">
-      <button id="prev" aria-label="Previous frame">⏮</button>
-      <button id="play" aria-label="Play">▶</button>
-      <button id="next" aria-label="Next frame">⏭</button>
+      <button id="prev" class="btn icon" aria-label="Previous frame"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M13 4 7 10l6 6"/></svg></button>
+      <button id="play" class="btn primary icon" aria-label="Play">▶</button>
+      <button id="next" class="btn icon" aria-label="Next frame"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></button>
       <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Frame">
-      <label class="speed">
-        <span id="fpsVal">2</span> fps
+      <label class="speed mono"><span id="fpsVal">2</span> fps
         <input id="fps" type="range" min="0.5" max="10" step="0.5" value="2" aria-label="Speed">
       </label>
-      <button id="zoom" class="small" aria-label="Zoom">1×</button>
-      <button id="gif" class="small" data-i18n="gifDl"></button>
+      <button id="zoom" class="btn sm mono" aria-label="Zoom">1×</button>
+      <button id="gif" class="btn sm" data-i18n="gifDl"></button>
     </div>
     <ol class="timeline" id="timeline"></ol>
 
-    <section class="analysis" id="analysis" hidden>
+    <section class="analysis panel" id="analysis" hidden>
       <div class="tabs" role="tablist">
         <button type="button" role="tab" data-tab="spectrum" aria-selected="true" data-i18n="tabSpectrum"></button>
         <button type="button" role="tab" data-tab="lightcurve" aria-selected="false" data-i18n="tabLight"></button>
@@ -121,110 +187,158 @@
       <div class="anabar">
         <span id="photSource" class="small"></span>
         <label class="small"><span data-i18n="photMode"></span>
-          <select id="photMode">
+          <select id="photMode" class="input sm">
             <option value="aperture" data-i18n="photAperture"></option>
             <option value="wings" data-i18n="photWings"></option>
           </select>
         </label>
         <label class="small check"><input id="photFlagged" type="checkbox" checked> <span data-i18n="photShowFlagged"></span></label>
-        <button type="button" id="photCsv" class="small" data-i18n="csv"></button>
+        <button type="button" id="photCsv" class="btn sm" data-i18n="csv"></button>
       </div>
       <div id="chart"></div>
       <p class="muted small" id="chartNote"></p>
     </section>
 
-    <details class="context" id="ctx">
-      <summary data-i18n="context"></summary>
-      <div class="ctxbar">
-        <select id="ctxSurvey" aria-label="Survey">
-          <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/2MASS/Color">2MASS (J, H, K)</option>
-          <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/AllWISE/RGB-W4-W2-W1">AllWISE (W1, W2, W4)</option>
-          <option value="https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube">SPHEREx DR1</option>
-          <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/DSS2/color">DSS2 (optical)</option>
-        </select>
-        <label class="small check"><input id="ctxGaia" type="checkbox" checked> Gaia DR3</label>
-        <label class="small check"><input id="ctxCatwise" type="checkbox"> CatWISE2020</label>
+    <details class="context panel" id="ctx">
+      <summary><span data-i18n="context"></span></summary>
+      <div class="ctxgrid">
+        <div>
+          <div class="ctxbar">
+            <select id="ctxSurvey" class="input sm" aria-label="Survey">
+              <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/2MASS/Color">2MASS (J, H, K)</option>
+              <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/AllWISE/RGB-W4-W2-W1">AllWISE (W1, W2, W4)</option>
+              <option value="https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube">SPHEREx DR1</option>
+              <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/DSS2/color">DSS2 (optical)</option>
+            </select>
+            <label class="small check"><input id="ctxGaia" type="checkbox" checked> Gaia DR3</label>
+            <label class="small check"><input id="ctxCatwise" type="checkbox"> CatWISE2020</label>
+          </div>
+          <div id="aladin"></div>
+          <p class="muted small" data-i18n="contextHelp"></p>
+        </div>
+        <div>
+          <h3 class="subhead" data-i18n="thisFrame"></h3>
+          <dl id="frameInfo" class="kv"><dt>—</dt><dd></dd></dl>
+          <div id="flagSummary" class="flagsum"></div>
+          <details id="expDetails"><summary id="expSummary"></summary><ol id="expList" class="explist"></ol></details>
+          <h3 class="subhead" data-i18n="neossat"></h3>
+          <p class="muted small" data-i18n="neossatHelp"></p>
+          <ul id="neossat" class="neolist"></ul>
+        </div>
       </div>
-      <div id="aladin"></div>
-      <p class="muted small" data-i18n="contextHelp"></p>
     </details>
   </section>
 
-  <aside class="panel">
-    <section>
-      <h2><span data-i18n="candidates"></span> <span class="count" id="candCount"></span></h2>
-      <label class="row check"><input id="showCands" type="checkbox" checked> <span data-i18n="showCands"></span></label>
+  <aside class="side">
+    <section class="panel" id="candPanel">
+      <h2><span data-i18n="candidates"></span> <span class="count mono" id="candCount"></span></h2>
+      <label class="check small"><input id="showCands" type="checkbox" checked> <span data-i18n="showCands"></span></label>
       <ul class="cands" id="cands"></ul>
       <p class="muted small" data-i18n="candHelp"></p>
     </section>
-
-    <section>
-      <h2 data-i18n="overlays"></h2>
-      <label class="row check"><input id="ovGaia" type="checkbox" checked> <span class="ovkey gaia"></span><span data-i18n="ovGaia"></span></label>
-      <label class="row check"><input id="ovSso" type="checkbox" checked> <span class="ovkey sso"></span><span data-i18n="ovSso"></span></label>
-      <p class="muted small" id="ovStatus"></p>
-    </section>
-
-    <section>
-      <h2 data-i18n="thisFrame"></h2>
-      <dl id="frameInfo" class="kv"><dt>—</dt><dd></dd></dl>
-      <div id="flagSummary" class="flagsum"></div>
-      <details id="expDetails"><summary id="expSummary"></summary><ol id="expList" class="explist"></ol></details>
-    </section>
-
-    <section>
-      <h2 data-i18n="display"></h2>
-      <label class="row"><span data-i18n="stretch"></span>
-        <select id="stretch">
-          <option value="asinh" selected>asinh</option>
-          <option value="linear">linear</option>
-          <option value="log">log</option>
-          <option value="sqrt">sqrt</option>
-        </select>
-      </label>
-      <label class="row"><span data-i18n="colours"></span>
-        <select id="cmap">
-          <option value="gray" selected data-i18n="cmGray"></option>
-          <option value="invert" data-i18n="cmInvert"></option>
-          <option value="heat" data-i18n="cmHeat"></option>
-        </select>
-      </label>
-      <label class="row"><span data-i18n="black"></span><input id="lo" type="range" min="0" max="60" step="0.5" value="5"></label>
-      <label class="row"><span data-i18n="white"></span><input id="hi" type="range" min="90" max="100" step="0.05" value="99.7"></label>
-      <label class="row check"><input id="cross" type="checkbox" checked> <span data-i18n="marker"></span></label>
-      <label class="row check"><input id="flagView" type="checkbox"> <span data-i18n="showFlagged"></span></label>
-      <label class="row check"><input id="wlMatch" type="checkbox" checked> <span data-i18n="wlMatch"></span></label>
-      <p class="muted small" data-i18n="wlMatchHelp"></p>
-    </section>
-
-    <section>
+    <section class="panel">
       <h2 data-i18n="cursor"></h2>
-      <dl id="cursor" class="kv"><dt>RA, Dec</dt><dd>—</dd></dl>
-    </section>
-
-    <section>
-      <h2 data-i18n="neossat"></h2>
-      <p class="muted small" data-i18n="neossatHelp"></p>
-      <ul id="neossat" class="neolist"></ul>
-    </section>
-
-    <section>
-      <h2 data-i18n="share"></h2>
-      <div class="share">
-        <input id="link" readonly aria-label="Link">
-        <button id="copy" type="button" data-i18n="copy"></button>
-      </div>
-      <p class="muted small" data-i18n="shareHelp"></p>
+      <dl id="cursor" class="kv mono"><dt>RA, Dec</dt><dd>—</dd></dl>
     </section>
   </aside>
 </main>
 
+<!-- ================================================================ advanced drawer -->
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="adv" aria-label="Advanced settings" hidden>
+  <div class="drawerhead">
+    <h2 data-i18n="advanced"></h2>
+    <button type="button" class="btn sm ghost icon" id="advClose" aria-label="Close">✕</button>
+  </div>
+
+  <section>
+    <h3 class="subhead" data-i18n="dataHead"></h3>
+    <label class="field"><span data-i18n="fov"></span>
+      <select id="fov" class="input">
+        <option value="120">2′</option>
+        <option value="240" selected>4′</option>
+        <option value="360">6′</option>
+        <option value="600">10′</option>
+        <option value="1200">20′</option>
+      </select>
+    </label>
+    <label class="field"><span data-i18n="frames"></span>
+      <select id="mode" class="input">
+        <option value="epoch" selected data-i18n="modeEpoch"></option>
+        <option value="epoch_detector" data-i18n="modeEpochDet"></option>
+        <option value="exposure" data-i18n="modeExposure"></option>
+      </select>
+    </label>
+    <div class="field"><span data-i18n="detectors"></span>
+      <div class="detchips" id="detchips" role="group"></div>
+      <select id="preset" class="input sm" aria-label="Detector preset">
+        <option value="1,2,3,4,5,6" data-i18n="presetAll"></option>
+        <option value="1,2,3" data-i18n="presetShort"></option>
+        <option value="4,5,6" data-i18n="presetLong"></option>
+        <option value="5,6" data-i18n="presetD6"></option>
+        <option value="custom" data-i18n="presetCustom" hidden></option>
+      </select>
+    </div>
+    <label class="check"><input id="wlMatch" type="checkbox" checked> <span data-i18n="wlMatch"></span></label>
+    <p class="muted small" data-i18n="wlMatchHelp"></p>
+  </section>
+
+  <section>
+    <h3 class="subhead" data-i18n="display"></h3>
+    <label class="field"><span data-i18n="stretch"></span>
+      <select id="stretch" class="input">
+        <option value="asinh" selected>asinh</option>
+        <option value="linear">linear</option>
+        <option value="log">log</option>
+        <option value="sqrt">sqrt</option>
+      </select>
+    </label>
+    <label class="field"><span data-i18n="colours"></span>
+      <select id="cmap" class="input">
+        <option value="gray" selected data-i18n="cmGray"></option>
+        <option value="invert" data-i18n="cmInvert"></option>
+        <option value="heat" data-i18n="cmHeat"></option>
+      </select>
+    </label>
+    <label class="field"><span data-i18n="black"></span><input id="lo" type="range" min="0" max="60" step="0.5" value="5"></label>
+    <label class="field"><span data-i18n="white"></span><input id="hi" type="range" min="90" max="100" step="0.05" value="99.7"></label>
+    <label class="check"><input id="cross" type="checkbox" checked> <span data-i18n="marker"></span></label>
+    <label class="check"><input id="flagView" type="checkbox"> <span data-i18n="showFlagged"></span></label>
+  </section>
+
+  <section>
+    <h3 class="subhead" data-i18n="overlays"></h3>
+    <label class="check"><input id="ovGaia" type="checkbox" checked> <span class="ovkey gaia"></span><span data-i18n="ovGaia"></span></label>
+    <label class="check"><input id="ovSso" type="checkbox" checked> <span class="ovkey sso"></span><span data-i18n="ovSso"></span></label>
+    <p class="muted small" id="ovStatus"></p>
+  </section>
+
+  <section>
+    <h3 class="subhead" data-i18n="share"></h3>
+    <div class="share">
+      <input id="link" class="input sm mono" readonly aria-label="Link">
+      <button id="copy" type="button" class="btn sm" data-i18n="copy"></button>
+    </div>
+    <p class="muted small" data-i18n="shareHelp"></p>
+  </section>
+</aside>
+
+<!-- ================================================================ first-visit guide -->
+<div class="tour" id="tour" hidden role="dialog" aria-live="polite">
+  <p class="tourstep mono" id="tourStep"></p>
+  <p id="tourText"></p>
+  <div class="row">
+    <button type="button" class="btn sm ghost" id="tourSkip" data-i18n="tourSkip"></button>
+    <span class="spacer"></span>
+    <button type="button" class="btn sm primary" id="tourNext" data-i18n="tourNext"></button>
+  </div>
+</div>
+
 <footer class="foot">
-  Data: NASA SPHEREx via <a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noopener">IRSA</a> ·
-  names: <a href="https://cds.unistra.fr/cgi-bin/Sesame" target="_blank" rel="noopener">CDS Sesame</a> ·
-  NASA Space Apps Challenge 2026 — Planet X and SPHEREx
+  <span data-i18n="footData"></span>
 </footer>
 <div class="toast" id="toast" role="status" hidden></div>
 <script src="static/app.js" type="module"></script>
+<script src="static/ui.js" type="module"></script>
 </body>
 </html>
