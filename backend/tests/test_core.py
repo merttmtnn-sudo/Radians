@@ -143,3 +143,14 @@ def test_measure_recovers_flux_over_background():
     # a bad pixel inside the aperture marks the measurement as flagged
     flg[15, 16] = 1 << 10                                  # HOT
     assert stack.measure(img, var, flg, 15, 15)["flagged"]
+
+
+def test_progress_is_reported_per_job():
+    from fastapi.testclient import TestClient
+
+    from app import main
+    main._report("t1", stage="read", done=3, total=10)
+    main._report(None, stage="ignored")
+    c = TestClient(main.app)
+    assert c.get("/api/progress", params={"job": "t1"}).json() == {"stage": "read", "done": 3, "total": 10}
+    assert c.get("/api/progress", params={"job": "nope"}).json() == {}

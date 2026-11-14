@@ -40,7 +40,26 @@ cd backend && ../.venv/bin/uvicorn app.main:app --reload
 # open http://127.0.0.1:8000
 ```
 
-Tests: `cd backend && python -m pytest -q tests`
+Tests: `cd backend && python -m pytest -q tests` and `node --test frontend/tests`
+
+Fill the caches for the five demo targets (a few minutes, once): `cd backend && python scripts/warm.py`
+
+## Deploy (Hugging Face Space)
+
+The `Dockerfile` runs everything in one container on port 7860. Create a **Docker** Space on
+Hugging Face, then:
+
+```bash
+deploy/push_hf.sh <hf-user>/<space-name>
+```
+
+The script pushes the current commit with `deploy/huggingface/README.md` as the Space card.
+Settings (environment variables): `MAX_WORKERS` (parallel IRSA reads, 32 in the container),
+`WARM_ON_START=1` (prepare the demo targets in the background at start-up), `CACHE_DIR`.
+
+**Speed.** A new position needs every SPHEREx exposure that covers it (300–400), about 0.5 MB each over
+HTTP byte ranges, most of it the compressed flag rows. On a home connection this takes a few minutes, in a
+data centre seconds; the page shows how many exposures have been read. Everything is cached afterwards.
 
 ## API
 
@@ -49,6 +68,7 @@ Tests: `cd backend && python -m pytest -q tests`
 | `GET /api/resolve?q=Barnard's Star` | name or coordinates → RA/Dec (+ proper motion) |
 | `GET /api/observations?ra=&dec=` | SPHEREx exposures covering a position |
 | `GET /api/frames?ra=&dec=&fov=300&mode=epoch` | aligned frames (`epoch`, `epoch_detector`, `exposure`) + photometry + candidates |
+| `GET /api/progress?job=` | progress of a running `/api/frames?…&job=` request |
 | `GET /api/photometry?ra=&dec=&fov=&x=&y=` | per-exposure brightness and wavelength at one pixel: an on-the-fly spectrum |
 | `GET /api/gaia?ra=&dec=&radius=` | Gaia DR3 stars (ESA archive), with proper motions |
 | `GET /api/sso?ra=&dec=&radius=&mjd=` | known asteroids and comets in the field at each date (IMCCE SkyBoT) |

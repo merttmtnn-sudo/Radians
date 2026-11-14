@@ -6,7 +6,7 @@ import hashlib
 import math
 import pickle
 import warnings
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -220,20 +220,18 @@ def build_frame(exp: Exposure, ra, dec, n, wout, target) -> Frame | None:
 
 def build_frames(exps: list[Exposure], ra, dec, n, target, progress=None) -> list[Frame]:
     wout = output_wcs(ra, dec, n)
-    frames = []
+    out: list[Frame | None] = [None] * len(exps)
     with ThreadPoolExecutor(config.MAX_WORKERS) as pool:
-        futs = [pool.submit(build_frame, e, ra, dec, n, wout, target) for e in exps]
-        for i, fu in enumerate(futs):
+        futs = {pool.submit(build_frame, e, ra, dec, n, wout, target): i for i, e in enumerate(exps)}
+        for k, fu in enumerate(as_completed(futs), 1):
+            i = futs[fu]
             try:
-                fr = fu.result()
+                out[i] = fu.result()
             except Exception as ex:      # one bad file must not sink the whole request
                 print("skip", exps[i].obs_id, exps[i].detector, repr(ex)[:200])
-                fr = None
-            if fr is not None:
-                frames.append(fr)
             if progress:
-                progress(i + 1, len(futs))
-    return frames
+                progress(k, len(futs))
+    return [f for f in out if f is not None]
 
 
 # ---------------------------------------------------------------- grouping

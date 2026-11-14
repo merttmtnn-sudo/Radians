@@ -1,7 +1,8 @@
-fastapi>=0.115
-uvicorn[standard]>=0.32
-astropy>=7.0
-pyvo>=1.6
-numpy>=2.0
-scipy>=1.14
-requests>=2.32
+# pinned: fitsrange.py uses astropy's internal Rice1 codec, which may move between releases
+fastapi==0.162.7
+uvicorn[standard]==0.54.0
+astropy==8.0.2
+pyvo==1.10.0
+numpy==2.5.4
+scipy==1.18.1
+requests==2.34.2

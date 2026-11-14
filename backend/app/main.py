@@ -3,7 +3,10 @@
 """
 from __future__ import annotations
 
+import math
+import os
 import threading
+import time
 from collections import OrderedDict
 from pathlib import Path
 
@@ -55,9 +58,21 @@ def observations(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., g
 # switching views does not re-read hundreds of exposures.
 _built: OrderedDict = OrderedDict()
 _built_lock = threading.Lock()
+# progress of running /api/frames requests, keyed by a client-chosen job id (polled by the page)
+_progress: OrderedDict = OrderedDict()
 
 
-def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures):
+def _report(job, **kw):
+    if not job:
+        return
+    with _built_lock:
+        _progress[job] = {**_progress.get(job, {}), **kw}
+        _progress.move_to_end(job)
+        while len(_progress) > 200:
+            _progress.popitem(last=False)
+
+
+def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job=None):
     fov = min(max(fov, config.MIN_FOV), config.MAX_FOV)
     n = int(round(fov / config.PIXEL_SCALE)) | 1                     # odd -> target on a pixel centre
     dets = tuple(sorted({int(d) for d in detectors.split(",") if d.strip().isdigit()}))
@@ -66,6 +81,7 @@ def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures):
         if key in _built:
             _built.move_to_end(key)
             return _built[key]
+    _report(job, stage="search")
     exps = [e for e in _exposures(ra, dec) if e.detector in dets]
     if len(exps) > max_exposures:                                   # thin evenly in time
         idx = np.linspace(0, len(exps) - 1, max_exposures).round().astype(int)
@@ -76,7 +92,9 @@ def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures):
     mean_mjd = float(np.mean([e.mjd for e in exps]))
     cra, cdec = stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mean_mjd)
     target = lambda mjd: stack.propagate(ra, dec, pmra, pmdec, ref_epoch, mjd)  # noqa: E731
-    frs = stack.build_frames(exps, cra, cdec, n, target)
+    _report(job, stage="read", done=0, total=len(exps))
+    frs = stack.build_frames(exps, cra, cdec, n, target, progress=lambda i, k: _report(job, done=i, total=k))
+    _report(job, stage="process")
     if not frs:
         raise HTTPException(502, "could not read any SPHEREx exposure for this position")
     built = {"frs": frs, "n": n, "ra": cra, "dec": cdec, "w": stack.output_wcs(cra, cdec, n)}
@@ -99,8 +117,9 @@ def frames(
     ref_epoch: float = Query(2000.0, description="Julian year of ra/dec when pm is given"),
     max_exposures: int = Query(400, ge=1, le=2000),
     candidates: bool = Query(True, description="run the moving / variable / transient finder"),
+    job: str | None = Query(None, max_length=40, pattern=r"^[A-Za-z0-9_-]+$", description="id for /api/progress"),
 ):
-    b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures)
+    b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job)
     if b is None:
         return {"grid": None, "frames": [], "exposures": [], "message": "SPHEREx has not observed this position yet."}
     frs, n, w = b["frs"], b["n"], b["w"]
@@ -123,6 +142,13 @@ def frames(
         "frames": out_frames, "exposures": phot, "n_exposures_read": len(frs),
         "candidates": cands, "detectors": config.DETECTORS,
     }
+
+
+@app.get("/api/progress")
+def progress(job: str = Query(..., max_length=40)):
+    """How far a running /api/frames request with the same job id has got."""
+    with _built_lock:
+        return _progress.get(job, {})
 
 
 @app.get("/api/photometry")
@@ -184,3 +210,39 @@ if FRONTEND.exists():
     @app.get("/")
     def index():
         return FileResponse(FRONTEND / "index.html")
+
+
+# ---------------------------------------------------------------- warm-up of the demo targets
+DEMO = [("Barnard's Star", "1,2,3,4,5,6"), ("eps Indi B", "1,2,3,4,5,6"), ("WISE J085510.83-071442.5", "6"),
+        ("RW Aur", "1,2,3,4,5,6"), ("R Dra", "1,2,3,4,5,6")]
+
+
+def warm(targets=DEMO, fov=240):
+    """Run the demo targets exactly as the page asks for them (same rounding, so every cache key
+    matches): frames, Gaia, SkyBoT and NEOSSat. Slow the first time, instant afterwards."""
+    r6 = lambda v: float(f"{v:.6f}")  # noqa: E731
+    for q, dets in targets:
+        t0 = time.time()
+        try:
+            tg = archive.resolve(q)
+            d = frames(ra=r6(tg["ra"]), dec=r6(tg["dec"]), fov=fov, mode="epoch", detectors=dets, pmra=tg.get("pmra"),
+                       pmdec=tg.get("pmdec"), ref_epoch=2000.0, max_exposures=400, candidates=True, job=None)
+            g = d["grid"]
+            if g:
+                ra, dec, rdeg = r6(g["ra"]), r6(g["dec"]), g["fov"] / 3600 / math.sqrt(2)
+                for fn, args in ((external.gaia, (ra, dec, round(rdeg, 4), 19.0)),
+                                 (external.skybot, (ra, dec, math.ceil(rdeg * 3600), [round(f["mjd"], 3) for f in d["frames"][:40]])),
+                                 (external.neossat, (ra, dec, 0.25))):
+                    try:
+                        fn(*args)
+                    except Exception as e:           # an external service being down must not stop the warm-up
+                        print(f"warm {q}: {fn.__name__} failed: {e!r}"[:200])
+            print(f"warm {q}: {len(d['frames'])} frames in {time.time() - t0:.0f}s", flush=True)
+        except Exception as e:
+            print(f"warm {q} failed: {e!r}"[:300], flush=True)
+
+
+@app.on_event("startup")
+def _warm_on_start():
+    if os.getenv("WARM_ON_START", "0") == "1":
+        threading.Thread(target=warm, name="warm", daemon=True).start()

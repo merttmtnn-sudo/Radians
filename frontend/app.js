@@ -10,7 +10,7 @@ const els = Object.fromEntries([
   'search', 'q', 'fov', 'mode', 'go', 'sky', 'overlay', 'stage', 'empty', 'loading', 'loadingMsg', 'loadingSub',
   'play', 'prev', 'next', 'scrub', 'fps', 'fpsVal', 'timeline', 'frameInfo', 'cursor', 'stretch', 'cmap', 'lo', 'hi',
   'cross', 'flagView', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'view', 'viewHelp', 'detchips',
-  'preset', 'cands', 'candCount', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples',
+  'preset', 'loadingBar', 'cands', 'candCount', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples',
 ].map(id => [id, $(id)]));
 
 const ALL_DETS = [1, 2, 3, 4, 5, 6];
@@ -109,9 +109,11 @@ async function run(opts) {
   stop();
   els.empty.hidden = true;
   const t0 = performance.now();
+  let poll = null, showProgress = false;
+  els.loadingBar.hidden = true;
   const tick = setInterval(() => {
     const s = Math.round((performance.now() - t0) / 1000);
-    els.loadingSub.textContent = s < 8 ? '' : t('slow', { s });
+    if (!showProgress) els.loadingSub.textContent = s < 8 ? '' : t('slow', { s });
   }, 1000);
   try {
     let target;
@@ -123,9 +125,24 @@ async function run(opts) {
     }
     state.target = target;
     setLoading(true, t('reading'));
+    const job = Math.random().toString(36).slice(2, 12);
+    poll = setInterval(async () => {
+      try {
+        const p = await api('api/progress', { job }, ctl.signal);
+        if (p.stage === 'read' && p.total) {
+          showProgress = true;
+          els.loadingSub.textContent = t('readingN', { done: p.done, total: p.total, pct: Math.round(100 * p.done / p.total) });
+          els.loadingBar.hidden = false;
+          els.loadingBar.value = p.done / p.total;
+        } else if (p.stage === 'process') {
+          els.loadingSub.textContent = t('processing');
+          els.loadingBar.value = 1;
+        }
+      } catch { /* progress is cosmetic */ }
+    }, 1000);
     const data = await api('api/frames', {
       ra: target.ra.toFixed(6), dec: target.dec.toFixed(6), fov: opts.fov, mode: opts.mode,
-      pmra: target.pmra, pmdec: target.pmdec, detectors: [...state.dets].sort().join(','),
+      pmra: target.pmra, pmdec: target.pmdec, detectors: [...state.dets].sort().join(','), job,
     }, ctl.signal);
     if (!data.frames || !data.frames.length) {
       state.data = null;
@@ -144,7 +161,8 @@ async function run(opts) {
     }
   } finally {
     clearInterval(tick);
-    if (state.abort === ctl) setLoading(false);
+    clearInterval(poll);
+    if (state.abort === ctl) { setLoading(false); els.loadingBar.hidden = true; }
   }
 }
 
