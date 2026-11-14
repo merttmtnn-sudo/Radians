@@ -346,6 +346,7 @@ export class Sky {
   onScreen(q, m = 40) { return q && q[0] > -m && q[1] > -m && q[0] < this.W + m && q[1] < this.H + m; }
   label(text, x, y, color, size = 12, align = 'left', force = false, bold = false) {
     const ctx = this.ctx;
+    if (this.cinema) return false;   // cinema mode: sky and ground only
     if (this.flatBand && !force && y > this.H * (1 - this.flatBand) - 2 * this.dpr) return false;   // behind the ground band
     ctx.font = `${bold ? '600 ' : ''}${size * this.dpr}px Segoe UI, system-ui, sans-serif`;
     const w = ctx.measureText(text).width, h = size * this.dpr;
@@ -406,32 +407,31 @@ export class Sky {
     if (L.galactic) this.polyline(this.galLine, 'j2000', 'rgba(200,120,255,0.65)', 1.2, [6, 4]);
     if (L.meridian) this.polyline(this.meridianLine, 'hor', 'rgba(120,255,170,0.6)', 1.1);
     if (L.constBounds) for (const b of this.boundLines) this.polyline(b, 'j2000', 'rgba(255,170,80,0.28)', 0.8, [3, 3]);
-    if (L.constLines) {
-      const a = 0.25 + 0.4 * starFade;
+    if (L.constLines && !this.cinema) {
+      const a = (0.25 + 0.4 * starFade) * (this.sparse ? 0.5 : 1);   // sparse: thin, faint lines
       for (const c of this.consLines) for (const l of c.lines) this.polyline(l, 'j2000', `rgba(110,160,255,${a})`, 1);
     }
 
     // deep-sky objects
-    if (L.dsos && starFade > 0.1) this.drawDsos(lim);
+    if (L.dsos && starFade > 0.1 && !this.cinema) this.drawDsos(lim);
 
     // stars (catalog dots are optional on top of SPHEREx imagery; names are always available)
     this.drawStars(lim, starFade, now, ss, !imagery || this.layers.stars);
-    this.drawCatalogs();
+    if (!this.cinema) this.drawCatalogs();
 
     // solar system
     this.drawSolarSystem(ss, lim);
 
     // SPHEREx targets & current target
-    this.drawTargets();
+    if (!this.cinema) this.drawTargets();
 
     // ground
     if (L.ground) this.drawGround(ss);
     if (L.azGrid || (L.ground && !this.flatBand)) this.polyline(this.horizonLine, 'hor', 'rgba(255,160,90,0.55)', 1);
-    if (L.cardinal) this.drawCardinal();
+    if (L.cardinal && !this.cinema) this.drawCardinal();
 
     // labels (after ground)
-    this.drawLabels(lim, starFade, ss);
-    this.drawSelection(now);
+    if (!this.cinema) { this.drawLabels(lim, starFade, ss); this.drawSelection(now); }
     this.dirty = false;
   }
 
@@ -763,7 +763,7 @@ export class Sky {
     // SPHEREx targets
     for (const { t, q } of this.targetQ || []) this.label(t.current ? '◎ ' + (t.name || 'Target') : t.name, q[0] + 10 * this.dpr, q[1] + 4 * this.dpr, t.current ? '#66d9ff' : '#ffb27a', 12, 'left', true);
     // constellations
-    if (this.layers.constNames && fade > 0.05) for (const c of this.cons) {
+    if (this.layers.constNames && !this.sparse && fade > 0.05) for (const c of this.cons) {
       if (this.view.fov > 120 && c.rank > 2) continue;
       if (this.isBelow(c.v)) continue;
       const q = this.project(this.j2view(c.v, false));
@@ -772,7 +772,7 @@ export class Sky {
       this.label(lang === 'en' || lang === 'la' ? nm.toUpperCase() : nm, q[0], q[1], `rgba(140,180,255,${0.35 + 0.45 * fade})`, 11.5, 'center');
     }
     // DSO labels
-    if (this.layers.dsos && this.opt.dsoLabels && fade > 0.1) for (const d of this.dsos) {
+    if (this.layers.dsos && this.opt.dsoLabels && !this.sparse && fade > 0.1) for (const d of this.dsos) {
       if (!d._q || !this.onScreen(d._q, 0)) { d._q = null; continue; }
       if (this.view.fov > 60 && !(d.mag < 6)) { d._q = null; continue; }
       this.label(d.id + (d.alt && this.view.fov < 40 ? ' ' + d.alt : ''), d._q[0] + d._r + 3 * this.dpr, d._q[1] + 3 * this.dpr, 'rgba(140,210,255,0.75)', 11);
@@ -780,7 +780,7 @@ export class Sky {
     }
     // star names
     if (this.opt.starLabels && fade > 0.05 && this.starScreen) {
-      const maxN = this.view.fov > 100 ? 25 : this.view.fov > 40 ? 60 : 200;
+      const maxN = this.sparse ? (this.view.fov > 40 ? 15 : 40) : this.view.fov > 100 ? 25 : this.view.fov > 40 ? 60 : 200;
       let n = 0;
       for (const [i, x, y, r] of this.starScreen) {
         if (n >= maxN) break;

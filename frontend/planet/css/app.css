@@ -272,3 +272,4 @@ body.embed #skyInfo.card .type { padding-right: 18px; font-size: 11px; text-tran
 body.embed #skyInfo.card .x { position: absolute; right: 8px; top: 6px; background: none; border: 0; color: var(--muted); font-size: 18px; cursor: pointer; }
 body.embed #skyInfo.card .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 body.embed #skyInfo.card .note { margin: -4px 0 10px; font-size: 12.5px; color: var(--muted); }
+body.embed.cinema #skyInfo { display: none !important; }

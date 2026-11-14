@@ -550,6 +550,7 @@ function embedBoot() {
   sky.view.fov = 100;
   sky.opt.lang = pageLang() === 'tr' ? 'tr' : 'en';
   sky.layers.stars = true; sky.layers.atmosphere = false;
+  sky.sparse = true;   // only the brightest names; faint constellation lines
   sky.dirty = true;
   // daytime: jump to 21:00 tonight (the "Now" button still goes to the real time)
   let checked = false;
@@ -565,9 +566,17 @@ function embedBoot() {
 // that the horizon below the centre rises above the band, so stars right above the horizon stay in view
 // and the ground keeps its shape. Looking up lets the band hide less sky; dragging down stops at it.
 const BAND = 0.12;
+const DOME = 70;   // half-width of the opening view, degrees: a ~140 degree dome
 function holdHorizon() {
   if (!sky.W || !sky.H) return;
   const v = sky.view;
+  if (!sky.domeSet && v.proj !== 'cyl') {
+    // first frame: open ~140 degrees across (vertical field from the frame shape; tall phones capped)
+    sky.domeSet = true;
+    sky.setupFrame();
+    const f = 2 * sky.P.gi(sky.P.g(DOME * D2R) * sky.H / sky.W) * R2D;
+    if (isFinite(f)) v.fov = Math.min(f, 120);
+  }
   sky.flatBand = sky.layers.ground && v.mount === 'altaz' ? BAND : 0;
   sky.setupFrame();
   const P = sky.P;
@@ -588,6 +597,7 @@ window.radiansSky = {
   now() { sky.setDate(new Date()); sky.setRate(1); },
   setRate(r) { sky.setRate(r); },
   setCons(on) { sky.layers.constLines = on; sky.layers.constNames = on; sky.dirty = true; saveOpts(); report(); },
+  setCinema(on) { sky.cinema = !!on; document.body.classList.toggle('cinema', sky.cinema); sky.dirty = true; },
   setPalette: setPal,
   setPlace(i) {
     if (i === 'geo') return $('#locGeo').click();

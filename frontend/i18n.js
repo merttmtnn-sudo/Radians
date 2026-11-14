@@ -5,7 +5,7 @@ const STRINGS = {
   en: {
     mapBtn: "Map", planetBtn: "Planetarium", skyEyebrow: "Planetarium", skyTitle: "Tonight’s sky, through SPHEREx’s infrared eyes",
     skySub: "The real sky above you: stars, planets and constellations drawn over SPHEREx’s infrared image of the whole sky. Drag to look around, scroll to zoom, click anything.",
-    skyCons: "Constellations", skyAdv: "Advanced", skyFull: "Full screen", skyFast: "Let the sky turn (15 minutes per second)", skyNow: "Now", skyLive: "live",
+    skyCons: "Constellations", skyCine: "Cinema", skyCineTip: "Only the sky and the ground, no labels or lines", skyAdv: "Advanced", skyFull: "Full screen", skyFast: "Let the sky turn (15 minutes per second)", skyNow: "Now", skyLive: "live",
     skyPlace: "Place", skyMyLoc: "My location", skyFamous: "Famous sights", skyPlanets: "Planets",
     skyHint: "Daytime? The sky opens at 21:00 tonight. Drag the time bar through the night, or press the round button to let the sky turn. Click a star or a nebula: the card can blink it in Radians or open the full science tool.",
     skyCredit: "Planetarium engine: Emre Bozkaya (SPHEREx Sky Explorer). Sky: NASA SPHEREx DR1 (IRSA). Stars and constellations: d3-celestial.", mapEyebrow: "102 infrared colours", mapTitle: "The whole sky, as SPHEREx sees it",
@@ -202,7 +202,7 @@ const STRINGS = {
   tr: {
     mapBtn: "Harita", planetBtn: "Planetaryum", skyEyebrow: "Planetaryum", skyTitle: "Bu gece gökyüzü, SPHEREx’in kızılötesi gözüyle",
     skySub: "Başınızın üstündeki gerçek gökyüzü: yıldızlar, gezegenler ve takımyıldızlar, SPHEREx’in tüm gökyüzünün kızılötesi görüntüsü üzerinde. Sürükleyerek etrafa bakın, tekerlekle yakınlaşın, istediğiniz şeye tıklayın.",
-    skyCons: "Takımyıldızlar", skyAdv: "Gelişmiş", skyFull: "Tam ekran", skyFast: "Gökyüzü dönsün (saniyede 15 dakika)", skyNow: "Şimdi", skyLive: "canlı",
+    skyCons: "Takımyıldızlar", skyCine: "Sinema", skyCineTip: "Yalnız gök ve zemin; yazı ve çizgi yok", skyAdv: "Gelişmiş", skyFull: "Tam ekran", skyFast: "Gökyüzü dönsün (saniyede 15 dakika)", skyNow: "Şimdi", skyLive: "canlı",
     skyPlace: "Konum", skyMyLoc: "Konumum", skyFamous: "Ünlü nesneler", skyPlanets: "Gezegenler",
     skyHint: "Gündüz mü? Gökyüzü bu gece 21:00 ile açılır. Zaman çubuğunu gece boyunca sürükleyin ya da yuvarlak düğmeye basıp gökyüzünü döndürün. Bir yıldıza ya da bulutsuya tıklayın: karttan Radians’ta blink’leyebilir ya da tam bilimsel aracı açabilirsiniz.",
     skyCredit: "Planetaryum motoru: Emre Bozkaya (SPHEREx Sky Explorer). Gökyüzü: NASA SPHEREx DR1 (IRSA). Yıldızlar ve takımyıldızlar: d3-celestial.", mapEyebrow: "102 kızılötesi renk", mapTitle: "Tüm gökyüzü, SPHEREx’in gözünden",

@@ -6,7 +6,7 @@ import { gradient } from './palette.js';
 
 const $ = (id) => document.getElementById(id);
 const root = document.documentElement;
-const sky = { frame: null, api: null, state: null, pal: 'rgb', cons: true, fast: false, adv: false, dragging: false };
+const sky = { frame: null, api: null, state: null, pal: 'rgb', cons: true, cine: false, fast: false, adv: false, dragging: false };
 try { sky.pal = localStorage.getItem('radians-skypal') || 'rgb'; } catch { /* private mode */ }
 
 const PALS = { rgb: 'palRgb', gray: 'palGray', inferno: 'palInferno', viridis: 'palViridis' };
@@ -52,6 +52,7 @@ function load() {
       sky.api = api;
       api.setPalette(sky.pal);
       api.setCons(sky.cons);
+      api.setCinema?.(sky.cine);
       if (sky.fast) api.setRate(900);
     };
     ready();
@@ -151,6 +152,12 @@ $('skyCons').onclick = () => {
   sky.cons = !sky.cons;
   $('skyCons').setAttribute('aria-pressed', String(sky.cons));
   sky.api?.setCons(sky.cons);
+};
+$('skyCine').onclick = () => {
+  sky.cine = !sky.cine;
+  $('skyCine').setAttribute('aria-pressed', String(sky.cine));
+  $('skyCons').disabled = sky.cine;
+  sky.api?.setCinema?.(sky.cine);
 };
 $('skyAdv').onclick = () => {
   sky.adv = !sky.adv;
