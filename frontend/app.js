@@ -650,6 +650,9 @@ els.examples.onclick = (e) => {
   els.q.value = b.dataset.q;
   setSelect(els.fov, b.dataset.fov || '240');
   setDets(b.dataset.det ? b.dataset.det.split(',').map(Number) : ALL_DETS);
+  // data-wl="0": wavelength matching off. Across two detectors (WISE 0855: D5+D6) matching keeps
+  // only 1–2 exposures per epoch, too few to see a faint target; each detector co-added on its own is enough.
+  els.wlMatch.checked = b.dataset.wl !== '0';
   run({ q: b.dataset.q, fov: els.fov.value, mode: els.mode.value });
 };
 window.addEventListener('popstate', fromUrl);

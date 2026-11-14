@@ -11,7 +11,7 @@ Trim to the length the submission form allows; the first 30 seconds stand on the
 | 0:18 | Switch *View* to **Frame − median** | “Subtracting the median makes the fixed stars vanish. What is left moved.” |
 | 0:26 | Point at the **Candidates** list (moving, 10.4″/yr) | “The finder measured its motion automatically, close to the catalogue value.” |
 | 0:32 | Click **ε Indi B** | “Same for a pair of nearby brown dwarfs: 4.65 arcseconds a year, matching the catalogue value.” |
-| 0:42 | Click **WISE 0855 (D6)** | “The coldest brown dwarf known only shines at the longest SPHEREx wavelengths; Radians shows it in detector 6.” |
+| 0:42 | Click **WISE 0855 (D5+D6)** | “The coldest brown dwarf known only shines at the longest SPHEREx wavelengths, detectors 5 and 6. The finder still catches it moving, 8 arcseconds a year.” |
 | 0:52 | Click **RW Aurigae**, open **Light curve** tab | “Things also change brightness. RW Aurigae doubled between visits; every detector agrees.” |
 | 1:02 | **Spectrum** tab, then click another star in the image | “Because SPHEREx’s filters vary across the detector, every star gets a spectrum for free. Click any star.” |
 | 1:12 | Gaia circles and NEOSSat panel; open **Wider sky context** | “Gaia stars, known asteroids and Canada’s NEOSSat archive tell you what is already known.” |

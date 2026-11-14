@@ -199,7 +199,7 @@ SIMBAD database and Aladin, operated at CDS, Strasbourg, France, and of IMCCE's 
 - **Views** (computed instantly in the browser): images, *frame − median of all* (static sky cancels,
   movers and variables stay), *frame − previous*, *frame − first*, and a deep *stack* of every frame.
 - **Detectors**: pick D1–D6 or a preset. Cold brown dwarfs such as WISE 0855 are bright only at
-  4–5 µm, so try *D6 only*.
+  4–5 µm, so try *D5+D6* with wavelength matching off (the *WISE 0855* button does this).
 - **Candidate finder**: every query also runs a simple search that
   - co-adds each visit only at wavelengths every visit sampled (**wavelength matching**: SPHEREx has
     no filters, so without it a colour difference between visits looks like a change),
@@ -210,7 +210,8 @@ SIMBAD database and Aladin, operated at CDS, Strasbourg, France, and of IMCCE's 
   - flags sources seen in one epoch and truly absent in the others → **one epoch only**.
 
   On the challenge targets it recovers Barnard's Star (10.38″/yr, PA 354°; catalogue 10.39″/yr, 356°),
-  ε Indi B (4.65″/yr, PA 125°; catalogue 4.68″/yr, 123°) and the variability of RW Aurigae (×1.7).
+  ε Indi B (4.65″/yr, PA 125°; catalogue 4.68″/yr, 123°), WISE 0855 with D5+D6 (8.16″/yr, PA 285°;
+  catalogue 8.15″/yr, 275°; see [Validation](docs/VALIDATION.md#wise-0855)) and the variability of RW Aurigae (×1.7).
   Candidates are suggestions to check by eye, each with a SIMBAD link.
 
 ## Using the viewer

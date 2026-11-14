@@ -83,7 +83,7 @@ def save(frames, path, ms=700):
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     reel = []
-    for q, dets in DEMO:
+    for q, dets, *_ in DEMO:
         fr = render(q, dets)
         slug = "".join(c if c.isalnum() else "-" for c in q.lower()).strip("-")
         save(fr, OUT / f"{slug}.gif")
