@@ -165,3 +165,6 @@ summary { cursor: pointer; color: var(--muted); }
 /* ---------------------------------------------------------------- phase 5 */
 #loadingBar { width: min(320px, 80%); height: 6px; margin: 4px 0 8px; accent-color: var(--accent); }
 #loadingBar[hidden] { display: none; }
+.tag.new { border-color: #ff6fb5; color: #ffc2e1; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--accent2); text-decoration: underline; cursor: pointer; font-size: inherit; }
+#photCsv { padding: 4px 10px; }

@@ -350,12 +350,14 @@ function renderCandidates() {
     head.append(dot, el('b', '', t(c.type)), el('span', 'small', ' ' + candText(c)));
     head.onclick = () => { state.selected = state.selected === i ? null : i; renderCandidates(); drawOverlay(); };
     li.append(head);
-    if (c.is_target || c.low_confidence) {
-      const tags = el('div', 'tags');
-      if (c.is_target) tags.append(el('span', 'tag', t('isTarget')));
-      if (c.low_confidence) tags.append(el('span', 'tag warn', t('lowConf')));
-      li.append(tags);
-    }
+    const known = catalogMatch(c);
+    const tags = el('div', 'tags');
+    if (c.is_target) tags.append(el('span', 'tag', t('isTarget')));
+    if (known === 'unchecked') { /* Gaia not loaded (yet): say nothing */ }
+    else if (known) tags.append(el('span', 'tag', t('knownGaia', { g: known.g?.toFixed(1) ?? '?', pm: (Math.hypot(known.pmra || 0, known.pmdec || 0) / 1000).toFixed(2) })));
+    else tags.append(el('span', 'tag new', t('notInGaia')));
+    if (c.low_confidence) tags.append(el('span', 'tag warn', t('lowConf')));
+    if (tags.childElementCount) li.append(tags);
     if (i === state.selected) {
       const d = el('div', 'canddetail small');
       d.append(el('div', '', `${formatRA(c.ra)} ${formatDec(c.dec)}`));
@@ -363,7 +365,13 @@ function renderCandidates() {
       a.href = `https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=${c.ra.toFixed(5)}+${c.dec >= 0 ? '%2B' : ''}${c.dec.toFixed(5)}&Radius=15&Radius.unit=arcsec`;
       a.target = '_blank';
       a.rel = 'noopener';
-      d.append(a);
+      const rep = el('button', 'linkbtn', t('copyReport'));
+      rep.type = 'button';
+      rep.onclick = async () => {
+        try { await navigator.clipboard.writeText(candReport(c, known)); toast(t('copied')); }
+        catch { toast(t('copyFail'), true); }
+      };
+      d.append(a, document.createTextNode(' · '), rep);
       li.append(d);
     }
     return li;
@@ -371,6 +379,41 @@ function renderCandidates() {
 }
 
 els.showCands.onchange = drawOverlay;
+
+// Is this candidate a star Gaia DR3 already lists? (Gaia moved to the candidate's date; a mover must
+// also move like the Gaia star.) Returns the Gaia source, null (not in Gaia) or 'unchecked'.
+function catalogMatch(c) {
+  if (typeof ex === 'undefined' || !ex.gaia || !ex.gaia.length || !state.data) return 'unchecked';
+  const mjd = c.mjd ?? (c.points?.length ? c.points[0].mjd : currentMjd());
+  const cosd = Math.cos(c.dec * Math.PI / 180);
+  let best = null, bd = 1e9;
+  for (const s of ex.gaia) {
+    const [ra, dec] = gaiaAt(s, mjd);
+    const d = Math.hypot((ra - c.ra) * cosd, dec - c.dec) * 3600;
+    if (d < bd) { bd = d; best = s; }
+  }
+  if (!best || bd > 7) return null;                        // ~1 SPHEREx pixel
+  if (c.type === 'moving') {
+    const pm = Math.hypot(best.pmra || 0, best.pmdec || 0) / 1000;
+    if (Math.abs(pm - c.rate_arcsec_yr) > Math.max(1.5, 0.3 * pm)) return null;
+  }
+  return best;
+}
+
+function candReport(c, known) {
+  const g = state.data.grid, fs = state.data.frames;
+  const lines = [
+    'Radians candidate report (NASA SPHEREx)',
+    `Type: ${t(c.type)}: ${candText(c)}`,
+    `Position (ICRS): ${formatRA(c.ra)} ${formatDec(c.dec)} = ${c.ra.toFixed(5)} ${c.dec.toFixed(5)} deg`,
+    `Visits: ${fs.length}, ${fs[0].date_start.slice(0, 10)} to ${fs[fs.length - 1].date_end.slice(0, 10)}; detectors ${[...state.dets].sort().map(d => 'D' + d).join(' ')}`,
+    `Field: ${formatRA(g.ra)} ${formatDec(g.dec)}, ${(g.fov / 60).toFixed(1)}' wide`,
+    `Gaia DR3: ${known === 'unchecked' ? 'not checked' : known ? `source ${known.id}, G ${known.g?.toFixed(2)}, pm ${(Math.hypot(known.pmra || 0, known.pmdec || 0) / 1000).toFixed(3)}"/yr` : 'no match within 7" (G < 19)'}`,
+    `View: ${location.href}`,
+    `SIMBAD: https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=${c.ra.toFixed(5)}+${c.dec >= 0 ? '%2B' : ''}${c.dec.toFixed(5)}&Radius=15&Radius.unit=arcsec`,
+  ];
+  return lines.join('\n');
+}
 
 // ------------------------------------------------------------------ frame info
 function show(i) {
@@ -741,6 +784,17 @@ function renderAnalysis() {
 
 for (const b of e4.analysis.querySelectorAll('[data-tab]')) b.onclick = () => { ex.tab = b.dataset.tab; renderAnalysis(); };
 e4.photMode.onchange = renderAnalysis;
+$('photCsv').onclick = () => {
+  if (!ex.phot) return;
+  const cols = ['date', 'mjd', 'detector', 'wavelength', 'bandwidth', 'flux_ujy', 'err_ujy', 'wing_ujy', 'background', 'flagged', 'saturated', 'flags', 'obs_id'];
+  const rows = [cols.join(','), ...ex.phot.map(p => cols.map(k => p[k] ?? '').join(','))];
+  const where = ex.click ? `${ex.click.ra.toFixed(5)}_${ex.click.dec.toFixed(5)}` : (state.target.name || 'target').replace(/[^A-Za-z0-9]+/g, '-');
+  const a = el('a');
+  a.href = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' }));
+  a.download = `radians-${where}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
 e4.photFlagged.onchange = renderAnalysis;
 window.addEventListener('resize', () => { clearTimeout(ex.rt); ex.rt = setTimeout(renderAnalysis, 200); });
 
@@ -753,7 +807,7 @@ function loadCatalogues() {
   const centre = { ra: d.grid.ra.toFixed(6), dec: d.grid.dec.toFixed(6) };
   const live = () => state.data === d;
   api('api/gaia', { ...centre, radius: rDeg.toFixed(4) })
-    .then(r => { if (live()) { ex.gaia = r.sources || []; drawOverlay(); if (ex.aladin) setAladinCats(); } }).catch(() => {});
+    .then(r => { if (live()) { ex.gaia = r.sources || []; drawOverlay(); renderCandidates(); if (ex.aladin) setAladinCats(); } }).catch(() => {});
   api('api/sso', { ...centre, radius: Math.ceil(rDeg * 3600), mjd: d.frames.slice(0, 40).map(f => f.mjd.toFixed(3)).join(',') })
     .then(r => { if (live()) { ex.sso = r || []; drawOverlay(); } }).catch(() => {});
 }

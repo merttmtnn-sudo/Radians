@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 IRSA_SIA = os.getenv("IRSA_SIA", "https://irsa.ipac.caltech.edu/SIA")
-COLLECTIONS = [c.strip() for c in os.getenv("SPHEREX_COLLECTIONS", "spherex_dr1").split(",") if c.strip()]
+COLLECTIONS = [c.strip() for c in os.getenv("SPHEREX_COLLECTIONS", "spherex_qr3,spherex_dr1").split(",") if c.strip()]
 # CDS Sesame and its mirrors, tried in order (the main site redirects to a mirror that can be slow)
 SESAME = [
     "https://cds.unistra.fr/cgi-bin/nph-sesame/-oxp/SNV",

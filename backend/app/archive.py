@@ -75,7 +75,11 @@ def query_exposures(ra: float, dec: float) -> list[Exposure]:
 
 # ---------------------------------------------------------------- targets
 def parse_coords(text: str):
-    t = text.strip().replace(",", " ")
+    t = text.strip()
+    # decimal commas ("269,45 4,69") vs a comma between the two numbers ("269.45, 4.69")
+    if re.fullmatch(r"[+-]?\d+,\d+\s+[+-]?\d+,\d+", t):
+        t = t.replace(",", ".")
+    t = t.replace(",", " ")
     parts = t.split()
     try:
         if len(parts) == 2 and all(re.fullmatch(r"[+-]?\d+(\.\d*)?", p) for p in parts):

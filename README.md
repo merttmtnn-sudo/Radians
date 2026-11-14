@@ -19,6 +19,25 @@ NASA Space Apps Challenge 2026 — *Planet X and SPHEREx*.
 Slides: [`frontend/slides.html`](frontend/slides.html) (served at `/static/slides.html`) ·
 demo reel: [`docs/media/radians-demo.gif`](docs/media/radians-demo.gif) · recording script: [`docs/demo-script.md`](docs/demo-script.md)
 
+## What the challenge asked for
+
+The challenge asks for a public web tool that shows SPHEREx images of any RA/Dec "like a little video".
+Its optional ideas, and where Radians stands:
+
+| Suggestion on the challenge page | Radians |
+|---|---|
+| Easy to update with new data releases | Yes. Every public SPHEREx release in IRSA is searched (`spherex_qr3` and `spherex_dr1` today; one setting to add the next), and the exposure list is refreshed twice a day. |
+| Add each detector's data to improve signal-to-noise; spectra on the fly | Yes. Inverse-variance co-adds per visit (and per visit and detector); a 0.75–5 µm spectrum of any pixel on request. |
+| Add or subtract images from different times | Yes. Frame − median, frame − previous, frame − first, and a deep stack. |
+| Let users choose the field of view | Yes. 2′ to 20′. |
+| Overlay Gaia or WISE | Yes. Gaia DR3 drawn on the image at each frame's date; every candidate is checked against Gaia; Aladin Lite with AllWISE, 2MASS, CatWISE2020 and SPHEREx maps. |
+| Coordinates in the URL, embeddable | Yes. Every view is a link (`?ra=&dec=&fov=&det=&view=…`); `embed=1` hides the page chrome. |
+| Contamination flags | Yes. Per-pixel SPHEREx flags shown on demand, summarised per frame, and used to mark doubtful measurements. |
+| Public tools (Astropy, Aladin) | Astropy and PyVO throughout; Aladin Lite (CDS) for the wider view. |
+
+Beyond the list: known asteroids from IMCCE SkyBoT, archived NEOSSat images from the Canadian Space
+Agency, a candidate report you can copy, CSV export of every measurement, English and Turkish.
+
 ## How it works
 
 1. You type coordinates (`08h55m10.8s -07d14m42s`, `133.795 -7.245`) or a name (`Barnard's Star`).
@@ -89,11 +108,48 @@ data centre seconds; the page shows how many exposures have been read. Everythin
 | `GET /api/sso?ra=&dec=&radius=&mjd=` | known asteroids and comets in the field at each date (IMCCE SkyBoT) |
 | `GET /api/neossat?ra=&dec=&radius=` | archived NEOSSat images of the area (CSA, via CADC) |
 
+## Limitations
+
+- SPHEREx pixels are 6.15″: motions below about 1″ a year do not show between visits a year apart.
+- Saturated stars have no usable core. Their brightness comes from the PSF wings (relative only), and
+  motion measured on them is rough (Barnard's Star: 11.7″/yr against 10.4″/yr).
+- Each SPHEREx exposure sees a position at a different wavelength, so a visit's co-add is a mix of
+  colours. A very red or very blue star can look slightly brighter or fainter between visits that
+  sampled different wavelengths; the variability finder asks for agreement between detectors to
+  limit this, but it is not a full wavelength-matched comparison.
+- Asteroids move within a visit and blur in the co-adds; SkyBoT marks the known ones per exposure.
+- It cannot prove a Planet X: a planet hundreds of AU away moves by arcminutes between visits (mostly
+  parallax), so it shows as a spot that is "new" in one visit and "gone" in another, not as one mover.
+  The transient finder lists such spots; following them up is for telescopes.
+- "Not in Gaia DR3" means no Gaia star brighter than G = 19 within 7″. Infrared-only objects such as
+  WISE 0855 are never in Gaia: check CatWISE2020 in the context view before calling anything new.
+- A position nobody has looked at yet takes a few minutes on the free server (all exposures are read
+  once); the demo targets are prepared at start-up.
+
+## Use of AI
+
+Radians was written during the hackathon weekend (from 14 November 2026) with an AI coding
+assistant, Anthropic's Claude, under the team's direction: it wrote much of the code, tests and
+documentation, and commits it helped write carry a `Co-Authored-By: Claude` line. Every image in the
+app and the slides is real SPHEREx data; nothing shown as data is AI-generated. The results above
+were checked against catalogue values.
+
+## Licence
+
+Code and text: MIT ([LICENSE](LICENSE)). Data stay under their providers' terms (see below).
+
 ## Team
 
 Mert Metin · Efe Gönderen · Bora Hısım · Emre Bozkaya
 
 ## Data and credits
+
+This research has made use of the NASA/IPAC Infrared Science Archive, which is funded by the National
+Aeronautics and Space Administration and operated by the California Institute of Technology. This work
+has made use of data from the European Space Agency (ESA) mission Gaia (https://www.cosmos.esa.int/gaia),
+processed by the Gaia Data Processing and Analysis Consortium (DPAC). This research has made use of the
+SIMBAD database and Aladin, operated at CDS, Strasbourg, France, and of IMCCE's SkyBoT service.
+
 
 - **SPHEREx** spectral images (DR1): NASA/IPAC Infrared Science Archive (IRSA). Photometry follows the
   IRSA SPHEREx tutorial notebooks (annulus background, flag bits, wavelength from the WCS-WAVE table).

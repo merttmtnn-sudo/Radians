@@ -154,3 +154,8 @@ def test_progress_is_reported_per_job():
     c = TestClient(main.app)
     assert c.get("/api/progress", params={"job": "t1"}).json() == {"stage": "read", "done": 3, "total": 10}
     assert c.get("/api/progress", params={"job": "nope"}).json() == {}
+
+
+def test_parse_coords_decimal_commas():
+    assert archive.parse_coords("269,45 4,69") == pytest.approx((269.45, 4.69))
+    assert archive.parse_coords("269.45, 4.69") == pytest.approx((269.45, 4.69))
