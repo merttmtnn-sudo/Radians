@@ -189,6 +189,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .hud-tr { top: 10px; right: 10px; }
 .hud-br { bottom: 10px; right: 10px; }
 .hud-bl { bottom: 10px; left: 10px; }
+.hud-quick { bottom: 44px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); text-align: center; white-space: normal; }
 .compass { width: 44px; height: 44px; padding: 0; background: none; }
 .compass::before { content: ""; position: absolute; right: 6px; bottom: 6px; width: 28px; height: 28px; border-right: 1.5px solid #aaa; border-bottom: 1.5px solid #aaa; }
 .compass .n { position: absolute; right: 2px; top: -4px; font-size: 11px; color: #aaa; }
