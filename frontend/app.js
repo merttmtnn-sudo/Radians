@@ -259,9 +259,9 @@ function drawSplit(ctx) {
   ctx.strokeStyle = '#ffb347'; ctx.lineWidth = Math.max(2, W / 400);
   ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, W); ctx.stroke();
   ctx.fillStyle = '#ffb347';
-  ctx.beginPath(); ctx.arc(x, W / 2, fs * 0.9, 0, 2 * Math.PI); ctx.fill();
+  ctx.beginPath(); ctx.arc(x, W * 0.22, fs * 0.9, 0, 2 * Math.PI); ctx.fill();
   ctx.fillStyle = '#000'; ctx.font = `600 ${fs}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('‹ ›', x, W / 2 + 1);
+  ctx.fillText('‹ ›', x, W * 0.22 + 1);
   ctx.font = `500 ${fs * 0.85}px ui-monospace, monospace`; ctx.textBaseline = 'top';
   for (const [lab, right] of [[frameLabel(0), false], [frameLabel(compareB()), true]]) {
     const tw = ctx.measureText(lab).width + fs, bx = right ? x + fs * 0.6 : x - fs * 0.6 - tw, by = W - fs * 2.6;
@@ -1422,3 +1422,8 @@ els.listen.onclick = () => {
   els.listen.textContent = t('listenStop');
   els.listen.setAttribute('aria-pressed', 'true');
 };
+
+// ?compare=1 opens straight in the before/after view (shareable)
+if (new URLSearchParams(location.search).get('compare') === '1') {
+  document.addEventListener('radians:loaded', () => setTimeout(() => setCompare(true), 0), { once: true });
+}
