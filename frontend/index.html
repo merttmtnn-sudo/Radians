@@ -299,51 +299,6 @@
     </div>
     <ol class="timeline" id="timeline"></ol>
 
-    <section class="depth panel" id="depth" hidden aria-labelledby="depthTitle">
-      <header class="depthhead">
-        <div>
-          <h2 id="depthTitle" data-i18n="depthTitle"></h2>
-          <p class="muted small" data-i18n="depthHelp"></p>
-        </div>
-        <span class="depthstatus small" id="depthStatus" role="status" aria-live="polite"></span>
-      </header>
-      <div class="depthgrid">
-        <div class="depthmain">
-          <div class="depthstage">
-            <canvas id="depthSky" width="1" height="1"></canvas>
-            <div class="hud hud-tl mono" id="depthHud"></div>
-          </div>
-          <div class="depthctl">
-            <button type="button" id="depthPlay" class="btn icon sm" aria-label="Play">▶</button>
-            <input id="depthScrub" type="range" min="0" max="0" value="0" data-i18n-title="depthScrub" aria-label="Exposures">
-          </div>
-          <p class="mono small depthn" id="depthN"></p>
-        </div>
-        <div class="depthcards">
-          <figure class="dcard">
-            <figcaption><b data-i18n="depthNoise"></b><span class="muted" data-i18n="depthNoiseSub"></span></figcaption>
-            <div class="dchart" id="depthNoise"></div>
-            <p class="small dnote" id="depthNoiseNote"></p>
-          </figure>
-          <figure class="dcard">
-            <figcaption><b data-i18n="depthStars"></b><span class="muted" data-i18n="depthStarsSub"></span></figcaption>
-            <div class="dchart" id="depthStars"></div>
-            <p class="small dnote" id="depthStarsNote"></p>
-          </figure>
-          <figure class="dcard">
-            <figcaption><b data-i18n="depthDiff"></b><span class="muted" data-i18n="depthDiffSub"></span></figcaption>
-            <canvas class="dimg" id="depthDiff" width="1" height="1"></canvas>
-            <p class="small dnote" id="depthDiffNote"></p>
-          </figure>
-          <figure class="dcard">
-            <figcaption><b data-i18n="depthCov"></b><span class="muted" data-i18n="depthCovSub"></span></figcaption>
-            <canvas class="dimg" id="depthCov" width="1" height="1"></canvas>
-            <p class="small dnote" id="depthCovNote"></p>
-          </figure>
-        </div>
-      </div>
-    </section>
-
     <section class="analysis panel" id="analysis" hidden>
       <div class="tabs" role="tablist">
         <button type="button" role="tab" data-tab="spectrum" aria-selected="true" data-i18n="tabSpectrum"></button>

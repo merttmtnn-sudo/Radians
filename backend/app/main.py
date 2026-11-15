@@ -237,20 +237,6 @@ def _report(job, **kw):
             _progress.popitem(last=False)
 
 
-def _live_preview(job, n, total):
-    """While exposures are read, share the co-add of those read so far (in reading order) with the progress
-    poller, so the page can show the image sharpening as it loads."""
-    acc = stack.DepthAccumulator(n)
-    every = max(1, total // 40)
-
-    def add(f):
-        acc.add(f)
-        if acc.count in (1, 2, 3, 5) or acc.count % every == 0:
-            img, noise, stars = acc.stats()
-            _report(job, preview={"n": n, "count": acc.count, "noise": noise, "stars": stars, "image": stack.b64(img)})
-    return add
-
-
 def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job=None):
     fov = min(max(fov, config.MIN_FOV), config.MAX_FOV)
     n = int(round(fov / config.PIXEL_SCALE)) | 1                     # odd -> target on a pixel centre
@@ -277,8 +263,7 @@ def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job=N
                             headers={"Retry-After": "60"})
     try:
         _report(job, stage="read", done=0, total=len(exps))
-        frs = stack.build_frames(exps, cra, cdec, n, target, progress=lambda i, k: _report(job, done=i, total=k),
-                                 on_frame=_live_preview(job, n, len(exps)) if job else None)
+        frs = stack.build_frames(exps, cra, cdec, n, target, progress=lambda i, k: _report(job, done=i, total=k))
     finally:
         _cold.release()
     threading.Thread(target=stack.prune_cache, daemon=True).start()
@@ -364,26 +349,6 @@ def frames(
         "spot": stack.spot_check(frs, [(f.phot.get("x", (n - 1) / 2), f.phot.get("y", (n - 1) / 2)) for f in frs]),
         "candidates": cands, "detectors": config.DETECTORS, "wl_range": wl_range, "wl_window": window,
     }
-
-
-@app.get("/api/depth")
-def depth(
-    ra: float = Query(..., ge=0, lt=360),
-    dec: float = Query(..., ge=-90, le=90),
-    fov: float = Query(config.DEFAULT_FOV),
-    detectors: str = Query("1,2,3,4,5,6"),
-    pmra: float | None = Query(None),
-    pmdec: float | None = Query(None),
-    ref_epoch: float = Query(2000.0),
-    max_exposures: int = Query(400, ge=1, le=2000),
-):
-    """How the image sharpens as exposures pile up: co-adds of the first 1, 2, 4 ... all exposures in time
-    order (int16, multiply by `scale`), the noise and star count at each step, and how many exposures cover
-    every pixel. Uses the exposures already read for /api/frames with the same parameters."""
-    b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures)
-    if b is None:
-        return {"steps": []}
-    return {"n": b["n"], **stack.depth_series(b["frs"], b["n"])}
 
 
 @app.get("/api/progress")

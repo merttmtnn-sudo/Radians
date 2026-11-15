@@ -210,7 +210,7 @@ Radians/
 │   │       └── data/            curated objects (pins.json), known file layouts
 │   ├── demo/                    the five challenge targets, pre-built (cache/ + built.pkl.gz; engine/ for the fast band)
 │   ├── scripts/                 cache warming, demo media, validation; scripts/engine/ for the engine's builders
-│   ├── tests/                   pytest (161 tests, no network); tests/engine/ against a fake IRSA
+│   ├── tests/                   pytest (159 tests, no network); tests/engine/ against a fake IRSA
 │   └── requirements.txt
 ├── frontend/                    the website (plain ES modules, no build step)
 │   ├── index.html               the single page: Home, Blink viewer, Map
@@ -220,7 +220,7 @@ Radians/
 │   │   ├── core/                i18n.js (English / Turkish), ui.js, palette.js, cube.js, charts.js,
 │   │   │                        aladin.js (viewer loader with a fallback), coords.js + suggest.js (search box)
 │   │   ├── blink/               app.js (the viewer), sky.js (image maths), finds.js (cards, merging the two finders),
-│   │   │                        typebox.js, curious.js, depth.js (Sharpening), gif.js
+│   │   │                        typebox.js, curious.js, gif.js
 │   │   ├── map/                 map.js (the Map), colour.js + colourdata.js (false-colour maths and texts)
 │   │   └── content/             facts.js, about.js, funfacts.js
 │   ├── media/                   the home page's target pictures (sharpened, made by backend/scripts/make_cards.py), GIFs and screenshots
@@ -281,7 +281,7 @@ been measured.
 | `GET /api/quick/motion?id=&x=&y=` | a line through a star's position in every pass |
 | `GET /api/views/{id}/lightcurve?x=&y=` | brightness over time at a spot in the fast band (`id` from `/api/quick`) |
 | `GET /api/frames?ra=&dec=&fov=300&mode=epoch` | all detectors: aligned frames (`epoch`, `epoch_detector`, `exposure`) + photometry + tracker candidates + whether a star is at the target's spot. With `sharp=2`: one sharpened picture per visit on 3″ pixels instead |
-| `GET /api/progress?job=`, `/api/depth` | progress of a running build; data for the Sharpening section |
+| `GET /api/progress?job=` | progress of a running build |
 | `GET /api/photometry?ra=&dec=&fov=&x=&y=` | per-exposure brightness and wavelength at one pixel: an on-the-fly spectrum |
 | `POST /api/spectype` | spectral type, best-match curves and molecular fingerprints of a spectrum; optionally the catalogue side and the verdict |
 | `GET /api/sharp?ra=&dec=&fov=&det=&factor=` | super-resolution: one detector band of a spot drizzled onto 3″ pixels (SPHEREx's are 6.15″) from its dithered exposures, plus the ordinary 6.15″ stack for a before / after comparison (the Map's deep zoom; cached a week) |

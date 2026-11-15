@@ -10,7 +10,6 @@ import { renderTypeBox } from './typebox.js';
 import { createCurious } from './curious.js';
 import { CUBE_URL, nearestSlice } from '../core/cube.js';
 const CUBE_NAME = 'SPHEREx DR1';
-import { depthStart, depthLive, depthLoad, depthHide } from './depth.js';
 import { getPalette, setPalette, viewerCmap } from '../core/palette.js';
 import { loadAladin, QUIET } from '../core/aladin.js';
 import { curated, TARGETS } from '../content/facts.js';
@@ -325,7 +324,6 @@ async function runDeep(target, opts, ctl, background) {
   }, 1000);
   say(t('reading'), background ? t('deepStart') : '');
   state.deepBusy = true;
-  depthStart();
   const job = Math.random().toString(36).slice(2, 12);
   const poll = setInterval(async () => {
     try {
@@ -339,7 +337,7 @@ async function runDeep(target, opts, ctl, background) {
           els.loadingBar.value = p.done / p.total;
         }
       }
-      if (p.preview) depthLive(p.preview); else if (p.stage === 'process') {
+      if (p.stage === 'process') {
         if (background) els.deepStatus.textContent = t('processing');
         else { els.loadingSub.textContent = t('processing'); els.loadingBar.value = 1; }
       }
@@ -374,7 +372,6 @@ async function runDeep(target, opts, ctl, background) {
     if (!data.frames || !data.frames.length) {
       const w = data.wl_window;
       const why = w ? t('wlNone', { lo: w[0].toFixed(2), hi: w[1].toFixed(2) }) : t('noData');
-      depthHide();
       if (background) { els.deepStatus.textContent = why; return; }
       state.data = null;
       els.empty.hidden = false;
@@ -391,11 +388,9 @@ async function runDeep(target, opts, ctl, background) {
       if (background ? was : opts.autoplay !== false) play();
     } else adoptDeep(data);
     if (state.src === 'sharp') loadSharp();
-    depthLoad(gridParams(), api);
     els.deepStatus.textContent = background ? t('deepReady') : '';
   } catch (e) {
     if (e.name === 'AbortError' || !background) throw e;
-    depthHide();
     els.deepStatus.textContent = t('deepFailed', { msg: e.message });
   } finally {
     clearInterval(tick);
@@ -505,7 +500,6 @@ async function run(opts) {
     await runDeep(target, opts, ctl, shown);
   } catch (e) {
     if (e.name !== 'AbortError') {
-      depthHide();
       toast(e.message, true);
       if (e.code === 'unavailable' && !state.data) showOutage();
       else if (!state.data) els.empty.hidden = false;
