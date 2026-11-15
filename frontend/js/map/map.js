@@ -29,6 +29,8 @@ const PRESETS = [
     tipEn: 'Emission from tiny carbon-rich dust grains (PAHs) warmed by starlight.', tipTr: 'Yıldız ışığıyla ısınan, karbonca zengin minik toz tanelerinin (PAH) salması.' },
   { um: 4.05, en: 'Brackett-α', tr: 'Brackett-α',
     tipEn: 'Another hydrogen line, which passes through dust better than visible light.', tipTr: 'Tozun içinden görünür ışıktan daha iyi geçen bir başka hidrojen çizgisi.' },
+  { um: 2.166, en: 'Brackett-γ', tr: 'Brackett-γ',
+    tipEn: 'A hydrogen line astronomers use to see star-forming gas through dust.', tipTr: 'Gökbilimcilerin tozun ardındaki yıldız oluşturan gazı görmek için kullandığı bir hidrojen çizgisi.' },
   { um: 4.27, en: 'CO₂ ice', tr: 'CO₂ buzu',
     tipEn: 'The absorption band of frozen carbon dioxide.', tipTr: 'Donmuş karbondioksitin soğurma bandı.' },
 ];
@@ -289,6 +291,64 @@ function buildPresets() {
     return b;
   }));
 }
+
+// ---------------------------------------------------------------- science views: three wavelengths as R, G, B
+// A colour HiPS the server builds from any three cube planes (backend/app/explorer.py, /hips/spherex-mix/R-G-B)
+const MIXES = [
+  { key: 'mixIces', um: [4.27, 3.05, 1.10] },
+  { key: 'mixGas', um: [4.05, 2.166, 1.875] },
+  { key: 'mixDust', um: [3.29, 2.2, 1.10] },
+];
+const mix = { on: null, own: false };
+function buildMixes() {
+  const chip = (label, tip, onclick, key) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'mapchip togg'; b.dataset.key = key;
+    b.title = tip; b.textContent = label; b.onclick = onclick;
+    return b;
+  };
+  $('mapMixes').replaceChildren(
+    ...MIXES.map(m => chip(t(m.key), t(m.key + 'Tip'), () => {
+      const tr = m.um.map(nearestSlice);
+      if (mix.on === tr.join('-')) { setMix(null); return; }
+      setMixSliders(tr); setMix(tr);
+    }, m.key)),
+    chip(t('mapMixOwn'), t('mapMixTip'), () => { mix.own = !mix.own; $('mapMixPanel').hidden = !mix.own; syncMixes(); }, 'own'));
+  syncMixes();
+}
+function setMixSliders(tr) {
+  ['R', 'G', 'B'].forEach((c, k) => { $('mapMix' + c).value = tr[k]; });
+  showMixVals();
+}
+function showMixVals() {
+  for (const c of ['R', 'G', 'B']) $('mapMix' + c + 'v').textContent = `${CUBE_WL[Number($('mapMix' + c).value)].toFixed(2)} µm`;
+}
+function setMix(tr) {
+  if (!map.aladin || !window.A) return;
+  try {
+    if (map.mixOn) { map.aladin.removeImageLayer('mix'); map.mixOn = false; }
+    if (tr) {
+      const id = tr.join('-');
+      const layer = window.A.imageHiPS('radians-mix-' + id, { url: new URL(`/hips/spherex-mix/${id}`, location.href).href, name: 'SPHEREx ' + id, imgFormat: 'png' });
+      map.aladin.setOverlayImageLayer(layer, 'mix');
+      map.mixOn = true;
+    }
+  } catch (e) { console.warn('mix layer', e); }
+  mix.on = tr ? tr.join('-') : null;
+  if (mix.on) $('mapWrap').dataset.mix = mix.on; else delete $('mapWrap').dataset.mix;   // colours stay colours under any palette
+  syncMixes();
+}
+function syncMixes() {
+  for (const b of $('mapMixes').children) {
+    const m = MIXES.find(x => x.key === b.dataset.key);
+    const on = b.dataset.key === 'own' ? mix.own : !!m && mix.on === m.um.map(nearestSlice).join('-');
+    b.setAttribute('aria-pressed', String(on));
+  }
+}
+for (const c of ['R', 'G', 'B']) $('mapMix' + c).oninput = showMixVals;
+$('mapMixGo').onclick = () => setMix(['R', 'G', 'B'].map(c => Number($('mapMix' + c).value)));
+setMixSliders(MIXES[0].um.map(nearestSlice));
+document.addEventListener('radians:lang', buildMixes);
 
 // ---------------------------------------------------------------- markers and target list
 function addMarkers() {
@@ -673,6 +733,7 @@ $('mapDeepOff').onclick = () => {
 
 // ---------------------------------------------------------------- start
 buildPresets();
+buildMixes();
 buildChips();
 buildPals();
 if (new URLSearchParams(location.search).get('map') === '1') openMap(false);

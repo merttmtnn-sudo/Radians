@@ -67,6 +67,7 @@
       </form>
     </div>
     <p class="hint muted small" data-i18n="searchHint"></p>
+    <p class="qparse small mono" id="qParse" aria-live="polite" hidden></p>
   </section>
 
   <section class="targets" aria-labelledby="tgtTitle">
@@ -216,6 +217,17 @@
     <div class="maprow">
       <span class="maplabel mono" data-i18n="mapPresets"></span>
       <div class="chips" id="mapPresets" role="group"></div>
+    </div>
+    <div class="maprow">
+      <span class="maplabel mono" data-i18n="mapMix"></span>
+      <div class="chips" id="mapMixes" role="group"></div>
+    </div>
+    <div class="mapmix" id="mapMixPanel" hidden>
+      <label><i class="mixdot r"></i><span class="mono" id="mapMixRv"></span><input type="range" id="mapMixR" min="0" max="101" step="1"></label>
+      <label><i class="mixdot g"></i><span class="mono" id="mapMixGv"></span><input type="range" id="mapMixG" min="0" max="101" step="1"></label>
+      <label><i class="mixdot b"></i><span class="mono" id="mapMixBv"></span><input type="range" id="mapMixB" min="0" max="101" step="1"></label>
+      <button type="button" class="btn sm" id="mapMixGo" data-i18n="mapMixShow"></button>
+      <p class="small muted" data-i18n="mapMixTip"></p>
     </div>
   </section>
 

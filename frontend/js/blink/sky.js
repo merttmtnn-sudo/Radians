@@ -204,6 +204,30 @@ export function lutDiverging() {
   return out;
 }
 
+/** Read "RA Dec" the way the server does (archive.parse_coords): two decimal-degree numbers (decimal commas
+ * allowed), or sexagesimal hours + degrees ("17h57m48s +04d41m36s", "17:57:48 +04:41:36", "17 57 48 +04 41 36").
+ * Returns [ra, dec] in degrees or null when it is not a position (then the text is looked up as a name). */
+export function parseCoords(text) {
+  let s = String(text || '').trim();
+  if (/^[+-]?\d+,\d+\s+[+-]?\d+,\d+$/.test(s)) s = s.replace(/,/g, '.');
+  s = s.replace(/,/g, ' ').trim();
+  const num = /^[+-]?\d+(\.\d*)?$/;
+  let parts = s.split(/\s+/);
+  let ra, dec;
+  if (parts.length === 2 && parts.every(p => num.test(p))) {
+    [ra, dec] = parts.map(Number);
+  } else {
+    parts = s.replace(/[hdms°:'"′″]/gi, ' ').trim().split(/\s+/);
+    if (parts.length !== 6 || !parts.every(p => num.test(p))) return null;
+    const [h, m, sec, dd, dm, ds] = parts.map(Number);
+    if (m >= 60 || sec >= 60 || dm >= 60 || ds >= 60) return null;
+    const neg = parts[3].startsWith('-');
+    ra = 15 * (h + m / 60 + sec / 3600);
+    dec = (neg ? -1 : 1) * (Math.abs(dd) + dm / 60 + ds / 3600);
+  }
+  return ra >= 0 && ra < 360 && dec >= -90 && dec <= 90 ? [ra, dec] : null;
+}
+
 /** Colour of visit k of n for the colour-by-time view: blue -> green -> red. */
 export function timeColour(k, n) {
   const u = n > 1 ? k / (n - 1) : 0.5;

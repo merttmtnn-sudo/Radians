@@ -1,5 +1,5 @@
 import {
-  decodeB64, percentiles, stretchValue, stretchSigned, lut, lutDiverging, pixToSky, formatRA, formatDec, timeColour, fitsBytes,
+  decodeB64, percentiles, stretchValue, stretchSigned, lut, lutDiverging, pixToSky, formatRA, formatDec, timeColour, fitsBytes, parseCoords,
   flagNames, parseState, computeView, isDiffView, skyToPix, stackImage, rgbChannels,
 } from './sky.js';
 import { t, setLang, getLang } from '../core/i18n.js';
@@ -1806,6 +1806,18 @@ function renderRgb() {
   drawOverlay();
 }
 document.addEventListener('radians:lang', syncBandUi);
+
+// Under the search box: how the text will be read, before anything is sent
+function showParse() {
+  const q = els.q.value.trim(), out = $('qParse');
+  if (q.length < 2) { out.hidden = true; return; }
+  const c = parseCoords(q);
+  out.textContent = c ? t('qAsPos', { ra: c[0].toFixed(4), dec: (c[1] >= 0 ? '+' : '') + c[1].toFixed(4) }) : t('qAsName', { q });
+  out.hidden = false;
+}
+els.q.addEventListener('input', showParse);
+els.q.addEventListener('blur', () => setTimeout(() => { $('qParse').hidden = true; }, 150));
+document.addEventListener('radians:lang', () => { if (!$('qParse').hidden) showParse(); });
 
 // Colour by time: every visit in its own colour (first blue, middle green, last red), added up and divided by
 // the colour total, so a star that stays put comes out white and anything that moves leaves a coloured trail.

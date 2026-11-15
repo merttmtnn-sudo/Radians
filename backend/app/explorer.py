@@ -623,6 +623,70 @@ def color_tile(order, npix):
         return out
 
 
+# "Mix your own": any three of the 102 planes as red, green and blue, each stretched on its own
+mix_router = APIRouter(prefix="/hips/spherex-mix")
+
+
+def mix_tile(order, npix, r, g, b):
+    p = config.CACHE_DIR / "sxmix" / f"{r}-{g}-{b}_{order}_{npix}.png"
+    if p.exists():
+        return p.read_bytes()
+    from PIL import Image
+    with _color_slots:
+        if p.exists():
+            return p.read_bytes()
+        tiles = list(_tile_pool.map(lambda f: _cube_tile(f, order, npix), (r, g, b)))
+        any_t = next((t for t in tiles if t is not None), None)
+        if any_t is None:
+            return None
+        rgb = np.zeros(any_t.shape + (3,), np.float32)
+        for ci, t in enumerate(tiles):
+            if t is not None:          # each plane's own sky level off (zodiacal light differs a lot per band)
+                lit = t[t > 0]
+                bk = float(np.percentile(lit, 25)) if lit.size > 100 else 4.0
+                rgb[..., ci] = np.maximum(0, t - bk) / max(40.0, 255 - bk)
+        rgb = np.clip(np.power(rgb, 1 / 1.15) * 255, 0, 255).astype(np.uint8)
+        buf = io.BytesIO()
+        Image.fromarray(rgb, "RGB").save(buf, "PNG", optimize=False, compress_level=6)
+        out = buf.getvalue()
+        config.atomic_write(p, out)
+        return out
+
+
+def _mix_ok(mix):
+    m = re.fullmatch(r"(\d{1,3})-(\d{1,3})-(\d{1,3})", mix)
+    if not m:
+        return None
+    t = tuple(int(x) for x in m.groups())
+    return t if all(0 <= x < 102 for x in t) else None
+
+
+@mix_router.get("/{mix}/properties")
+def mix_properties(mix: str):
+    if not _mix_ok(mix):
+        return Response(status_code=404)
+    txt = "\n".join([
+        f"creator_did = ivo://radians/P/SPHEREx/DR1/mix/{mix}", f"obs_title = SPHEREx DR1 planes {mix} as R-G-B",
+        "dataproduct_type = image", "dataproduct_subtype = color", "hips_version = 1.4", "hips_frame = equatorial",
+        "hips_order = 5", "hips_order_min = 0", "hips_tile_width = 512", "hips_tile_format = png", "hips_initial_fov = 60",
+        "obs_copyright = NASA/JPL-Caltech/IPAC SPHEREx", ""])
+    return Response(txt, media_type="text/plain", headers={"Cache-Control": "max-age=86400"})
+
+
+@mix_router.get("/{mix}/Norder{order}/Dir{d}/Npix{npix}.png")
+def mix_tile_route(mix: str, order: int, d: int, npix: int):
+    t = _mix_ok(mix)
+    if not t or not 0 <= order <= 5 or not 0 <= npix < 12 * 4 ** order:
+        return Response(status_code=404)
+    try:
+        png = mix_tile(order, npix, *t)
+    except Exception as e:  # noqa: BLE001
+        return _err(f"tile: {e}")
+    if png is None:
+        return Response(status_code=404)
+    return Response(png, media_type="image/png", headers={"Cache-Control": "max-age=604800"})
+
+
 @hips_router.get("/properties")
 def color_properties():
     txt = "\n".join([

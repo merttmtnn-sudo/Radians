@@ -22,6 +22,7 @@ app = FastAPI(title="Radians", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 app.include_router(explorer.router)
 app.include_router(explorer.hips_router)
+app.include_router(explorer.mix_router)
 
 # ---------------------------------------------------------------- fair sharing of one server
 _hits: dict = {}
