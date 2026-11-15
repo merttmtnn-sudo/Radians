@@ -1,6 +1,6 @@
 @echo off
 rem Starts Radians from this folder: makes the Python environment on the first run, then serves the
-rem site at http://localhost:8765 and opens it in the browser. Close this window to stop it.
+rem site at http://127.0.0.1:8765 and opens it in the browser. Close this window to stop it.
 setlocal
 cd /d "%~dp0"
 
@@ -27,12 +27,12 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo.
-echo Radians is starting at http://localhost:8765/?lang=tr
+echo Radians is starting at http://127.0.0.1:8765/?lang=tr
 echo The five challenge targets open at once. Any other spot shows its first pictures after about 10 seconds; all six bands take a few minutes.
 echo Close this window, or press Ctrl+C, to stop.
 echo.
-start "" cmd /c "timeout /t 8 /nobreak >nul & start "" http://localhost:8765/?lang=tr"
-".venv\Scripts\python.exe" -m uvicorn app.main:app --port 8765 --app-dir backend
+start "" cmd /c "timeout /t 8 /nobreak >nul & start "" http://127.0.0.1:8765/?lang=tr"
+".venv\Scripts\python.exe" -m uvicorn app.main:app --port 8765 --app-dir backend --timeout-keep-alive 75
 goto :eof
 
 :failed

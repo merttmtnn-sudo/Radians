@@ -678,13 +678,10 @@ body.embed .depth { display: none !important; }
   border-radius: 14px; background: color-mix(in srgb, var(--accent, #ffb347) 9%, transparent); }
 .looknote p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.45; }
 
-/* ---- map tools merged in from Skyshift: famous objects, constellations, colour mixes, other skies ---- */
+/* ---- map tools merged in from Skyshift: famous objects, the colour and scientific themes ---- */
 .mappop[data-kind="f"] .mappopkind::before { background: #8cc8ff; }
 .mapchip.f > i { width: 9px; height: 9px; border: 2px solid #8cc8ff; }
 .maplegend button[aria-pressed="true"] { color: var(--accent); }
-.maplooking { position: absolute; z-index: 14; left: 16px; top: 48px; font-size: 12px; color: #d8dade; pointer-events: none;
-  text-shadow: 0 0 6px #000, 0 0 2px #000; }
-.maplooking b { color: #fff; font-weight: 600; }
 /* a colour picture on top (a mix, or another survey): no grey filter and no tint over it */
 .mapwrap[data-top] #skymapAladin .aladin-imageCanvas { filter: var(--bc); }
 .mixbody { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }

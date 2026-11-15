@@ -63,9 +63,6 @@ test('every script, style sheet and data file the page names is there', () => {
       if (!existsSync(path.join(FRONT, m[1]))) missing.push(`${m[1]} (${file})`);
     }
   }
-  for (const f of ['constellations.lines.json', 'constellations.json', 'constellations.bounds.json']) {
-    if (!existsSync(path.join(FRONT, 'data', f))) missing.push(`data/${f}`);
-  }
   assert.deepEqual(missing, []);
 });
 

@@ -29,7 +29,7 @@ merged them into this one:
   a preview within seconds and the whole band in well under a minute; exposure pairs matched by
   wavelength; the blue/orange difference and colour by time; a second finder on the difference
   picture; halo photometry for saturated stars; a motion fit for any star; colour mixes and science
-  views for the map; constellations and famous-object pins with one-line stories.
+  views for the map; famous-object pins with one-line stories.
 
 After that merge the Radians pair's newer work (GitHub `main`, 15 Nov 2026) was merged in as well:
 **super-resolution** (dithered exposures drizzled onto 3″ pixels, with a before / after switch) in the
@@ -210,7 +210,7 @@ Radians/
 │   │       └── data/            curated objects (pins.json), known file layouts
 │   ├── demo/                    the five challenge targets, pre-built (cache/ + built.pkl.gz; engine/ for the fast band)
 │   ├── scripts/                 cache warming, demo media, validation; scripts/engine/ for the engine's builders
-│   ├── tests/                   pytest (157 tests, no network); tests/engine/ against a fake IRSA
+│   ├── tests/                   pytest (158 tests, no network); tests/engine/ against a fake IRSA
 │   └── requirements.txt
 ├── frontend/                    the website (plain ES modules, no build step)
 │   ├── index.html               the single page: Home, Blink viewer, Map
@@ -221,12 +221,10 @@ Radians/
 │   │   │                        aladin.js (viewer loader with a fallback), coords.js + suggest.js (search box)
 │   │   ├── blink/               app.js (the viewer), sky.js (image maths), finds.js (cards, merging the two finders),
 │   │   │                        typebox.js, curious.js, depth.js (Sharpening), gif.js
-│   │   ├── map/                 map.js (the Map), colour.js + colourdata.js (false-colour maths and texts),
-│   │   │                        constellations.js
+│   │   ├── map/                 map.js (the Map), colour.js + colourdata.js (false-colour maths and texts)
 │   │   └── content/             facts.js, about.js, funfacts.js
-│   ├── data/                    constellation lines, names and boundaries (d3-celestial, BSD-3)
 │   ├── media/                   the home page's target pictures (sharpened, made by backend/scripts/make_cards.py), GIFs and screenshots
-│   └── tests/                   node tests (45): image maths, cards, colour, coordinates, constellations, whole-site checks
+│   └── tests/                   node tests (44): image maths, cards, colour, coordinates, whole-site checks
 ├── docs/                        validation report, demo script, slides PDF, figures
 ├── deploy/huggingface/          an unused Hugging Face Space set-up
 ├── explore/                     early probes of the IRSA archive (kept for reference)
@@ -340,13 +338,28 @@ chips: five with the feature's wavelength in
 orange and the light beside it in blue (water ice, CO₂ ice, methane, Paschen-α, Brackett-γ), three with three wavelengths as red, green and blue (ices,
 hydrogen gas, warm dust). In the Blink viewer the same Regular / Inverted / Colour choice is under
 Advanced; Colour needs all detectors there, because one band alone has no colour either.
-Also: brightness and contrast, constellations, the challenge targets, Explore stars and 28 famous objects
+Also: brightness and contrast, the challenge targets, Explore stars and 28 famous objects
 as markers with a card that blinks the spot (the famous ones can be switched off in the legend).
 Below 0.7° the **super-resolution** button reads the real
 exposures of the spot in the band of the chosen wavelength and drizzles them onto 3″ pixels
 (`backend/app/sharp.py`); Before / After switches to the ordinary 6″ stack on the same brightness
 scale. The map shows SPHEREx only; zoomed in past its 13″ pixels it says that it is only magnifying
 them. All colour is false colour and labelled so.
+
+### How fast the Map is, and what it depends on
+
+One wavelength (Regular, Inverted): the tiles go straight from NASA's archive (IRSA, California) to
+the browser. Measured from Turkey: about 1.1 s for a tile on a new connection, 0.2–0.4 s on an open
+one; a screen needs 12 to 40 tiles, so a new view takes 1 to 5 seconds and nothing on our side can
+shorten the trip. What we do: the wavelength you picked is fetched in the background before you
+confirm it, and the filler layer (the neighbouring band that shows through a detector's small
+holes) waits until the chosen wavelength's own tiles are in. Colour and Scientific: our server
+makes each tile from 12 (Colour) or 2–3 (Scientific) archive tiles, then keeps it for ever. It
+keeps its connections to the archive open and opens them when the Map opens (`/hips/warm`): a new
+Colour tile takes 0.7 s (it took 2.6 s), a new Scientific tile 0.3 s (2.4 s), a screenful of twelve
+new Colour tiles 3.7 s; a tile seen before comes from the disk or the browser cache at once. On a
+Windows PC, opening the site as `127.0.0.1` saves 0.2 s on every new connection compared with
+`localhost` (the start script does that).
 
 ## Sharing one free server
 
@@ -443,8 +456,6 @@ SIMBAD database and Aladin, operated at CDS, Strasbourg, France, and of IMCCE's 
   (Marley et al. 2021, Zenodo record 5063476), smoothed to SPHEREx resolution. Type–temperature tables:
   Pecaut & Mamajek (2013), Filippazzo et al. (2015).
 - **Known Solar System objects**: IMCCE SkyBoT.
-- **Constellation lines, names and boundaries**: d3-celestial by Olaf Frohn (BSD-3-Clause, see
-  `frontend/data/LICENSE-d3-celestial.txt`).
 - **Infrared colour recipe of the Map**: Emre Bozkaya (SPHEREx Sky Explorer).
 - Built with Astropy, PyVO, NumPy, SciPy, Pillow and FastAPI; the browser side has no build step or
   framework.

@@ -641,6 +641,7 @@ from .engine import main as engine  # noqa: E402
 
 app.include_router(quick.router)        # /api/quick: an engine view in the viewer's frame format
 app.include_router(mixtiles.router)          # /hips/spherex-mix: false-colour mixes of the all-sky cube for the map
-app.include_router(mixtiles.colour_router)   # /hips/spherex-color: the map's fixed "Infrared RGB" palette
+app.include_router(mixtiles.colour_router)   # /hips/spherex-color: the map's Colour theme
+app.include_router(mixtiles.warm_router)     # /hips/warm: opens the tile connections when the Map opens
 for _router in engine.routers:
     app.include_router(_router)

@@ -5,7 +5,6 @@
 // listed, and a click anywhere blinks that spot.
 import { rainbowTint, rgbToHex, scaleRgb, hexToRgb } from './colour.js';
 import { FRAME_GAIN, PRESETS as SCI_PRESETS, NOTES } from './colourdata.js';
-import { loadConstellations, linePaths, labels as constLabels, constellationAt } from './constellations.js';
 import { t, getLang } from '../core/i18n.js';
 import { CUBE_URL, CUBE_WL, BLANK, bandOf, nearestSlice } from '../core/cube.js';
 import { TARGETS, EXPLORE } from '../content/facts.js';
@@ -84,6 +83,7 @@ addEventListener('popstate', () => { if (new URLSearchParams(location.search).ge
 // ---------------------------------------------------------------- the map
 async function initMap() {
   if (map.aladin) return;
+  fetch(new URL('hips/warm', location.href)).catch(() => {});      // the colour tiles' connections, ahead of time
   try {
     await loadAladin();
     $('mapStatus').replaceChildren();
@@ -169,11 +169,19 @@ function fillOf(i) {
   if (BLANK.has(j)) j = band === 3 ? 49 : 52;            // the two dichroic channels are empty
   return j;
 }
+// It only shows through small holes, so after a change of wavelength it waits until the chosen plane's own
+// tiles are in: both layers come from the same server, and the picture should not queue behind its filler.
 function setFill(now = false) {
   clearTimeout(map.fillTimer);
-  map.fillTimer = setTimeout(() => {
-    try { map.base?.setSliceNumber(fillOf(map.slice)); } catch { /* single plane */ }
-  }, now ? 0 : 300);
+  const apply = () => { try { map.base?.setSliceNumber(fillOf(map.slice)); } catch { /* single plane */ } };
+  if (now) { apply(); return; }
+  const began = performance.now();
+  const tick = () => {
+    const t1 = performance.now();
+    if ((t1 - began > 600 && t1 - lastTile > 700) || t1 - began > 8000) apply();
+    else map.fillTimer = setTimeout(tick, 200);
+  };
+  map.fillTimer = setTimeout(tick, 200);
 }
 
 // ticks under the slider, at the plane of each wavelength
@@ -428,6 +436,7 @@ $('mapPopGo').onclick = () => {
 // Every tile the map shows is remembered. While a wavelength is picked but not confirmed yet, the same tiles
 // of that plane (and of its fill plane) are fetched into the browser cache, so confirming finds them there.
 const seen = new Map();                                  // 'Norder3/Dir0/Npix100' -> last time on screen
+let lastTile = 0;                                        // when a tile of the cube last arrived
 const fetched = new Set();
 const queue = [];
 let active = 0;
@@ -436,7 +445,7 @@ try {
   new PerformanceObserver((list) => {
     for (const e of list.getEntries()) {
       const m = e.name.match(/spherex_allsky_cube\/+(Norder\d+\/Dir\d+\/Npix\d+)(?:_\d+)?\.png/);
-      if (m) { seen.set(m[1], performance.now()); fetched.add(e.name.replace(/cube\/\//, 'cube/')); }
+      if (m) { lastTile = performance.now(); seen.set(m[1], lastTile); fetched.add(e.name.replace(/cube\/\//, 'cube/')); }
     }
     if (performance.getEntriesByType('resource').length > 3000) performance.clearResourceTimings();
   }).observe({ type: 'resource' });
@@ -581,11 +590,9 @@ buildPresets();
 buildChips();
 if (new URLSearchParams(location.search).get('map') === '1') openMap(false);
 // ================================================================ merged in from Skyshift
-// Famous-object pins with one-line stories, constellation lines and "You're looking at", and the
-// colour and scientific themes.
+// Famous-object pins with one-line stories, and the colour and scientific themes.
 const extra = {
   pins: [], catalog: null,
-  cons: { on: false, lines: null, names: null, ready: false },
   layer: null,
   mix: { preset: SCI_PRESETS[0].id },
 };
@@ -604,10 +611,6 @@ const um = (w) => `${w.toFixed(w < 1 ? 3 : 2)} µm`;
 function initExtras() {
   applyTheme();
   loadPins();
-  try { if (localStorage.getItem('radians-mapconst') === '1') setConstellations(true); } catch { /* private mode */ }
-  loadConstellations().then(() => { extra.cons.ready = true; looking(); }).catch(() => {});
-  map.aladin.on('positionChanged', looking);
-  map.aladin.on('zoomChanged', looking);
 }
 
 // ---------------------------------------------------------------- one colour picture on top of the SPHEREx layers
@@ -763,51 +766,7 @@ function buildFamous() {
   }));
 }
 
-// ---------------------------------------------------------------- constellations and "You're looking at"
-async function setConstellations(on) {
-  const c = extra.cons;
-  c.on = on;
-  $('mapConst').setAttribute('aria-pressed', String(on));
-  try { localStorage.setItem('radians-mapconst', on ? '1' : '0'); } catch { /* private mode */ }
-  if (!map.aladin || !window.A) return;
-  try {
-    if (on && !c.lines) {
-      await loadConstellations();
-      c.lines = window.A.graphicOverlay({ name: 'constellation-lines', color: 'rgba(255, 255, 255, 0.34)', lineWidth: 1.1 });
-      map.aladin.addOverlay(c.lines);
-      c.lines.addFootprints(linePaths().map(path => window.A.polyline(path)));
-    }
-    if (on && !c.names) drawConstellationNames();
-    for (const o of [c.lines, c.names]) if (o) (on ? o.show() : o.hide());
-  } catch (e) { console.warn('constellations', e); }
-}
-function drawConstellationNames() {
-  const c = extra.cons;
-  if (c.names) { try { map.aladin.removeLayer?.(c.names); c.names.hide(); } catch { /* older Aladin */ } }
-  // an invisible marker: Aladin only writes labels next to a shape
-  c.names = window.A.catalog({ name: 'constellation-names', shape: 'circle', color: 'rgba(0, 0, 0, 0)', sourceSize: 4,
-    displayLabel: true, labelColumn: 'label', labelColor: 'rgba(255, 255, 255, 0.62)', labelFont: '500 12px system-ui, sans-serif' });
-  map.aladin.addCatalog(c.names);
-  c.names.addSources(constLabels(L()).filter(x => x.rank <= 2).map(x => window.A.source(x.ra, x.dec, { label: x.name.toUpperCase() })));
-}
-$('mapConst').onclick = () => setConstellations(!extra.cons.on);
-
-let lookTimer = null;
-function looking() {
-  clearTimeout(lookTimer);
-  lookTimer = setTimeout(() => {
-    const box = $('mapLooking');
-    if (!extra.cons.ready || !map.aladin) { box.textContent = ''; return; }
-    let fov = 180, ra, dec;
-    try { fov = map.aladin.getFov()[0]; [ra, dec] = map.aladin.pix2world(box.parentElement.clientWidth / 2, box.parentElement.clientHeight / 2, 'icrs') || []; } catch { /* outside the sky */ }
-    const c = fov <= 70 && Number.isFinite(ra) ? constellationAt(ra, dec, L()) : null;   // zoomed out, the centre says little
-    box.replaceChildren();
-    if (c) { const b = document.createElement('b'); b.textContent = c.name; box.append(`${t('mapLooking')}: `, b); }
-  }, 150);
-}
-
 document.addEventListener('radians:lang', () => {
   buildPresets(); buildChips(); hidePop(); showPick(map.pick ?? map.slice); deepChip();
-  buildMix(); buildFamous(); looking();
-  if (extra.cons.names) { drawConstellationNames(); if (!extra.cons.on) extra.cons.names.hide(); }
+  buildMix(); buildFamous();
 });

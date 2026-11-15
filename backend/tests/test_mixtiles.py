@@ -91,3 +91,23 @@ def test_three_planes_as_red_green_blue_at_the_same_address(client):
     assert sorted(client.calls) == [(21, 0, 3), (46, 0, 3), (72, 0, 3)]
     assert client.get("/hips/spherex-mix/72-46-200/properties").status_code == 404      # no such plane
     assert client.get("/hips/spherex-mix/72-46/properties").status_code == 404
+
+
+def test_opening_the_map_opens_the_tile_connections_once(client, monkeypatch):
+    """/hips/warm: twelve small requests to the archive in the background, and not again right away."""
+    import threading
+    import time
+    from app import net
+    asked, done = [], threading.Event()
+
+    def fake_get(url, **kw):
+        asked.append(url)
+        if len(asked) == mixtiles.WARM_CONNECTIONS:
+            done.set()
+    monkeypatch.setattr(net, "get", fake_get)
+    monkeypatch.setattr(mixtiles, "_warmed", 0.0)
+    assert client.get("/hips/warm").json() == {"started": True}
+    assert done.wait(5) and all(u.endswith("/properties") for u in asked)
+    assert client.get("/hips/warm").json() == {"started": False}
+    time.sleep(0.05)
+    assert len(asked) == mixtiles.WARM_CONNECTIONS

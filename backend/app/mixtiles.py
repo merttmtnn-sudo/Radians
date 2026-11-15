@@ -27,6 +27,7 @@ import hashlib
 import io
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -49,6 +50,40 @@ _slots = threading.BoundedSemaphore(6)            # colour tiles being made at t
 _HIPS_COMMON = ["dataproduct_type = image", "dataproduct_subtype = color", "hips_version = 1.4", "hips_frame = equatorial",
                 "hips_order = 5", "hips_order_min = 0", "hips_tile_width = 512", "hips_tile_format = png",
                 "hips_initial_fov = 60"]
+
+
+warm_router = APIRouter()
+WARM_CONNECTIONS = 12                 # as many as irsa.SLOTS lets through at once
+WARM_AGAIN_S = 25.0                   # IRSA keeps an idle connection open for at least this long
+_warmed = 0.0
+_warm_lock = threading.Lock()
+
+
+def warm() -> bool:
+    """Open the connections the colour tiles will use, in the background. The first tile made on
+    cold connections takes about 2 s (12 pieces, each with its own TCP + TLS set-up); on open ones
+    about 0.6 s. False if this ran in the last WARM_AGAIN_S seconds."""
+    global _warmed
+    with _warm_lock:
+        if time.time() - _warmed < WARM_AGAIN_S:
+            return False
+        _warmed = time.time()
+
+    def one(_):
+        try:
+            with irsa.SLOTS:
+                net.get(HIPS_ROOT + "/properties", timeout=20, tries=1)
+        except net.Upstream:
+            pass                      # a head start only
+    for i in range(WARM_CONNECTIONS):
+        _tile_pool.submit(one, i)
+    return True
+
+
+@warm_router.get("/hips/warm")
+def warm_route():
+    """The page calls this when the Map opens. It answers at once."""
+    return {"started": warm()}
 
 
 def cube_tile(frame, order, npix):

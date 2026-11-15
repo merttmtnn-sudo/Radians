@@ -16,7 +16,6 @@ bilimsel çalışmaları listeler. Sitede gösterilen her görüntü ve sayı bu
 | **Sesame ad çözümleyici** (CDS) | Aramaya yazılan adın koordinata çevrilmesi | https://cds.unistra.fr/cgi-bin/Sesame |
 | **VizieR** (CDS; Harvard aynası) | Yıldızların 2MASS ve AllWISE kataloglarındaki parlaklıkları (tayf karşılaştırması); değişen yıldız katalogları | https://vizier.cds.unistra.fr |
 | **SkyBoT** (IMCCE, Paris Gözlemevi) | Görüntünün tarihinde o noktadan geçen bilinen asteroit ve kuyruklu yıldızlar | https://ssp.imcce.fr/webservices/skybot/ |
-| **d3-celestial veri dosyaları** (Olaf Frohn, BSD-3) | Haritadaki takımyıldız çizgileri, adları ve sınırları | https://github.com/ofrohn/d3-celestial |
 
 **Teşekkür.** Bu çalışma NASA/IPAC Infrared Science Archive’ın (California Institute of Technology’nin NASA ile
 yaptığı sözleşme altında işletilir) verilerini ve servislerini; CDS’nin (Strasbourg Astronomical Data Center)

@@ -6,15 +6,38 @@ import csv
 import hashlib
 import io
 import json
+import threading
 import time
 
 import requests
+import requests.adapters
 from fastapi.responses import JSONResponse
 
 from . import config
 
 IRSA = "https://irsa.ipac.caltech.edu"
 UA = {"User-Agent": "Radians/0.1 (NASA Space Apps 2026)"}
+
+
+_session = None
+_session_lock = threading.Lock()
+
+
+def session() -> requests.Session:
+    """One HTTP session for the whole server, so connections are kept open and used again. A new
+    connection to IRSA costs about a second (TCP + TLS from Europe); a request on an open one about
+    a quarter of that. The map's colour tiles need 3 to 12 small files each, so this matters most
+    there."""
+    global _session
+    with _session_lock:
+        if _session is None:
+            s = requests.Session()
+            s.headers.update(UA)
+            adapter = requests.adapters.HTTPAdapter(pool_connections=8, pool_maxsize=32)
+            s.mount("https://", adapter)
+            s.mount("http://", adapter)
+            _session = s
+    return _session
 
 
 class Upstream(ConnectionError):
@@ -48,7 +71,7 @@ def get(url, params=None, timeout=60, tries=4, stream=False):
     last = None
     for i in range(tries):
         try:
-            r = requests.get(url, params=params, headers=UA, timeout=timeout, stream=stream)
+            r = session().get(url, params=params, timeout=timeout, stream=stream)
             if r.status_code in (429, 502, 503, 504):
                 last = Upstream(f"HTTP {r.status_code}")
                 r.close()
