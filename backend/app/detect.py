@@ -200,6 +200,7 @@ def find_candidates(epoch_groups, ed_groups, wout, target_xy=None):
 
     variable = _variables(static, ed_groups, sky, is_target)
     transients = _transients(epoch_groups, sky, is_target)
+    _second_opinion(moving, variable, transients, difference_finds(epoch_groups, ref))
     out = (sorted(moving, key=lambda c: -c["significance"])[:MAX_PER_TYPE]
            + sorted(variable, key=lambda c: -c["significance"])[:MAX_PER_TYPE]
            + sorted(transients, key=lambda c: -c["significance"])[:MAX_PER_TYPE])
@@ -257,6 +258,50 @@ def _variables(static, ed_groups, sky, is_target):
                         "ratio": best["ratio"], "detectors": per_det, "is_target": is_target(s["x"], s["y"]),
                         "low_confidence": all(d["low_confidence"] for d in per_det)})
     return out
+
+
+def difference_finds(epoch_groups, ref=None, snr_min=6.0):
+    """The second, independent finder: each visit minus the median of the other visits (shifted onto it).
+    Whatever stays put cancels; what remains is "is here now" (positive, orange in the viewer) or "was here"
+    (negative, blue). Returns [{x, y, epoch, sign, snr}] in reference-visit pixels. Residuals next to very
+    bright stars (saturated cores, slightly different PSFs) are dropped unless they are a large part of the star."""
+    if len(epoch_groups) < 2:
+        return []
+    ref = ref or epoch_groups[0]
+    bright = [s for s in ref.get("aligned", []) if s["snr"] > 60]
+    out = []
+    for g in epoch_groups:
+        others = [o for o in epoch_groups if o is not g]
+        stackd = []
+        for o in others:
+            dx = int(round(o["offset"][0] - g["offset"][0]))
+            dy = int(round(o["offset"][1] - g["offset"][1]))
+            stackd.append(np.roll(np.roll(o["image"], -dy, 0), -dx, 1))
+        with np.errstate(all="ignore"):
+            med = np.nanmedian(np.array(stackd), axis=0)
+            mvar = np.nanmean(np.array([o["variance"] for o in others]), axis=0) * (math.pi / 2) / len(others)
+            diff = g["image"] - med
+            var = g["variance"] + mvar
+        for sign in (1, -1):
+            for s in find_sources(sign * diff, var, snr_min):
+                x, y = s["x"] - g["offset"][0], s["y"] - g["offset"][1]
+                if any(math.hypot(b["x"] - x, b["y"] - y) < 5 and s["snr"] < 0.15 * b["snr"] for b in bright):
+                    continue
+                out.append({"x": x, "y": y, "epoch": g["epoch"], "sign": sign, "snr": s["snr"]})
+    return out
+
+
+def _second_opinion(moving, variable, transients, finds, r=2.0):
+    """Mark candidates the difference pictures also show ("found two ways")."""
+    def near(x, y, epoch=None, sign=None):
+        return any(math.hypot(f["x"] - x, f["y"] - y) < r and (epoch is None or f["epoch"] == epoch)
+                   and (sign is None or f["sign"] == sign) for f in finds)
+    for c in moving:
+        c["found_by"] = ["track", "difference"] if any(near(p["x"], p["y"]) for p in c["points"]) else ["track"]
+    for c in variable:
+        c["found_by"] = ["track", "difference"] if near(c["x"], c["y"]) else ["track"]
+    for c in transients:
+        c["found_by"] = ["track", "difference"] if near(c["x"], c["y"], c["epoch"], 1) else ["track"]
 
 
 def _ap_snr(g, x, y):

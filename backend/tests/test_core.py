@@ -116,6 +116,7 @@ def test_finder_sees_moving_star():
     assert len(mov) == 1
     assert abs(mov[0]["rate_arcsec_yr"] - 1.0 * 6.15) < 0.5          # 1 px/yr
     assert abs(mov[0]["pa_deg"] - 270) < 5                             # +x is west
+    assert mov[0]["found_by"] == ["track", "difference"]               # the difference pictures see it too
 
 
 def test_cached_cutout_reused_when_it_covers_the_box():
@@ -392,3 +393,26 @@ def test_irsa_requests_in_flight_are_capped(monkeypatch):
     for th in threads:
         th.join()
     assert 1 <= state["max"] <= 3
+
+
+
+def test_injected_faint_mover_recovered_two_ways():
+    """Injection test (docs/VALIDATION.md): a faint star moving 1.5 px per visit through noise and a static
+    field is found by the tracker and by the difference pictures; the static stars are not."""
+    from app import detect
+    n = 41
+    rng = np.random.default_rng(7)
+    yy, xx = np.mgrid[0:n, 0:n]
+    blob = lambda x, y, a: a * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * 0.6 ** 2))
+    field = blob(8.2, 30.1, 40) + blob(31.6, 9.4, 25) + blob(28.3, 33.7, 15)
+    eps = []
+    for i in range(4):
+        img = field + blob(14.0 + 1.5 * i, 20.0, 6.0) + rng.normal(0, 0.25, (n, n))
+        eps.append({"epoch": i + 1, "mjd": 60800 + 182 * i, "image": img, "variance": np.full((n, n), 0.0625),
+                    "flags": np.zeros((n, n), np.uint32), "detector": 1, "n_exposures": 20})
+    c = detect.find_candidates(eps, eps, stack.output_wcs(10.0, 0.0, n), (20, 20))
+    mov = [k for k in c if k["type"] == "moving"]
+    assert len(mov) == 1 and mov[0]["found_by"] == ["track", "difference"]
+    finds = detect.difference_finds(eps, eps[0])
+    for sx, sy in ((8.2, 30.1), (31.6, 9.4), (28.3, 33.7)):
+        assert not any(math.hypot(f["x"] - sx, f["y"] - sy) < 2 for f in finds)

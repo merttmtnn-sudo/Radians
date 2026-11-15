@@ -81,3 +81,17 @@ difference image shows the moving pair at 4–5 µm and none at 1.1–1.6 µm.
 discovery position. During SPHEREx (2025–26) it is ~125″ west and ~10″ north of that point, outside a 100″
 field. Radians handles this by propagating proper motion to each exposure date and by its 240″ default
 field.
+
+
+## Two independent finders and an injection test
+
+Every candidate is looked for twice. The **star tracker** links sources visit to visit and fits a straight
+line (moving), compares a star with itself at the same detector (variable), or finds a source absent from
+every other visit (one epoch only). The **difference pictures** subtract from each visit the median of the
+other visits: static stars cancel, a mover leaves an orange "is here now" / blue "was here" pair. A candidate
+both methods see is marked "found two ways" in the viewer.
+
+**Injection test** (`backend/tests/test_core.py::test_injected_faint_mover_recovered_two_ways`, runs in CI):
+a faint star (peak 6σ per pixel per visit) moving 1.5 px per visit across four visits, in Gaussian noise and
+a field of three static stars of 15–40σ, is recovered as the one moving candidate, by both finders; none of
+the static stars leaves a difference-picture detection.

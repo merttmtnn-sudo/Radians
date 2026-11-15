@@ -552,6 +552,7 @@ function renderCandidates() {
     const cat = catalogueStatus(c, states, hits);
     const notes = el('div', 'candnotes small');
     if (c.is_target) notes.append(el('span', 'tag', t('isTarget')));
+    if (c.found_by?.includes('difference')) { const tw = el('span', 'tag new', '✓✓ ' + t('twoWays')); tw.title = t('twoWaysTip'); notes.append(tw); }
     if (cat) {
       const line = el('p', 'candcat ' + cat.kind, t(cat.key, cat.vars));
       if (hits.gaia) line.title = t('knownGaia', { g: hits.gaia.g?.toFixed(1) ?? '?', pm: (Math.hypot(hits.gaia.pmra || 0, hits.gaia.pmdec || 0) / 1000).toFixed(2) });
