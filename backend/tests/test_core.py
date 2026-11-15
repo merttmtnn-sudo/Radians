@@ -352,3 +352,43 @@ def test_sharp_grids_and_limit():
     sharp._bilinear(acc, wacc, np.array([1.5]), np.array([1.0]), np.array([4.0]), 1.0, 3)
     assert abs(wacc.sum() - 1) < 1e-9 and abs(acc[3 + 1] - 2) < 1e-9
     assert main.LIMITS["/api/sharp"] == config.RATE_FRAMES
+
+
+
+def test_irsa_requests_in_flight_are_capped(monkeypatch):
+    """From Efe's PR #9: however many threads read, at most IRSA_SLOTS requests are in flight."""
+    import threading
+    import time
+    from app import fitsrange
+    state = {"now": 0, "max": 0}
+    lock = threading.Lock()
+
+    class Resp:
+        status_code = 206
+        content = b"x" * 10
+        headers = {"Content-Type": "application/octet-stream", "Content-Range": "bytes 0-9/100"}
+
+        def raise_for_status(self):
+            pass
+
+        def close(self):
+            pass
+
+    class Sess:
+        def get(self, *a, **k):
+            with lock:
+                state["now"] += 1
+                state["max"] = max(state["max"], state["now"])
+            time.sleep(0.02)
+            with lock:
+                state["now"] -= 1
+            return Resp()
+
+    monkeypatch.setattr(fitsrange, "session", lambda: Sess())
+    monkeypatch.setattr(fitsrange, "IRSA_SLOTS", threading.BoundedSemaphore(3))
+    threads = [threading.Thread(target=fitsrange._get, args=("u", [(0, 10)])) for _ in range(20)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert 1 <= state["max"] <= 3

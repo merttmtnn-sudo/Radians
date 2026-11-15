@@ -185,22 +185,48 @@ export function computeView(images, variances, view) {
     case 'diff_median': { const m = medianImage(images); return images.map(im => diff(im, m)); }
     case 'diff_prev': return images.map((im, i) => diff(im, images[(i - 1 + images.length) % images.length]));
     case 'diff_first': return images.map(im => diff(im, images[0]));
-    case 'stack': return [stackImage(images, variances)];
+    case 'stack': case 'time': return [stackImage(images, variances)];   // 'time' is drawn from the frames (app.js)
     default: return images;
   }
 }
 
 export const isDiffView = (v) => v.startsWith('diff');
 
-/** Diverging lookup table: index 0 = most negative (blue), 128 = zero (black), 255 = most positive (white). */
+/** Diverging lookup table: index 0 = most negative (blue: was here), 128 = zero (black), 255 = most positive
+ * (orange: is here now). */
 export function lutDiverging() {
   const out = new Uint8ClampedArray(256 * 3);
   for (let i = 0; i < 256; i++) {
     const t = (i - 128) / 127;
-    const [r, g, b] = t >= 0 ? [t, t, t] : [-0.35 * t, -0.65 * t, -t];
+    const [r, g, b] = t >= 0 ? [t, 0.66 * t, 0.26 * t] : [-0.30 * t, -0.62 * t, -t];
     out[i * 3] = r * 255; out[i * 3 + 1] = g * 255; out[i * 3 + 2] = b * 255;
   }
   return out;
+}
+
+/** Colour of visit k of n for the colour-by-time view: blue -> green -> red. */
+export function timeColour(k, n) {
+  const u = n > 1 ? k / (n - 1) : 0.5;
+  return u < 0.5 ? [0.2 + 0.2 * u, 0.45 + 1.1 * u, 1 - 1.2 * u] : [0.3 + 1.4 * (u - 0.5), 1 - 1.3 * (u - 0.5), 0.4 - 0.6 * (u - 0.5)];
+}
+
+/** Minimal FITS file (one float32 image, sky WCS from a header dict) as bytes. */
+export function fitsBytes(img, n, cards) {
+  const card = (k, v, c = '') => {
+    const val = typeof v === 'string' ? `'${v.replace(/'/g, "''")}'`.padEnd(20) : String(v).padStart(20);
+    return (k.padEnd(8) + '= ' + val + (c ? ' / ' + c : '')).slice(0, 80).padEnd(80);
+  };
+  const lines = [card('SIMPLE', 'T'), card('BITPIX', -32), card('NAXIS', 2), card('NAXIS1', n), card('NAXIS2', n)]
+    .map((l, i) => (i === 0 ? 'SIMPLE  =                    T'.padEnd(80) : l));
+  for (const [k, v, c] of cards) lines.push(card(k, v, c));
+  lines.push('END'.padEnd(80));
+  let head = lines.join('');
+  head = head.padEnd(Math.ceil(head.length / 2880) * 2880, ' ');
+  const dataLen = Math.ceil((n * n * 4) / 2880) * 2880;
+  const buf = new ArrayBuffer(head.length + dataLen), u8 = new Uint8Array(buf), dv = new DataView(buf);
+  for (let i = 0; i < head.length; i++) u8[i] = head.charCodeAt(i) & 0x7f;
+  for (let i = 0; i < n * n; i++) dv.setFloat32(head.length + i * 4, img[i], false);   // big-endian, NaN stays NaN
+  return u8;
 }
 
 /** Signed stretch for difference images: -1..1 (NaN for missing data). */

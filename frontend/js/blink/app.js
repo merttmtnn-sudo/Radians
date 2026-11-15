@@ -1,5 +1,5 @@
 import {
-  decodeB64, percentiles, stretchValue, stretchSigned, lut, lutDiverging, pixToSky, formatRA, formatDec,
+  decodeB64, percentiles, stretchValue, stretchSigned, lut, lutDiverging, pixToSky, formatRA, formatDec, timeColour, fitsBytes,
   flagNames, parseState, computeView, isDiffView, skyToPix, stackImage, rgbChannels,
 } from './sky.js';
 import { t, setLang, getLang } from '../core/i18n.js';
@@ -10,7 +10,7 @@ import { createCurious } from './curious.js';
 import { CUBE_URL, nearestSlice } from '../core/cube.js';
 import { depthStart, depthLive, depthLoad, depthHide } from './depth.js';
 import { getPalette, setPalette, viewerCmap } from '../core/palette.js';
-import { curated } from '../content/facts.js';
+import { curated, TARGETS } from '../content/facts.js';
 import { headline, clarity, catalogueStatus, nearestAt, tooFast, cleanId, CAT_NAMES } from './finds.js';
 
 const $ = (id) => document.getElementById(id);
@@ -85,7 +85,7 @@ function info(dl, rows) {
 }
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-const isStack = () => els.view.value === 'stack';
+const isStack = () => els.view.value === 'stack' || els.view.value === 'time';
 
 // ------------------------------------------------------------------ detectors
 function buildDetChips() {
@@ -106,7 +106,39 @@ function buildDetChips() {
   }));
 }
 
+// Fast band first: a new spot reads one detector band (seconds instead of minutes); D1–D6 chips load another
+// band, "All detectors" all six. The choice is remembered. The prepared challenge targets open in full.
+const FAST_DEFAULT = 3;                                             // 1.63–2.42 µm: the map's default plane
+const band = { fast: (() => { try { return localStorage.getItem('radians-fastband') !== '0'; } catch { return true; } })(),
+  det: (() => { try { return Number(localStorage.getItem('radians-fastdet')) || FAST_DEFAULT; } catch { return FAST_DEFAULT; } })() };
+function saveBand() { try { localStorage.setItem('radians-fastband', band.fast ? '1' : '0'); localStorage.setItem('radians-fastdet', String(band.det)); } catch { /* private window */ } }
+function newSpotDets() { return band.fast ? [band.det] : ALL_DETS; }
+function buildBandBar() {
+  $('bandChips').replaceChildren(...ALL_DETS.map(d => {
+    const b = el('button', '', `D${d}`);
+    b.type = 'button'; b.dataset.det = d;
+    b.onclick = () => { band.fast = true; band.det = d; saveBand(); setDets([d]); requery(); };
+    return b;
+  }));
+  for (const b of $('bandSeg').querySelectorAll('button')) b.onclick = () => {
+    band.fast = b.dataset.band === 'fast'; saveBand();
+    setDets(band.fast ? [band.det] : ALL_DETS);
+    requery();
+  };
+}
+function syncBandUi() {
+  const one = state.dets.size === 1 ? [...state.dets][0] : null;
+  for (const b of $('bandSeg').querySelectorAll('button')) {
+    const on = b.dataset.band === 'fast' ? one !== null : state.dets.size === ALL_DETS.length;
+    b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+    b.title = t(b.dataset.band === 'fast' ? 'bandFastTip' : 'bandAllTip');
+  }
+  $('bandChips').hidden = one === null && state.dets.size === ALL_DETS.length;
+  for (const b of $('bandChips').children) b.setAttribute('aria-pressed', String(state.dets.has(Number(b.dataset.det)) && state.dets.size === 1));
+}
+
 function syncDetUi() {
+  syncBandUi();
   for (const b of els.detchips.children) b.setAttribute('aria-pressed', String(state.dets.has(Number(b.dataset.det))));
   const key = [...state.dets].sort().join(',');
   const match = [...els.preset.options].find(o => o.value === key);
@@ -242,7 +274,7 @@ function applyView(startIdx = state.idx) {
   if (!state.data) return;
   state.shown = computeView(state.images, state.variances, els.view.value);
   els.scrub.max = state.shown.length - 1;
-  els.viewHelp.textContent = isDiffView(els.view.value) ? t('viewHelpDiff') : isStack() ? t('viewHelpStack') : '';
+  els.viewHelp.textContent = isDiffView(els.view.value) ? t('viewHelpDiff') : els.view.value === 'time' ? t('viewHelpTime') : isStack() ? t('viewHelpStack') : '';
   computeLevels();
   buildTimeline();
   show(isStack() ? 0 : startIdx);
@@ -270,6 +302,7 @@ function frameFlags(i) {
 function render() {
   const { data } = state;
   if (!data) return;
+  if (els.view.value === 'time') { renderTime(); return; }
   if (rgbReady()) { renderRgb(); return; }
   const n = data.grid.n;
   const cmp = compareOn();
@@ -973,7 +1006,10 @@ function fromUrl() {
     if (s.wlw !== null) setSelect(els.wlW, s.wlw);
   }
   syncWlBox();
-  setDets(s.det ? s.det.split(',').map(Number) : ALL_DETS);
+  // a new spot (from the map, the planetarium or a shared link without bands): fast band first,
+  // unless it is one of the prepared challenge targets, which open in full at once
+  const prepared = s.q && TARGETS.some(x => x.q.toLowerCase() === s.q.toLowerCase());
+  setDets(s.det ? s.det.split(',').map(Number) : prepared ? ALL_DETS : newSpotDets());
   const common = { fov: els.fov.value, mode: els.mode.value, frame: s.frame, autoplay: s.frame === null };
   if (s.ra !== null && s.dec !== null) run({ q: s.q, ra: s.ra, dec: s.dec, pmra: s.pmra, pmdec: s.pmdec, ...common });
   else if (s.q) run({ q: s.q, ...common });
@@ -982,7 +1018,9 @@ function fromUrl() {
 els.search.onsubmit = (e) => {
   e.preventDefault();
   const q = els.q.value.trim();
-  if (q) run({ q, fov: els.fov.value, mode: els.mode.value });
+  if (!q) return;
+  if (!TARGETS.some(x => x.q.toLowerCase() === q.toLowerCase())) setDets(newSpotDets());
+  run({ q, fov: els.fov.value, mode: els.mode.value });
 };
 for (const e of [els.fov, els.mode]) e.onchange = requery;
 els.examples.onclick = (e) => {
@@ -1447,6 +1485,8 @@ e4.ctxGaia.onchange = e4.ctxCatwise.onchange = () => ex.aladin && setAladinCats(
 
 // ------------------------------------------------------------------ start
 buildDetChips();
+buildBandBar();
+syncBandUi();
 let startLang = parseState(location.search).lang;
 try { startLang = startLang || localStorage.getItem('radians-lang'); } catch { /* private mode */ }
 applyLang(startLang || 'en');
@@ -1764,3 +1804,57 @@ function renderRgb() {
   ctx.putImageData(out, 0, 0);
   drawOverlay();
 }
+document.addEventListener('radians:lang', syncBandUi);
+
+// Colour by time: every visit in its own colour (first blue, middle green, last red), added up and divided by
+// the colour total, so a star that stays put comes out white and anything that moves leaves a coloured trail.
+function renderTime() {
+  const { data } = state, n = data.grid.n, ims = state.images, N = ims.length;
+  const [lo, hi] = percentiles(ims, [Number(els.lo.value), Number(els.hi.value)]);
+  const kind = els.stretch.value, cols = ims.map((_, k) => timeColour(k, N));
+  const tot = [0, 1, 2].map(c => cols.reduce((s, x) => s + x[c], 0) || 1);
+  const ctx = els.sky.getContext('2d'), out = ctx.createImageData(n, n);
+  for (let y = 0; y < n; y++) {
+    const row = n - 1 - y;
+    for (let x = 0; x < n; x++) {
+      const i = y * n + x, o = (row * n + x) * 4;
+      let r = 0, g = 0, b = 0;
+      for (let k = 0; k < N; k++) {
+        const v = stretchValue(ims[k][i], lo, hi, kind);
+        if (Number.isNaN(v)) continue;
+        r += v * cols[k][0]; g += v * cols[k][1]; b += v * cols[k][2];
+      }
+      out.data[o] = Math.min(255, Math.round(255 * r / tot[0]));
+      out.data[o + 1] = Math.min(255, Math.round(255 * g / tot[1]));
+      out.data[o + 2] = Math.min(255, Math.round(255 * b / tot[2]));
+      out.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+  drawOverlay();
+}
+
+// FITS of the visit on screen (or the stack): float32, MJy/sr, with the sky grid's WCS and the visit dates
+$('fitsDl').onclick = () => {
+  if (!state.data) return;
+  const d = state.data, n = d.grid.n, i = isStack() ? 0 : state.idx;
+  const img = isStack() ? stackImage(state.images, state.variances) : state.images[i];
+  const f = isStack() ? null : d.frames[i];
+  const cards = [];
+  for (const [k, v] of Object.entries(d.grid.wcs || {})) {
+    if (/^(NAXIS|SIMPLE|BITPIX|END)/.test(k) || v === null || typeof v === 'object') continue;
+    cards.push([k.slice(0, 8), typeof v === 'number' ? v : String(v)]);
+  }
+  cards.push(['BUNIT', 'MJy/sr', 'surface brightness'], ['TELESCOP', 'SPHEREx'], ['ORIGIN', 'Radians (NASA/IPAC IRSA data)'],
+    ['DETECTOR', [...state.dets].sort().map(x => 'D' + x).join(' ')]);
+  if (f) cards.push(['EPOCH', f.epoch, 'visit number'], ['DATE-BEG', String(f.date_start || '').slice(0, 19)], ['DATE-END', String(f.date_end || '').slice(0, 19)]);
+  else cards.push(['COMMENT', 'stack of all visits']);
+  const bytes = fitsBytes(img, n, cards);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/fits' }));
+  const nm = (els.q.value.trim() || 'spot').replace(/[^\w.-]+/g, '-');
+  a.download = `radians-${nm}-${f ? 'E' + f.epoch : 'stack'}.fits`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(t('fitsDone'));
+};

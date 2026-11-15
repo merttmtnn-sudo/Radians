@@ -177,6 +177,14 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .viewer { min-width: 0; }
 .viewbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 .viewbar #view { margin-left: auto; }
+/* fast band / all detectors */
+.bandbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bandchips { display: inline-flex; gap: 4px; }
+.bandchips[hidden] { display: none; }
+.bandchips button { min-width: 34px; height: 28px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line, rgba(255,255,255,.14));
+  background: transparent; color: inherit; font: 600 12px/1 var(--mono, monospace); cursor: pointer; opacity: .75; }
+.bandchips button:hover { opacity: 1; }
+.bandchips button[aria-pressed="true"] { background: var(--accent, #ffb347); border-color: transparent; color: #1a1205; opacity: 1; }
 .viewhelp { min-height: 18px; margin-bottom: 8px; }
 .stage { position: relative; aspect-ratio: 1; max-height: calc(100vh - 250px); max-width: 100%; margin: 0 auto;
   background: #000; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }

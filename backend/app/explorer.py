@@ -29,7 +29,7 @@ from astropy.io import fits
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, Response
 
-from . import config
+from . import config, fitsrange
 
 IRSA = "https://irsa.ipac.caltech.edu"
 TAP = IRSA + "/TAP/sync"
@@ -41,7 +41,7 @@ URI_RE = re.compile(r"^ibe/data/spherex/[\w./-]+\.fits$")
 WAVE_SEED = Path(__file__).resolve().parent / "wave_seed"
 
 router = APIRouter(prefix="/api/sx")
-_cutout_slots = threading.BoundedSemaphore(8)   # cut-outs read from IRSA at the same time
+_cutout_slots = fitsrange.IRSA_SLOTS             # one IRSA request cap shared with the blink reader
 _pool = ThreadPoolExecutor(8)
 
 

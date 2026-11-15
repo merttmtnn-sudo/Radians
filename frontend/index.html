@@ -306,6 +306,14 @@
         <button type="button" data-view="images" data-i18n="segImages"></button>
         <button type="button" data-view="diff_median" data-i18n="segDiff"></button>
         <button type="button" data-view="stack" data-i18n="segStack"></button>
+        <button type="button" data-view="time" data-i18n="segTime"></button>
+      </div>
+      <div class="bandbar" id="bandBar">
+        <div class="seg" role="group" aria-label="Detectors" id="bandSeg">
+          <button type="button" data-band="fast" data-i18n="bandFast"></button>
+          <button type="button" data-band="all" data-i18n="bandAll"></button>
+        </div>
+        <div class="bandchips" id="bandChips" role="group" aria-label="Band"></div>
       </div>
       <select id="view" aria-label="View" class="input sm">
         <option value="images" data-i18n="viewImages"></option>
@@ -313,6 +321,7 @@
         <option value="diff_prev" data-i18n="viewDiffPrev"></option>
         <option value="diff_first" data-i18n="viewDiffFirst"></option>
         <option value="stack" data-i18n="viewStack"></option>
+        <option value="time" data-i18n="viewTime"></option>
       </select>
     </div>
     <p class="muted small viewhelp" id="viewHelp"></p>
@@ -346,6 +355,7 @@
       <button id="compare" class="btn sm" aria-pressed="false" data-i18n="compare" data-i18n-title="compareTitle"></button>
       <button id="zoom" class="btn sm mono" aria-label="Zoom">1×</button>
       <button id="gif" class="btn sm" data-i18n="gifDl"></button>
+      <button id="fitsDl" class="btn sm" data-i18n="fitsDl"></button>
     </div>
     <ol class="timeline" id="timeline"></ol>
 
