@@ -96,7 +96,7 @@ an H-R diagram, a period search, FITS / CSV / GIF downloads, English and Turkish
 5. **All detectors after that**, in the background: every exposure of all six bands is reprojected
    onto the native 6.15″ grid, background-subtracted, grouped into epochs and co-added with
    inverse-variance weights. This feeds the 0.75–5 µm spectrum, the colour composite, the detector
-   tools, the Sharpening section and the tracker.
+   tools and the tracker.
 6. Every exposure also gives a brightness at a known wavelength (the SPHEREx linear-variable
    filters), which is what makes on-the-fly spectra possible.
 
