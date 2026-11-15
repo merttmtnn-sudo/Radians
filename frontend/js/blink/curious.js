@@ -4,7 +4,7 @@
 import { scatterChart } from '../core/charts.js';
 import { compass } from './finds.js';
 
-export const TOOLS = ['hr', 'motion', 'period', 'star'];
+export const TOOLS = ['hr', 'motion', 'period', 'star', 'facts'];
 const LY_PER_PC = 3.2616;
 
 /** km/s across the sky from a motion in arcsec/yr and a parallax in mas; null without a parallax. */
@@ -87,6 +87,60 @@ export function knownLines(k, d) {
   return out;
 }
 
+/** "About this star": [[key, vars], ...] for a /api/curious/facts answer: what Gaia DR3 knows about
+ * the star itself, and the planets the NASA Exoplanet Archive lists around it. */
+export function factsLines(d) {
+  const out = [];
+  const s = d && d.star, sig = (v) => (v >= 100 ? Math.round(v).toLocaleString('en-US') : v >= 10 ? v.toFixed(0) : v >= 1 ? v.toFixed(1) : v.toFixed(2));
+  if (!s || s.reachable === false) out.push(['cuFactsDown', {}]);
+  else if (!s.found) out.push(['tyNoGaia', {}]);
+  else {
+    if (s.distance_ly != null) out.push([s.distance_from === 'parallax' ? 'cuFactDist' : 'cuFactDistModel', { d: sig(s.distance_ly) }]);
+    if (s.radius_sun != null) out.push(['cuFactRadius', { r: sig(s.radius_sun) }]);
+    if (s.luminosity_sun != null) out.push(['cuFactLum', { l: sig(s.luminosity_sun) }]);
+    if (s.mass_sun != null) out.push(['cuFactMass', { m: sig(s.mass_sun) }]);
+    if (s.age_gyr != null) out.push(['cuFactAge', { a: sig(s.age_gyr) }]);
+    if (s.rv_kms != null) out.push([s.rv_kms < 0 ? 'cuFactToward' : 'cuFactAway', { v: Math.round(Math.abs(s.rv_kms)) }]);
+    if (s.space_kms != null) out.push(['cuFactSpace', { v: Math.round(s.space_kms) }]);
+    const a = s.in_1000yr_arcmin;
+    if (a >= 0.5 && s.direction) {
+      out.push([a >= 15.5 ? 'cuFactFutureMoon' : 'cuFactFuture',
+        { a: a < 60 ? `${a.toFixed(1)}′` : `${(a / 60).toFixed(1)}°`, dir: s.direction, moons: (a / 31).toFixed(1) }]);
+    }
+    for (const kind of s.binary || []) out.push([`cuFactBinary_${kind}`, {}]);
+    if (!(s.binary || []).length && s.ruwe != null) out.push([s.double_hint ? 'cuFactRuwe' : 'cuFactSingle', { r: s.ruwe.toFixed(1) }]);
+  }
+  const p = d && d.planets;
+  if (!p || p.reachable === false) out.push(['cuPlanetsDown', {}]);
+  else if (!p.planets.length) out.push(['cuPlanetsNone', {}]);
+  else {
+    out.push(['cuPlanets', { n: p.planets.length, host: p.host || '' }]);
+    for (const pl of p.planets.slice(0, 8)) {
+      const vars = { name: pl.name, p: pl.period_d != null ? sig(pl.period_d) : '?', m: pl.mass_earth != null ? sig(pl.mass_earth) : '', year: pl.year || '?' };
+      out.push([pl.mass_earth != null ? 'cuPlanet' : 'cuPlanetNoMass', vars]);
+    }
+  }
+  return out;
+}
+
+/** Catalogue brightness next to ours: rows [band, wavelength µm, catalogue mJy, SPHEREx mJy or null,
+ * SPHEREx / catalogue or null]. surveys: the /api/curious/xmatch answer; points: the measured
+ * spectrum [{wavelength, value (µJy), saturated, flagged}]. SPHEREx's value is the median of the
+ * clean points within 4% of the band's wavelength (at least three). */
+export function fluxRows(surveys, points) {
+  const rows = [];
+  for (const s of surveys || []) {
+    for (const f of (s.state === 'found' && s.fluxes) || []) {
+      if (f.um < 0.75 || f.um > 5.0) continue;                    // outside what SPHEREx sees
+      const near = (points || []).filter(p => !p.saturated && !p.flagged && Number.isFinite(p.value)
+        && Math.abs(p.wavelength / f.um - 1) <= 0.04).map(p => p.value).sort((a, b) => a - b);
+      const ours = near.length >= 3 ? near[near.length >> 1] : null;
+      rows.push([`${s.survey} ${f.band}`, f.um, f.ujy / 1000, ours != null ? ours / 1000 : null, ours != null && f.ujy > 0 ? ours / f.ujy : null]);
+    }
+  }
+  return rows;
+}
+
 /** "Other catalogues": rows [name, id or null, magnitudes text, stateKey or null]. */
 export function starRows(gaia, surveys) {
   const mags = (m) => Object.entries(m || {}).filter(([, v]) => typeof v === 'number').map(([k, v]) => `${k} ${v.toFixed(2)}`).join(' · ');
@@ -141,8 +195,9 @@ export function createCurious(host, { t, ctx }) {
       if (!r.ok) throw new Error(String(r.status));
       return { ...(await r.json()), known: await known };
     }
+    if (tool === 'facts') return get('api/curious/facts', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), gaia_id: c.gaiaId });
     const [g, x] = await Promise.all([gaia(), get('api/curious/xmatch', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), pmra: c.pmra, pmdec: c.pmdec, mjd: c.mjd.toFixed(1) })]);
-    return { gaia: g, surveys: x.surveys };
+    return { gaia: g, surveys: x.surveys, flux: fluxRows(x.surveys, c.points) };
   }
 
   async function run(tool) {
@@ -223,6 +278,21 @@ export function createCurious(host, { t, ctx }) {
       table.append(tr);
     }
     out.append(table, el('p', 'muted small', t('cuStarNote')));
+    if (d.flux && d.flux.length) {
+      // the same star's brightness in the other surveys, next to what SPHEREx measured at that wavelength
+      const mjy = (v) => (v >= 100 ? v.toFixed(0) : v >= 1 ? v.toFixed(1) : v.toFixed(2));
+      const ft = el('table', 'cutable');
+      const fh = el('tr');
+      for (const k of ['cuFluxBand', 'cuFluxTheirs', 'cuFluxOurs', 'cuFluxRatio']) fh.append(el('th', '', t(k)));
+      ft.append(fh);
+      for (const [band, um, theirs, ours, ratio] of d.flux) {
+        const tr = el('tr');
+        tr.append(el('td', '', `${band} (${um.toFixed(2)} µm)`), el('td', 'mono', mjy(theirs)),
+          el('td', 'mono', ours != null ? mjy(ours) : '–'), el('td', 'mono', ratio != null ? ratio.toFixed(2) : '–'));
+        ft.append(tr);
+      }
+      out.append(el('h5', 'cusub', t('cuFluxTitle')), ft, el('p', 'muted small', t('cuFluxNote')));
+    }
   }
 
   function draw() {
@@ -251,6 +321,7 @@ export function createCurious(host, { t, ctx }) {
     if (s.tool === 'hr') drawHr(out, d);
     else if (s.tool === 'motion') { lines(out, motionLines(c.cand, d.gaia, d.fit)); out.append(el('p', 'muted small', t('cuMotionNote'))); }
     else if (s.tool === 'period') drawPeriod(out, d);
+    else if (s.tool === 'facts') { lines(out, factsLines(d)); out.append(el('p', 'muted small', t('cuFactsNote'))); }
     else drawStar(out, d);
   }
 

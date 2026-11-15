@@ -12,3 +12,4 @@ DEMO = BACKEND / "demo" / "engine"                                # pre-built vi
 IRSA_CONCURRENCY = int(os.environ.get("SKYSHIFT_IRSA_CONCURRENCY", 16))
 SIA_TTL_HOURS = float(os.environ.get("SKYSHIFT_SIA_TTL_HOURS", 72))
 MAX_DISK_GB = float(os.environ.get("SKYSHIFT_MAX_DISK_GB", 5))
+MAX_GRID = int(os.environ.get("SKYSHIFT_MAX_GRID", 300))          # output pixels across a view (180 on a small server)

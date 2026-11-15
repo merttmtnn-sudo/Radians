@@ -124,14 +124,14 @@ pre-built views of the five challenge fields in `backend/demo/engine`):
 
 | Injected | S/N 5 | S/N 8 | S/N 12 | S/N 20 | S/N 40 |
 |---|---|---|---|---|---|
-| Mover, 9″/yr | 50% (16/32) | 100% (32/32) | 100% (32/32) | 91% (29/32) | 100% (32/32) |
-| Brightened (×2 in the last pass) | 22% (7/32) | 34% (11/32) | 53% (17/32) | 100% (32/32) | 100% (32/32) |
-| Appeared (last pass only) | 53% (17/32) | 100% (32/32) | 100% (32/32) | 100% (32/32) | 100% (32/32) |
+| Mover, 9″/yr | 50% (16/32) | 100% (32/32) | 100% (32/32) | 97% (31/32) | 100% (32/32) |
+| Brightened (×2 in the last pass) | 25% (8/32) | 28% (9/32) | 78% (25/32) | 100% (32/32) | 100% (32/32) |
+| Appeared (last pass only) | 47% (15/32) | 100% (32/32) | 100% (32/32) | 100% (32/32) | 100% (32/32) |
 
 | Field (nothing injected) | Band | Passes | Finds besides the target | Finder's own note |
 |---|---|---|---|---|
-| Epsilon Indi B | 5 | 4 | 0 | – |
-| WISE 0855−0714 | 5 | 3 | 0 | too few pictures at matching wavelengths (3 per pass): it does not search |
+| Epsilon Indi B | 5 | 5 | 0 | – |
+| WISE 0855−0714 | 5 | 4 | 0 | too few pictures at matching wavelengths: it does not search |
 | Barnard's Star | 5 | 3 | 0 | – |
 | RW Aurigae | 6 | 3 | 0 | – |
 | R Draconis | 6 | 4 | 0 | – |
@@ -152,6 +152,15 @@ Reading it:
 
 The tracker's own table above was run again on the merged code (15 Nov 2026) and came out the same,
 cell for cell.
+
+This table was run again after two later changes to the fast band (same day): pass pictures are a
+clipped mean instead of a median (`stacking.pass_stack`: per pixel, the mean of the frames within
+3 sigma of the median; measured on 92 real pass pictures from two independent halves of their
+frames, the noise is 11% lower), and a new visit starts after 20 days without data instead of 45
+(so Epsilon Indi B has five passes and WISE 0855 four). Before those changes the rows read
+50 / 100 / 100 / 91 / 100% (mover), 22 / 34 / 53 / 100 / 100% (brightened) and 53 / 100 / 100 / 100 /
+100% (appeared): the same within the scatter of 32 trials, except a doubling at S/N 12, which went
+from 53% to 78%.
 
 ## "Does it pulse?": the brightness check
 

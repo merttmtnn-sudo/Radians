@@ -87,6 +87,49 @@ def test_known_variable_stars(tmp_path, monkeypatch):
     assert curious.gaia_variable("not a number") == {"found": False}
 
 
+def test_star_facts_and_planets(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    head = "#\n#   VizieR\n\n"
+    main = ("Source\tPlx\te_Plx\tpmRA\tpmDE\tRV\te_RV\tRUWE\tTeff\tlogg\tDist\tNSS\tDup\n \tmas\tmas\tmas/yr\tmas/yr\tkm/s\tkm/s\t \tK\t \tpc\t \t \n"
+            "---\t---\t---\t---\t---\t---\t---\t---\t---\t---\t---\t-\t-\n"
+            "4472832130942575872\t 546.9759\t 0.0401\t -801.551\t10362.394\t-110.47\t 0.13\t  1.085\t 3099.6\t 4.7640\t    1.8275\t0\t0\n")
+    flame = ("Source\tRad-Flame\tLum-Flame\tMass-Flame\tAge-Flame\n \tRsun\tLsun\tMsun\tGyr\n---\t---\t---\t---\t---\n"
+             "4472832130942575872\t  1.2179\t 1.374e+00\t 0.942\t12.131\n")
+
+    def vizier(url, params, **kw):
+        return Reply(head + (main if params["-source"] == curious.GAIA_MAIN else flame))
+    monkeypatch.setattr(explorer, "_get", vizier)
+    s = curious.star_facts("Gaia DR3 4472832130942575872")
+    assert s["found"] and abs(s["distance_ly"] - 5.96) < 0.02 and s["distance_from"] == "parallax"       # Barnard's Star
+    assert s["rv_kms"] == -110.5 and abs(s["across_kms"] - 90.1) < 0.5 and abs(s["space_kms"] - 142.5) < 1
+    assert s["direction"] == "north" and abs(s["in_1000yr_arcmin"] - 173.2) < 0.5                        # almost 3 degrees
+    assert not s["double_hint"] and s["binary"] == [] and s["radius_sun"] == 1.2179 and s["age_gyr"] == 12.131
+    # a poor single-star fit and Gaia's own binary flags are passed on; no FLAME row is not an error
+    double = main.replace("  1.085", "  2.300").replace("\t0\t0\n", "\t3\t0\n")
+    monkeypatch.setattr(explorer, "_get", lambda url, params, **kw: Reply(head + (double if params["-source"] == curious.GAIA_MAIN else "")))
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path / "b")
+    d = curious.star_facts("4472832130942575872")
+    assert d["double_hint"] and d["binary"] == ["astrometric", "spectroscopic"] and d["mass_sun"] is None
+    assert curious.star_facts("x") == {"found": False}
+    csv = ("pl_name,hostname,pl_orbper,pl_bmasse,pl_rade,disc_year,discoverymethod\n"
+           "Barnard's star b,Barnard's star,3.1533,0.37,0.75,2024,Radial Velocity\n")
+    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply(csv))
+    p = curious.known_planets(269.4485, 4.7394)
+    assert p["host"] == "Barnard's star" and p["planets"] == [{"name": "Barnard's star b", "period_d": 3.1533, "mass_earth": 0.37,
+                                                               "radius_earth": 0.75, "year": 2024, "method": "Radial Velocity"}]
+    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply("pl_name,hostname,pl_orbper,pl_bmasse,pl_rade,disc_year,discoverymethod\n"))
+    assert curious.known_planets(10.0, 5.0) == {"host": None, "planets": []}
+    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply("<!DOCTYPE html><html>busy</html>"))
+    import pytest
+    with pytest.raises(Exception):
+        curious.known_planets(11.0, 5.0)                                     # an error page is "unreachable", not "no planets"
+
+
+def test_catalogue_magnitudes_become_fluxes():
+    f = {x["band"]: x for x in curious.band_fluxes({"J": 5.244, "H": 4.834, "K": 4.524, "W9": 1.0, "W1": None})}
+    assert set(f) == {"J", "H", "K"} and abs(f["K"]["ujy"] / 1e6 - 10.33) < 0.05 and f["K"]["um"] == 2.159      # Barnard: about 10 Jy
+
+
 TSV = ("#\n#   VizieR\n\n2MASS\tRAJ2000\tDEJ2000\tJmag\tHmag\tKmag\n \tdeg\tdeg\tmag\tmag\tmag\n"
        "-----\t-----\t-----\t---\t---\t---\n17574849+0441405 \t269.452066\t+04.694608\t5.244\t4.834\t4.524\n")
 
@@ -124,6 +167,8 @@ def test_routes_report_services_that_are_down(tmp_path, monkeypatch):
     assert c.get("/api/curious/hr", params={"ra": 10, "dec": 5}).json()["reachable"] is False
     assert c.get("/api/curious/motion", params={"gaia_id": "123"}).json()["reachable"] is False
     assert [s["state"] for s in c.get("/api/curious/xmatch", params={"ra": 10, "dec": 5}).json()["surveys"]] == ["unreachable"] * 2
+    facts = c.get("/api/curious/facts", params={"ra": 10, "dec": 5, "gaia_id": "123"}).json()
+    assert facts["star"]["reachable"] is False and facts["planets"]["reachable"] is False
     known = c.get("/api/curious/variable", params={"ra": 10, "dec": 5, "gaia_id": "123"}).json()
     assert known["vsx"]["reachable"] is False and known["gaia"]["reachable"] is False
     assert c.get("/api/curious/variable", params={"ra": 10, "dec": 5}).json()["gaia"] == {"reachable": True, "found": False}

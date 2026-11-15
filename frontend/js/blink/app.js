@@ -20,7 +20,7 @@ const els = Object.fromEntries([
   'search', 'q', 'fov', 'mode', 'go', 'sky', 'overlay', 'stage', 'empty', 'loading', 'loadingMsg', 'loadingSub',
   'play', 'prev', 'next', 'scrub', 'fps', 'fpsVal', 'timeline', 'frameInfo', 'cursor', 'stretch', 'cmap', 'lo', 'hi',
   'wlWin', 'wlBox', 'wlC', 'wlW', 'wlLab', 'rgbNote',
-  'cross', 'flagView', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'view', 'viewHelp', 'detchips',
+  'cross', 'flagView', 'smooth', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'view', 'viewHelp', 'detchips',
   'srcBar', 'srcSeg', 'bandChips', 'srcStatus', 'deepStatus',
   'preset', 'loadingBar', 'wlMatch', 'zoom', 'gif', 'cands', 'candCount', 'candRange', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples', 'compare', 'listen',
 ].map(id => [id, $(id)]));
@@ -38,6 +38,7 @@ const state = {
   // seconds, then the whole band). 'deep': all detectors co-added (/api/frames), read afterwards.
   // state.data is whichever of the two is on screen.
   src: 'quick', band: null, quick: null, deepData: null, qabort: null,
+  sharp: null,                            // 'sharp': one super-resolution picture per visit from all detectors (see loadSharp)
   md: null,                               // wavelength-matched differences of the fast band (see matchedDiffs)
   qc: null,                               // finds on the fast band's difference picture (see loadQuickChanges)
   cands: [],                              // the cards: both finders' finds, merged, on the grid on screen
@@ -193,13 +194,39 @@ const save = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private 
 function setSrc(src) {
   if (!state.target || src === state.src) return;
   state.src = src;
-  save('radians-src', src);
+  if (src !== 'sharp') save('radians-src', src);    // sharpening is asked for per spot, not remembered
   syncSrcUi();
-  if (src === 'deep') {
+  if (src === 'sharp') {
+    if (state.sharp?.frames?.length) showSet(state.sharp);
+    else if (state.deepData?.frames?.length) loadSharp();
+    else toast(t('needDeep'));                      // it is made from the all-detector exposures: when they are in
+  } else if (src === 'deep') {
     if (state.deepData?.frames?.length) showSet(state.deepData);
     else toast(t('needDeep'));                      // being read: it goes on screen when it arrives
   } else if (state.quick?.frames?.length) showSet(state.quick);
   else startQuick();
+}
+
+/** One sharpened picture per visit: every exposure of the visit, all detector bands together,
+ * combined on pixels half the size (the server keeps the exposures the all-detector view read, so
+ * nothing is downloaded). It replaces the pictures only: finds and measurements stay those of the
+ * all-detector data and are moved onto the finer grid. */
+async function loadSharp() {
+  const deep = state.deepData;
+  if (!deep?.frames?.length || state.sharpBusy) return;
+  state.sharpBusy = true;
+  els.deepStatus.textContent = t('sharpMaking');
+  try {
+    const d = await api('api/frames', { ...state.params, mode: 'epoch', sharp: 2, candidates: false }, state.abort?.signal);
+    if (state.deepData !== deep) return;             // another spot was opened meanwhile
+    if (!d.frames?.length) { els.deepStatus.textContent = d.message || t('sharpNone'); if (state.src === 'sharp') setSrc('deep'); return; }
+    state.sharp = d;
+    const thin = d.frames.filter(f => f.thin).length;
+    els.deepStatus.textContent = t(thin ? 'sharpReadyThin' : 'sharpReady', { n: thin, min: d.sharp.min_exposures });
+    if (state.src === 'sharp') showSet(d);
+  } catch (e) {
+    if (e.name !== 'AbortError') { els.deepStatus.textContent = t('deepFailed', { msg: e.message }); if (state.src === 'sharp') setSrc('deep'); }
+  } finally { state.sharpBusy = false; }
 }
 els.srcSeg.onclick = (e) => { const b = e.target.closest('button[data-src]'); if (b) setSrc(b.dataset.src); };
 
@@ -359,6 +386,7 @@ async function runDeep(target, opts, ctl, background) {
       syncUrl(background);
       if (background ? was : opts.autoplay !== false) play();
     } else adoptDeep(data);
+    if (state.src === 'sharp') loadSharp();
     depthLoad(gridParams(), api);
     els.deepStatus.textContent = background ? t('deepReady') : '';
   } catch (e) {
@@ -441,6 +469,8 @@ async function run(opts) {
   state.band = opts.band ?? null;
   state.quick = null;
   state.deepData = null;
+  state.sharp = null;
+  state.sharpBusy = false;
   state.qc = null;
   state.cands = [];
   state.deepBusy = false;
@@ -710,10 +740,10 @@ function drawTargetMarker(ctx) {
     } else if (f.target_px) {                   // fast band: the engine's predicted spot (picture pixels, y down)
       x = f.target_px[0];
       y = n - 1 - f.target_px[1];
-    } else if (state.data.quick && !state.target.pmra) {
+    } else if ((state.data.quick || state.data.sharp) && !state.target.pmra) {
       [x, y] = skyToPix(state.target.ra, state.target.dec, state.data.grid);   // its grid centre is snapped to ~7"
     }
-  } else if (state.data.quick && !state.target.pmra) {
+  } else if ((state.data.quick || state.data.sharp) && !state.target.pmra) {
     [x, y] = skyToPix(state.target.ra, state.target.dec, state.data.grid);
   }
   const [cx, cy, k] = toCanvas(x, y);
@@ -1210,6 +1240,16 @@ els.next.onclick = () => { stop(); show(state.idx + 1); };
 els.scrub.oninput = () => { stop(); show(Number(els.scrub.value)); };
 els.fps.oninput = () => { els.fpsVal.textContent = els.fps.value; if (state.playing) play(); syncUrl(true); };
 for (const e of [els.stretch, els.cmap, els.cross, els.flagView]) e.onchange = () => { syncRgb(); render(); syncUrl(true); };
+
+// Pixels are drawn as hard squares by default: that is what was measured. "Smooth" lets the browser
+// blend neighbouring pixels, which looks better when zoomed in and adds no information.
+function setSmooth(on) {
+  els.sky.classList.toggle('smooth', on);
+  els.smooth.checked = on;
+  save('radians-smooth', on ? '1' : '0');
+}
+els.smooth.onchange = () => setSmooth(els.smooth.checked);
+setSmooth(saved('radians-smooth') === '1');
 // one palette for the map, the blink and the sharpening view ('rgb' = the three-detector colour composite here)
 els.cmap.addEventListener('change', () => setPalette(els.cmap.value));
 document.addEventListener('radians:palette', () => {
@@ -1287,7 +1327,7 @@ function syncUrl(replace = false) {
   p.set('fov', els.fov.value);
   p.set('mode', els.mode.value);
   if (state.dets.size < 6) p.set('det', [...state.dets].sort().join(','));
-  if (state.src === 'deep') p.set('src', 'deep');
+  if (state.src === 'deep' || state.src === 'sharp') p.set('src', 'deep');
   else if (state.quick?.quick.band ?? state.band) p.set('band', state.quick?.quick.band ?? state.band);   // the band on screen
   if (els.view.value !== 'images') p.set('view', els.view.value);
   if (els.fps.value !== '2') p.set('fps', els.fps.value);
@@ -1537,7 +1577,7 @@ async function photAt(x, y) {
     }
   }
   let px = bx, py = by;
-  if (state.data.quick) {
+  if (state.data !== state.deepData) {              // the fast band or the sharpened pictures: another grid
     if (!state.deepData?.grid) {
       const [ra, dec] = pixToSky(bx, by, state.data.grid);
       ex.click = { x: bx, y: by, ra, dec };

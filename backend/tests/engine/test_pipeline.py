@@ -4,7 +4,7 @@ import time
 import numpy as np
 import pytest
 
-from app.engine import sia, stacking, store
+from app.engine import field, sia, stacking, store
 from app.engine.field import CutoutCache, build_band, snap, spread_in_time, spread_in_wavelength
 from app.engine.fitsread import Reader
 from app.engine.http import Http
@@ -57,6 +57,33 @@ def test_group_passes_gaps_and_long_runs():
     groups = stacking.group_passes(t)
     assert groups[0] == [0, 1, 2] and groups[1] == [3, 4] and groups[2] == [5]
     assert len(groups) == 3 + 3                  # a 155-day continuous run splits into 3 bins
+
+
+def test_pass_picture_is_a_clipped_mean():
+    """Less noise than the median, and a cosmic ray in one frame still leaves no mark."""
+    rng = np.random.default_rng(4)
+    frames = rng.standard_normal((40, 60, 60)).astype("f4")
+    frames[7, 10, 10] = 500.0                                   # a cosmic ray
+    frames[:, 30, 30] += 50.0                                   # a star, in every frame
+    frames[3, 5:8, 5:8] = np.nan                                # a blank patch in one frame
+    idx = np.arange(40)
+    med, mean = stacking.median_stack(frames, idx), stacking.pass_stack(frames, idx)
+    quiet = np.ones((60, 60), bool)
+    quiet[30, 30] = False
+    assert 0.75 < mean[quiet].std() / med[quiet].std() < 0.9    # the median's error is 25% larger for Gaussian noise
+    assert abs(mean[10, 10]) < 1 and abs(mean[30, 30] - 50) < 1 and np.isfinite(mean).all()
+    few = stacking.pass_stack(frames, idx[:5])                  # too few frames to judge scatter: the median
+    np.testing.assert_array_equal(few, stacking.median_stack(frames, idx[:5]))
+    assert np.isnan(stacking.pass_stack(frames, [])).all()
+    empty = np.full((8, 4, 4), np.nan, "f4")
+    assert np.isnan(stacking.pass_stack(empty, np.arange(8))).all()
+
+
+def test_big_fields_keep_two_arcsec_pixels():
+    assert field.grid_size(4.0) == (120, 2.0) and field.grid_size(10.0) == (300, 2.0)
+    assert field.grid_size(10.0, 60) == (300, 2.0)              # an ordinary field: 60 exposures
+    n, scale = field.grid_size(10.0, 600)                       # a deep field: coarser, so the cube fits in memory
+    assert scale > 2.0 and 600 * n * n <= field.MAX_CUBE_PIXELS * 1.02 and abs(n * scale - 600) < scale
 
 
 def test_a_short_return_visit_joins_its_neighbour():

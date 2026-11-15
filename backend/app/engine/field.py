@@ -31,7 +31,8 @@ from .fitsread import LayoutMismatch, Reader, pipeline_version, wavelength_at
 
 NATIVE_PIX_ARCSEC = 6.15
 DEFAULT_SCALE_ARCSEC = 2.0
-MAX_GRID = 180                 # bigger fields get coarser output pixels, to bound memory
+MAX_GRID = settings.MAX_GRID   # output pixels across: 300 keeps 2" pixels up to the largest field (10 arcmin)
+MAX_CUBE_PIXELS = 30e6         # exposures x output pixels kept in memory (about 150 MB); beyond it pixels get coarser
 SNAP_DEG = 0.002               # centres snap to ~7" so nearby clicks share one cache
 PREVIEW_PER_PASS = 8           # exposures per pass in a preview
 PROBE_PER_PASS = 24            # headers read per pass to choose them (deep fields have hundreds)
@@ -51,9 +52,16 @@ def cutout_half(size_arcmin: float) -> int:
     return int(math.ceil(size_arcmin * 60 / NATIVE_PIX_ARCSEC / 2 * math.sqrt(2))) + 3
 
 
-def grid_size(size_arcmin: float) -> tuple[int, float]:
-    scale = max(DEFAULT_SCALE_ARCSEC, round(size_arcmin * 60 / MAX_GRID, 3))
-    return int(round(size_arcmin * 60 / scale)), scale
+def grid_size(size_arcmin: float, n_frames: int = 0) -> tuple[int, float]:
+    """(pixels across, arcsec per pixel) of the output grid: 2" pixels, coarser only where the field
+    is wider than MAX_GRID of them, or where n_frames exposures of that size would not fit in memory
+    (a deep field seen hundreds of times in a 10 arcmin view)."""
+    side = size_arcmin * 60
+    scale = max(DEFAULT_SCALE_ARCSEC, side / MAX_GRID)
+    if n_frames > 0:
+        scale = max(scale, side / math.sqrt(MAX_CUBE_PIXELS / n_frames))
+    scale = math.ceil(scale * 1000 - 1e-9) / 1000
+    return int(round(side / scale)), scale
 
 
 def field_key(ra: float, dec: float) -> str:
@@ -289,7 +297,7 @@ def build_band(cache: CutoutCache, exps: list[dict], ra: float, dec: float, band
     errors += fetch_errors
     t_fetch = time.time() - started
 
-    n, scale = grid_size(size_arcmin)
+    n, scale = grid_size(size_arcmin, len(cuts))
     gw = stacking.grid_wcs(ra, dec, n, scale)
     sky = stacking.grid_sky(gw, n)
     k = len(cuts)
@@ -319,7 +327,7 @@ def build_band(cache: CutoutCache, exps: list[dict], ra: float, dec: float, band
     stacks, passes = {}, []
     for number, members in members_of.items():
         used = used_of[number]
-        stacks[number] = stacking.median_stack(frames, used)
+        stacks[number] = stacking.pass_stack(frames, used)
         basis = used if len(used) else members
         info = dict(index=number, start=iso_date(mjds[members].min()), end=iso_date(mjds[members].max()),
                     mjd=round(float(mjds[basis].mean()), 3), n_frames=int(len(members)), n_used=int(len(used)),

@@ -158,7 +158,99 @@ def gaia_variable(source_id) -> dict:
             "class": cls, "score": round(score, 2) if score is not None else None}
 
 
+# ---------------------------------------------------------------- the star itself
+GAIA_PARAMS = "I/355/paramp"                # Gaia DR3 astrophysical parameters (FLAME: radius, luminosity, mass, age)
+EXOPLANETS = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
+PLANET_RADIUS_DEG = 0.004                   # 14 arcsec around the star's Gaia position
+NSS = {1: "astrometric", 2: "spectroscopic", 4: "eclipsing"}
+RUWE_DOUBLE = 1.4                           # above this Gaia's single-star fit is poor: often an unseen companion
+
+
+def _vizier_rows(source: str, params: dict, cols: str, kind: str, key: str) -> list[dict]:
+    def run():
+        r = explorer._get(VIZIER, {"-source": source, **params, "-out": cols, "-out.max": "1"}, timeout=TIMEOUT, tries=1)
+        if not r.ok or "#" not in r.text[:200]:
+            raise explorer.Upstream("VizieR unavailable")
+        return parse_tsv(r.text)
+    return explorer._cached_json(kind, f"{source}:{key}", TTL, run)
+
+
+def star_facts(source_id) -> dict:
+    """What Gaia DR3 knows about one star beyond its place in the H-R diagram: distance, speed
+    along the line of sight and in space, where it will be in a thousand years, signs of a
+    companion, and (where Gaia's FLAME module has them) radius, luminosity, mass and age.
+    From VizieR's copy of Gaia DR3. {"found": False} if the source is unknown."""
+    sid = str(source_id or "").replace("Gaia DR3", "").strip()
+    if not sid.isdigit():
+        return {"found": False}
+    rows = _vizier_rows(GAIA_MAIN, {"Source": sid}, "Source,Plx,e_Plx,pmRA,pmDE,RV,e_RV,RUWE,Teff,logg,Dist,NSS,Dup", "cufacts", sid)
+    if not rows:
+        return {"found": False}
+    n = lambda k: explorer._num(rows[0].get(k))  # noqa: E731
+    plx, e_plx = n("Plx"), n("e_Plx")
+    good = plx is not None and plx > 0 and e_plx and plx / e_plx >= 5
+    dist_pc = 1000.0 / plx if good else n("Dist")
+    pmra, pmdec = n("pmRA") or 0.0, n("pmDE") or 0.0
+    rate = math.hypot(pmra, pmdec) / 1000.0                      # arcsec per year
+    across = tangential_speed(rate, plx) if good else None
+    rv = n("RV")
+    nss = int(n("NSS") or 0)
+    out = {"found": True, "id": sid, "distance_ly": round(dist_pc * 3.2616, 2) if dist_pc else None,
+           "distance_from": "parallax" if good else ("model" if dist_pc else None),
+           "rv_kms": round(rv, 1) if rv is not None else None, "rv_err": n("e_RV"),
+           "across_kms": round(across, 1) if across is not None else None,
+           "space_kms": round(math.hypot(across, rv), 1) if across is not None and rv is not None else None,
+           "rate": round(rate, 4), "direction": compass(math.degrees(math.atan2(pmra, pmdec))) if rate > 0 else None,
+           "in_1000yr_arcmin": round(rate * 1000 / 60, 2),
+           "ruwe": n("RUWE"), "double_hint": bool((n("RUWE") or 0) > RUWE_DOUBLE),
+           "binary": [name for bit, name in NSS.items() if nss & bit], "teff": n("Teff"), "logg": n("logg"),
+           "radius_sun": None, "luminosity_sun": None, "mass_sun": None, "age_gyr": None}
+    try:
+        flame = _vizier_rows(GAIA_PARAMS, {"Source": sid}, "Source,Rad-Flame,Lum-Flame,Mass-Flame,Age-Flame", "cuflame", sid)
+    except Exception:  # noqa: BLE001  (an extra: the facts above stand without it)
+        flame = []
+    if flame:
+        f = lambda k: explorer._num(flame[0].get(k))  # noqa: E731
+        out.update(radius_sun=f("Rad-Flame"), luminosity_sun=f("Lum-Flame"), mass_sun=f("Mass-Flame"), age_gyr=f("Age-Flame"))
+    return out
+
+
+def known_planets(ra: float, dec: float) -> dict:
+    """Planets the NASA Exoplanet Archive lists around a star within 14 arcsec of (ra, dec):
+    {"host", "planets": [{"name", "period_d", "mass_earth", "radius_earth", "year", "method"}]}."""
+    adql = ("select pl_name,hostname,pl_orbper,pl_bmasse,pl_rade,disc_year,discoverymethod from pscomppars "
+            f"where contains(point('icrs',ra,dec),circle('icrs',{ra:.5f},{dec:.5f},{PLANET_RADIUS_DEG}))=1 order by pl_orbper")
+
+    def run():
+        r = explorer._get(EXOPLANETS, {"query": adql, "format": "csv"}, timeout=TIMEOUT, tries=1)
+        if not r.ok or not r.text.lstrip().startswith("pl_name"):
+            raise explorer.Upstream("Exoplanet Archive unavailable")
+        return explorer._csv(r.text)
+    rows = explorer._cached_json("cuplanets", adql, TTL, run)
+    planets = [{"name": (row.get("pl_name") or "").strip(), "period_d": explorer._num(row.get("pl_orbper")),
+                "mass_earth": explorer._num(row.get("pl_bmasse")), "radius_earth": explorer._num(row.get("pl_rade")),
+                "year": int(explorer._num(row.get("disc_year")) or 0) or None, "method": (row.get("discoverymethod") or "").strip() or None}
+               for row in rows]
+    return {"host": (rows[0].get("hostname") or "").strip() if rows else None, "planets": planets}
+
+
 # ---------------------------------------------------------------- other catalogues
+# Flux of a zero-magnitude star (Jy) and the band's wavelength (micron), to put catalogue magnitudes
+# next to the SPHEREx spectrum: 2MASS (Cohen et al. 2003), WISE (Jarrett et al. 2011).
+ZERO_POINTS = {"J": (1594.0, 1.235), "H": (1024.0, 1.662), "K": (666.7, 2.159),
+               "W1": (309.54, 3.353), "W2": (171.787, 4.603), "W3": (31.674, 11.56), "W4": (8.363, 22.09)}
+
+
+def band_fluxes(mags: dict) -> list[dict]:
+    """[{"band", "um", "ujy"}] for the magnitudes of one survey (bands inside SPHEREx's range first)."""
+    out = []
+    for band, mag in (mags or {}).items():
+        if band in ZERO_POINTS and isinstance(mag, (int, float)):
+            f0, um = ZERO_POINTS[band]
+            out.append({"band": band, "um": um, "ujy": f0 * 10 ** (-0.4 * mag) * 1e6})
+    return out
+
+
 def parse_tsv(text: str) -> list[dict]:
     """Rows of a VizieR tab-separated answer (comment lines, then names, units, dashes, data)."""
     lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
@@ -207,6 +299,7 @@ def cross_match(ra, dec, pmra=0.0, pmdec=0.0, mjd=51544.5, radius_arcsec=6.0) ->
         if best is None:
             out.append({"survey": name, "state": "none"})
             continue
+        found = {m.replace("mag", ""): explorer._num(best.get(m)) for m in mags}
         out.append({"survey": name, "state": "found", "id": best.get(idcol, "").strip(), "sep_arcsec": round(apart(best), 2),
-                    "epoch": epoch, "mags": {m.replace("mag", ""): explorer._num(best.get(m)) for m in mags}})
+                    "epoch": epoch, "mags": found, "fluxes": band_fluxes(found)})
     return out

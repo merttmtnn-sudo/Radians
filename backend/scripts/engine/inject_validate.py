@@ -51,7 +51,7 @@ def stacks(frames, meta, arr):
     pairs = stacking.pair_by_wavelength(ia, ib, arr["waves"], stacking.MATCH_TOL_FRACTION * (hi - lo))
     if pairs is None:
         pairs = (ia, ib)
-    return stacking.median_stack(frames, pairs[0]), stacking.median_stack(frames, pairs[1]), (len(pairs[0]), len(pairs[1]))
+    return stacking.pass_stack(frames, pairs[0]), stacking.pass_stack(frames, pairs[1]), (len(pairs[0]), len(pairs[1]))
 
 
 def run_finder(frames, meta, arr):

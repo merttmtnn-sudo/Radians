@@ -29,7 +29,7 @@ _hits_lock = threading.Lock()
 LIMITS = {"/api/frames": config.RATE_FRAMES, "/api/photometry": config.RATE_PHOT}
 # endpoints that ask SIMBAD / Gaia / VizieR / IRSA for a visitor or fit on the server: one budget each
 LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr",
-                                              "/api/curious/motion", "/api/curious/period", "/api/curious/variable", "/api/curious/xmatch",
+                                              "/api/curious/facts", "/api/curious/motion", "/api/curious/period", "/api/curious/variable", "/api/curious/xmatch",
                                               "/api/object")})
 LIMITS["/api/sharp"] = config.RATE_FRAMES
 # the fast band's own lookups (its pictures, /api/quick, are long-polled and limited by the engine's build queue)
@@ -295,6 +295,7 @@ def frames(
     matched: bool = Query(True, description="co-add only wavelength-matched exposures (visits compared like for like)"),
     wl_min: float | None = Query(None, ge=0.5, le=5.5, description="wavelength window, micron: keep exposures that saw the target at >= wl_min"),
     wl_max: float | None = Query(None, ge=0.5, le=5.5, description="... and <= wl_max (no extra reads: every exposure is already read)"),
+    sharp: int | None = Query(None, ge=2, le=3, description="one super-resolution picture per visit, on pixels this many times finer (mode, matched and candidates are then ignored)"),
 ):
     b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job)
     if b is None:
@@ -314,6 +315,21 @@ def frames(
         if not frs:
             return {"grid": None, "frames": [], "exposures": [], "wl_range": wl_range, "wl_window": window,
                     "message": "No SPHEREx exposure saw this position in that wavelength window."}
+    if sharp:
+        # every exposure of a visit, all detector bands together, drizzled onto finer pixels (app/sharp.py);
+        # kept with the build, so going back and forth costs nothing
+        kept = b.setdefault("sharp", {})
+        key = (sharp, tuple(window) if window else None)
+        if key not in kept:
+            kept[key] = sharp_views.visits(frs, b["ra"], b["dec"], n, sharp)
+        out = kept[key]
+        if out is None:
+            return {"grid": None, "frames": [], "exposures": [], "wl_range": wl_range, "wl_window": window,
+                    "message": "No exposure could be used for a sharpened picture here."}
+        return {**out, "query": {"ra": ra, "dec": dec, "pmra": pmra, "pmdec": pmdec, "ref_epoch": ref_epoch, "mode": "epoch"},
+                "flag_bits": {str(bit): name for bit, name in config.FLAG_BITS.items()}, "bad_mask": config.BAD_MASK,
+                "exposures": [], "candidates": [], "n_exposures_read": len(frs), "detectors": config.DETECTORS,
+                "wl_range": wl_range, "wl_window": window}
     raw = {m: stack.group_raw(frs, m, matched) for m in {mode, "epoch", "epoch_detector"} if m == mode or candidates}
     out_frames = stack.encode(raw[mode])
     cands = []
@@ -565,6 +581,15 @@ def curious_period(req: PeriodRequest):
     return curious.period_search([p.model_dump() for p in req.points], req.wings)
 
 
+@app.get("/api/curious/facts")
+def curious_facts(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+                  gaia_id: str | None = Query(None, max_length=40)):
+    """The star itself: Gaia DR3's distance, speeds, companion hints, radius, luminosity, mass and age,
+    and the planets the NASA Exoplanet Archive lists around it. Each part says when its service is down."""
+    return {"star": _try(curious.star_facts, gaia_id) if gaia_id else {"reachable": True, "found": False},
+            "planets": _try(curious.known_planets, ra, dec)}
+
+
 @app.get("/api/curious/variable")
 def curious_variable(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
                      gaia_id: str | None = Query(None, max_length=40)):
@@ -596,6 +621,7 @@ def object_info(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge
 
 # ---------------------------------------------------------------- sharper than one pixel (drizzle)
 from . import sharp  # noqa: E402
+sharp_views = sharp          # /api/frames has a parameter called "sharp"
 
 
 @app.get("/api/sharp")

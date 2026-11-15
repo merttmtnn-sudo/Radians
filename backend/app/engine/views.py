@@ -22,7 +22,8 @@ from .field import CutoutCache, build_band, cutout_half, fetch_all, snap
 from .fitsread import Reader
 from .http import Http
 
-VERSION = 2                     # bump to invalidate stored views after a processing change
+VERSION = 3                     # bump to invalidate stored views after a processing change
+                                # (3: clipped-mean pass pictures, 20-day visits, 2" pixels on big fields)
 SIZE_RANGE = (1.0, 10.0)        # arcmin
 QUALITIES = ("preview", "standard")
 TARGET_KEYS = ("ra", "dec", "pmra", "pmdec", "plx", "epoch")
@@ -212,8 +213,8 @@ class ViewManager:
         ia, ib = np.flatnonzero(arr["pass_of"] == a), np.flatnonzero(arr["pass_of"] == b)
         pairs = stacking.pair_by_wavelength(ia, ib, arr["waves"], stacking.MATCH_TOL_FRACTION * (hi - lo))
         if pairs is not None:
-            stack_a = stacking.median_stack(arr["frames"], pairs[0])
-            stack_b = stacking.median_stack(arr["frames"], pairs[1])
+            stack_a = stacking.pass_stack(arr["frames"], pairs[0])
+            stack_b = stacking.pass_stack(arr["frames"], pairs[1])
             used = np.concatenate(pairs)
             how = dict(matched=True, n_a=int(len(pairs[0])), n_b=int(len(pairs[1])),
                        wave_um=[round(float(np.nanmin(arr["waves"][used])), 3), round(float(np.nanmax(arr["waves"][used])), 3)])

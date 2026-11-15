@@ -1,7 +1,7 @@
 // node --test frontend/tests
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { speedKms, motionLines, periodLines, knownLines, starRows } from '../js/blink/curious.js';
+import { speedKms, motionLines, periodLines, knownLines, starRows, factsLines, fluxRows } from '../js/blink/curious.js';
 
 const barnard = { reachable: true, found: true, id: '4472832130942575872', g: 8.195, bp_rp: 2.834, rate: 10.393, direction: 'north',
   parallax_mas: 546.976, parallax_ok: true, speed_kms: 90.1 };
@@ -102,4 +102,46 @@ test('how it moves: a line through the positions of the fast band', async () => 
   assert.ok(motionLines(null, gaia, { ok: false, reason: 'saturated' }).some(([k]) => k === 'cuMotionFitSat'));
   // without a fit the answer is what it was before
   assert.deepEqual(motionLines(null, gaia), motionLines(null, gaia, null));
+});
+
+test('about this star: Gaia facts and known planets', () => {
+  const star = { reachable: true, found: true, distance_ly: 5.96, distance_from: 'parallax', rv_kms: -110.5, across_kms: 90.1, space_kms: 142.6,
+    direction: 'north', in_1000yr_arcmin: 173.2, ruwe: 1.085, double_hint: false, binary: [], radius_sun: null, luminosity_sun: null, mass_sun: null, age_gyr: null };
+  const planets = { reachable: true, host: "Barnard's star", planets: [{ name: "Barnard's star b", period_d: 3.1533, mass_earth: 0.37, radius_earth: 0.75, year: 2024, method: 'Radial Velocity' },
+    { name: "Barnard's star c", period_d: 4.12, mass_earth: null, year: 2025 }] };
+  const l = factsLines({ star, planets });
+  assert.deepEqual(l[0], ['cuFactDist', { d: '6.0' }]);
+  assert.deepEqual(l[1], ['cuFactToward', { v: 111 }]);
+  assert.deepEqual(l[2], ['cuFactSpace', { v: 143 }]);
+  assert.deepEqual(l[3], ['cuFactFutureMoon', { a: '2.9°', dir: 'north', moons: '5.6' }]);
+  assert.deepEqual(l[4], ['cuFactSingle', { r: '1.1' }]);
+  assert.deepEqual(l[5], ['cuPlanets', { n: 2, host: "Barnard's star" }]);
+  assert.deepEqual(l[6], ['cuPlanet', { name: "Barnard's star b", p: '3.2', m: '0.37', year: 2024 }]);
+  assert.equal(l[7][0], 'cuPlanetNoMass');
+  // a Sun-like star with model values, a poor single-star fit, slow motion, no planets
+  const sun = factsLines({ star: { ...star, distance_ly: 50.4, distance_from: 'model', rv_kms: 33.2, space_kms: null, in_1000yr_arcmin: 3.4, direction: 'south_west',
+    ruwe: 2.3, double_hint: true, radius_sun: 1.2179, luminosity_sun: 1.374, mass_sun: 0.942, age_gyr: 12.131 }, planets: { reachable: true, host: null, planets: [] } });
+  assert.deepEqual(sun.map(x => x[0]), ['cuFactDistModel', 'cuFactRadius', 'cuFactLum', 'cuFactMass', 'cuFactAge', 'cuFactAway', 'cuFactFuture', 'cuFactRuwe', 'cuPlanetsNone']);
+  assert.deepEqual(sun[6][1], { a: '3.4′', dir: 'south_west', moons: '0.1' });
+  assert.deepEqual(factsLines({ star: { ...star, binary: ['astrometric', 'eclipsing'] }, planets }).filter(x => x[0].startsWith('cuFactBinary')).map(x => x[0]),
+    ['cuFactBinary_astrometric', 'cuFactBinary_eclipsing']);
+  // services that are down, and a spot without a Gaia star
+  assert.deepEqual(factsLines({ star: { reachable: false }, planets: { reachable: false } }), [['cuFactsDown', {}], ['cuPlanetsDown', {}]]);
+  assert.deepEqual(factsLines({ star: { reachable: true, found: false }, planets: { reachable: true, host: null, planets: [] } }), [['tyNoGaia', {}], ['cuPlanetsNone', {}]]);
+});
+
+test('catalogue brightness next to the SPHEREx spectrum', () => {
+  const surveys = [{ survey: '2MASS', state: 'found', fluxes: [{ band: 'J', um: 1.235, ujy: 12.7e6 }, { band: 'K', um: 2.159, ujy: 10.3e6 }] },
+    { survey: 'AllWISE', state: 'found', fluxes: [{ band: 'W1', um: 3.353, ujy: 5e6 }, { band: 'W3', um: 11.56, ujy: 1e6 }] },
+    { survey: 'Other', state: 'none' }];
+  const points = [2.10, 2.14, 2.16, 2.20, 2.24].map((w, i) => ({ wavelength: w, value: 9e6 + i * 1e6 }))
+    .concat([{ wavelength: 2.16, value: 99e6, saturated: true }, { wavelength: 2.15, value: 77e6, flagged: true }, { wavelength: 3.35, value: 4e6 }]);
+  const rows = fluxRows(surveys, points);
+  assert.deepEqual(rows.map(r => r[0]), ['2MASS J', '2MASS K', 'AllWISE W1']);          // W3 lies outside SPHEREx's range
+  assert.equal(rows[0][3], null);                                                        // no points near 1.24 µm
+  assert.equal(rows[1][2], 10300);
+  assert.equal(rows[1][3], 11000);                                                       // the median of the clean points within 4%
+  assert.ok(Math.abs(rows[1][4] - 11 / 10.3) < 1e-9);
+  assert.equal(rows[2][3], null);                                                        // one point is not enough
+  assert.deepEqual(fluxRows(null, points), []);
 });
