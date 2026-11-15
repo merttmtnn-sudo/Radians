@@ -53,7 +53,7 @@ Its optional ideas, and where Radians stands:
 | Suggestion on the challenge page | Radians |
 |---|---|
 | Easy to update with new data releases | Yes. Every public SPHEREx release in IRSA is searched live (`spherex_qr3` and `spherex_dr1` today; one setting to add the next), and the exposure lists are refreshed. |
-| Add each detector's data to improve signal-to-noise; spectra on the fly | Yes. Median stacks per sky pass in the fast band; inverse-variance co-adds per visit (and per visit and detector) over all detectors; a 0.75–5 µm spectrum of any pixel on request. |
+| Add each detector's data to improve signal-to-noise; spectra on the fly | Yes. Outlier-rejecting mean stacks per sky pass in the fast band; inverse-variance co-adds per visit (and per visit and detector) over all detectors; a sharpened picture per visit from all six bands on 3″ pixels; a 0.75–5 µm spectrum of any pixel on request. |
 | Add or subtract images from different times | Yes. A wavelength-matched difference (blue = was here, orange = is here now), frame − median, frame − previous, frame − first, a deep stack, and colour by time. |
 | Let users choose the field of view | Yes. 2′ to 20′ (the fast band builds up to 10′). |
 | Overlay Gaia or WISE | Yes. Gaia DR3 drawn on the image at each frame's date; every candidate is checked against Gaia DR3, SIMBAD and CatWISE2020 (a catalogue that cannot be reached is named as "could not check"); the same star in 2MASS and AllWISE; Aladin Lite with AllWISE, 2MASS, CatWISE2020 and SPHEREx maps. |
@@ -78,10 +78,14 @@ English and Turkish.
 2. The backend asks NASA/IPAC IRSA which SPHEREx exposures cover that position (SIA2).
 3. Instead of downloading 65 MB files, it reads only the pixel rows it needs with HTTP byte ranges,
    including the RICE-compressed contamination flags.
-4. **Fast band first.** One detector band (the object's own, else band 5) is read by the engine:
-   a preview from a few exposures per sky pass, spread in wavelength, then the whole band. Exposures
-   are grouped into sky passes (SPHEREx returns about every six months), and each pass is a median
-   stack on a 2″ north-up grid, all passes on one brightness scale.
+4. **Fast band first.** One detector band (the object's own, else band 5) is read by the engine.
+   NASA's list says where each exposure sits on the sky, which predicts the target's pixel to within
+   8 pixels, so the header and the pixel rows of an exposure come in one request: the first
+   pictures already use every exposure, and one more request per exposure adds the variance and
+   the quality flags. Exposures are grouped into sky passes (a new one after 20 days without data;
+   a return visit of fewer than six exposures stays with its neighbour), and each pass is a
+   clipped mean (the frames within 3 sigma of the median) on a 2″ north-up grid, all passes on one
+   brightness scale.
 5. **All detectors after that**, in the background: every exposure of all six bands is reprojected
    onto the native 6.15″ grid, background-subtracted, grouped into epochs and co-added with
    inverse-variance weights. This feeds the 0.75–5 µm spectrum, the colour composite, the detector
@@ -104,10 +108,10 @@ All from real SPHEREx data through the app (pre-built in `backend/demo`, so they
 | Target | Tracker (all detectors) | Difference picture (one band) | Catalogue |
 |---|---|---|---|
 | Barnard's Star | 10.38″/yr north | 10.45 ± 1.01″/yr north (band 5) | 10.39″/yr |
-| ε Indi B | 4.65″/yr south-east | 4.37 ± 0.34″/yr; a line through its position in 4 passes gives 4.68 ± 0.34″/yr | 4.68″/yr |
+| ε Indi B | 4.65″/yr south-east | 4.70 ± 0.30″/yr; a line through its position in 5 passes gives 4.67 ± 0.29″/yr | 4.68″/yr |
 | WISE 0855−0714 | 8.16″/yr west (D5+D6) | declines: 3 matching exposures per pass | 8.15″/yr |
-| RW Aurigae | about 70% brighter in D3/D4 | about 52% fainter in band 6 | young variable |
-| R Draconis | nothing reported (it does not move) | about 46% fainter in band 6; halo light curve 0.51–1.64 × usual | Mira variable, ~246 d |
+| RW Aurigae | about 70% brighter in D3/D4 | about 51% fainter in band 6 | young variable |
+| R Draconis | nothing reported (it does not move) | about 41% fainter in band 6; halo light curve 0.50–1.62 × usual | Mira variable, ~246 d |
 
 RW Aurigae is not a contradiction: it brightened at short wavelengths while its 4–5 µm light faded,
 and the card shows both statements with their bands. ε Indi B is typed T3V from its spectrum (SIMBAD:
@@ -141,19 +145,31 @@ directly comparable.
 
 ## Speed
 
-Measured on 15 Nov 2026 from Turkey, on a position in nobody's cache (150.123 +20.456):
+Measured on 15 Nov 2026 from Turkey, on positions in nobody's cache. The pixel reading of one band
+of 55 to 59 exposures (241.90 −31.80), each way run several times on the same evening:
 
-| Step | Time |
-|---|---|
-| Preview of the fast band on screen (about 8 exposures per pass) | 9 s |
-| The whole band (68 exposures, 3 passes) | 18 s |
-| All six bands (305 exposures) for the spectrum and the all-detector view | about 3 min |
-| Another band of a field already visited | 8 s |
-| A challenge target (pre-built) | under 1 s |
+| | Requests | First pictures | Whole band |
+|---|---|---|---|
+| Before (headers first, then a few exposures per pass, then everything) | 201 to 260 | 9 to 14 s, from 24 exposures | 16.6 to 24.7 s |
+| Now (one request per exposure, then one more) | 110 to 118 | 6.7 to 9.7 s, from every exposure | 10.9 to 14.6 s |
 
-More parallel requests do not help: IRSA throttles each client (measured by Efe: 12 in flight gave
-1.3 exposures a second, 32 gave 0.6, 64 gave 0.3), so every reader in the server shares one limit
-(`IRSA_MAX_INFLIGHT`, 12).
+Add about 3 s for NASA's exposure list, unless the visitor paused on the suggestion first: the
+page then asks for the list and opens the connections ahead of the click (`/api/quick/warm`).
+A challenge target is pre-built and opens in under a second. All six bands (about 300 to 400
+exposures) for the spectrum and the all-detector view took 2 to 3 minutes before; that reader now
+makes two requests per exposure instead of four, but most of its time is the download of the
+quality flags (about 370 kB per exposure), so expect a smaller gain there. It was not timed end
+to end: NASA's image search was answering "502 Proxy Error" for the rest of that evening.
+
+What was learnt on the way:
+- A request on an open connection takes about 0.4 s, whatever it asks for (87 byte ranges or 1);
+  a new connection costs 0.7 s alone and about 2.5 s when a dozen open at once. Idle connections
+  stay usable for at least 30 s.
+- More parallel requests do not help: IRSA throttles each client (measured by Efe: 12 in flight
+  gave 1.3 exposures a second, 32 gave 0.6, 64 gave 0.3), so every reader in the server shares one
+  limit (`IRSA_MAX_INFLIGHT`, 12).
+- NASA's copy of the files on Amazon S3 (named in the exposure list) answered no faster from here
+  and takes only one byte range per request, so it is not used.
 
 ## Repository layout
 
@@ -178,7 +194,7 @@ Radians/
 │   │   ├── config.py            settings from environment variables
 │   │   └── engine/              the fast engine (merged in from Skyshift)
 │   │       ├── http.py, sia.py, fitsread.py, field.py, store.py    polite HTTP, exposure search, byte-range reader, cut-out cache
-│   │       ├── stacking.py      sky passes, wavelength matching, median stacks, display levels
+│   │       ├── stacking.py      sky passes, wavelength matching, clipped-mean stacks, display levels
 │   │       ├── views.py, api_views.py   view builds (preview, then the band) and /api/views/…
 │   │       ├── photometry.py    box and halo-ring photometry, light curve, spectrum
 │   │       ├── changes.py       the difference-picture finder
@@ -187,7 +203,7 @@ Radians/
 │   │       └── data/            curated objects (pins.json), reference spectra
 │   ├── demo/                    the five challenge targets, pre-built (cache/ + built.pkl.gz; engine/ for the fast band)
 │   ├── scripts/                 cache warming, demo media, validation; scripts/engine/ for the engine's builders
-│   ├── tests/                   pytest (146 tests, no network); tests/engine/ against a fake IRSA
+│   ├── tests/                   pytest (176 tests, no network); tests/engine/ against a fake IRSA
 │   └── requirements.txt
 ├── frontend/                    the website (plain ES modules, no build step)
 │   ├── index.html               the single page: Home, Blink viewer, Map, Planetarium
@@ -205,7 +221,7 @@ Radians/
 │   ├── data/                    constellation lines, names and boundaries (d3-celestial, BSD-3)
 │   ├── planet/                  planetarium engine (by Emre Bozkaya), also a page of its own at /planet/
 │   ├── media/                   GIFs and screenshots of the challenge targets
-│   └── tests/                   node tests (42): image maths, cards, colour, coordinates, constellations, whole-site checks
+│   └── tests/                   node tests (45): image maths, cards, colour, coordinates, constellations, whole-site checks
 ├── docs/                        validation report, demo script, slides PDF, figures
 ├── deploy/huggingface/          an unused Hugging Face Space set-up
 ├── explore/                     early probes of the IRSA archive (kept for reference)
@@ -255,18 +271,19 @@ been measured.
 | `GET /api/search?q=barn` | suggestions while typing: curated objects with their stories |
 | `GET /api/pins` | the curated objects (challenge targets and famous sky) |
 | `GET /api/coverage?ra=&dec=` | has SPHEREx seen this spot: exposures, sky passes, exposures per detector band |
-| `GET /api/quick?ra=&dec=&fov=&band=&have=&wait=` | the fast band in the viewer's frame format: preview, then the whole band |
+| `GET /api/quick?ra=&dec=&fov=&band=&have=&wait=` | the fast band in the viewer's frame format: first pictures (every exposure, image only), then the whole band with variance and flags |
+| `GET /api/quick/warm?ra=&dec=&band=` | a head start while the visitor is still choosing: the exposure list is fetched and connections are opened in the background (no pixels) |
 | `GET /api/quick/diffs?id=` | each later pass minus the first, at matching wavelengths |
 | `GET /api/quick/changes?id=` | finds on the difference picture, as candidate cards |
 | `GET /api/quick/motion?id=&x=&y=` | a line through a star's position in every pass |
 | `POST /api/views`, `GET /api/views/{id}/…` | the engine's own API: status, pass pictures, light curve, spectrum, type, FITS (see `backend/app/engine/api_views.py`) |
-| `GET /api/frames?ra=&dec=&fov=300&mode=epoch` | all detectors: aligned frames (`epoch`, `epoch_detector`, `exposure`) + photometry + tracker candidates |
+| `GET /api/frames?ra=&dec=&fov=300&mode=epoch` | all detectors: aligned frames (`epoch`, `epoch_detector`, `exposure`) + photometry + tracker candidates + whether a star is at the target's spot. With `sharp=2`: one sharpened picture per visit on 3″ pixels instead |
 | `GET /api/progress?job=`, `/api/depth` | progress of a running build; data for the Sharpening section |
 | `GET /api/photometry?ra=&dec=&fov=&x=&y=` | per-exposure brightness and wavelength at one pixel: an on-the-fly spectrum |
 | `POST /api/spectype` | spectral type, best-match curves and molecular fingerprints of a spectrum; optionally the catalogue side and the verdict |
 | `GET /api/sharp?ra=&dec=&fov=&det=&factor=` | super-resolution: one detector band of a spot drizzled onto 3″ pixels (SPHEREx's are 6.15″) from its dithered exposures, plus the ordinary 6.15″ stack for a before / after comparison (map and planetarium deep zoom; cached a week) |
 | `GET /api/object?ra=&dec=&id=&lang=&kind=` | planetarium details panel: SIMBAD facts (type, magnitudes, distance, spectral type, other names) and a Wikipedia summary in the page language, found through Wikidata catalogue codes |
-| `GET /api/curious/hr`, `/motion`, `/xmatch`, `/variable`, `POST /api/curious/period` | H-R diagram data, Gaia motion and speed, 2MASS / AllWISE, known variable stars (VSX, Gaia DR3), and the brightness check (change between visits, rhythm inside visits) |
+| `GET /api/curious/hr`, `/motion`, `/xmatch`, `/variable`, `/facts`, `POST /api/curious/period` | H-R diagram data, Gaia motion and speed, 2MASS / AllWISE (with fluxes), known variable stars (VSX, Gaia DR3), the star itself (distance, speeds, companion hints, radius, luminosity, mass, age, known planets), and the brightness check (change between visits, rhythm inside visits) |
 | `GET /api/gaia`, `/api/crossmatch`, `/api/sso`, `/api/neossat` | Gaia DR3; SIMBAD and CatWISE2020; SkyBoT; NEOSSat |
 | `GET /api/sx/…` | the planetarium and its own time-lapse / spectra tool |
 | `GET /hips/spherex-color/…` | infrared colour sky as a HiPS (B = D1+D2, G = D3+D4, R = D5+D6) |
@@ -283,12 +300,18 @@ ported to Python (`backend/app/explorer.py`); HiPS tiles come straight from IRSA
 
 ## Using the viewer
 
-- **Fast band / All detectors** (top of the viewer): the fast band is on screen first; the D1–D6
-  chips next to it load another band. All detectors is the co-add of everything, read afterwards.
-  The choice is remembered for the next new spot (a curated object keeps its own best band).
+- **Fast band / All detectors / Sharpened** (top of the viewer): the fast band is on screen first;
+  the D1–D6 chips next to it load another band. All detectors is the co-add of everything, read
+  afterwards. The choice is remembered for the next new spot (a curated object keeps its own best
+  band). **Sharpened** combines every exposure of a visit, all six bands together, on 3″ pixels
+  (half SPHEREx's): a star comes out 8.9″ wide instead of 10.3″ and a pair separates from about
+  11″ apart instead of 13″ (measured on test stars). It needs the all-detector data and takes
+  about half a minute to make; a visit with fewer than 12 exposures gains nothing and is marked.
+  "Smooth pixels" (display options) blends neighbouring pixels: softer when zoomed, no new detail.
 - **Views**: Images; **Difference** (in the fast band: each later visit minus the first at matching
   wavelengths; otherwise frame − median / previous / first; always blue = was here, orange = is here
-  now); **Colour by time** (every visit in its own colour, first blue, last red: what stays put is
+  now; a view that subtracts the first visit starts at the second, since the first minus itself is
+  empty); **Colour by time** (every visit in its own colour, first blue, last red: what stays put is
   white, what moves leaves a trail); Stack.
 - **Space** play/pause, **← →** step frames, the timeline jumps to a visit. All frames share one
   brightness scale, so a star that brightens really is brighter.
@@ -300,7 +323,8 @@ ported to Python (`backend/app/explorer.py`); HiPS tiles come straight from IRSA
   stars and ghosts.
 - Under the spectrum: the **Type** box (catalogues next to our own fit, with the best-match curve
   drawn over the points) and **For the curious** (H-R diagram, how it moves, does it pulse, other
-  catalogues). Both first check that a star is at the spot: on empty sky, or on the edge of a
+  catalogues with their brightness next to SPHEREx's, and what Gaia and the NASA Exoplanet Archive
+  know about the star itself). Both first check that a star is at the spot: on empty sky, or on the edge of a
   brighter neighbour, they say so instead of fitting noise (a click within 18″ of a star measures
   that star). "Does it pulse?" answers two things: whether the brightness changed between visits,
   and whether there is a rhythm inside the visits that date-shuffled copies of the data almost
@@ -341,8 +365,13 @@ environment settings (`RATE_FRAMES`, `RATE_PHOT`, `RATE_LOOKUP`, `MAX_COLD_BUILD
   (relative only), and the Type box shows the catalogue side only.
 - Visits are compared only at wavelengths every visit sampled. When visits share few wavelengths the
   comparison is noisier, and the difference finder says "too few pictures" instead of guessing.
-- The fast band is one detector band of up to 10′. What only all detectors can give (the full
-  spectrum, the colour composite) arrives minutes later on a position nobody has looked at.
+- The fast band is one detector band of up to 10′ (2″ pixels up to that size, unless a deep field
+  has so many exposures that they would not fit in memory). What only all detectors can give (the
+  full spectrum, the colour composite, the sharpened pictures) arrives minutes later on a position
+  nobody has looked at.
+- "Does it pulse?" can only test rhythms that fit inside a visit about twice (1 day to a few
+  weeks on most of the sky), needs single measurements above a signal-to-noise of 3, and reports a
+  change between visits only from about 15%. Slower or smaller changes are not seen.
 - Completeness of both finders falls off at low S/N (see Validation); a source fainter than that in
   every visit will not be reported.
 - Asteroids move within a visit and blur in the stacks; SkyBoT marks the known ones per exposure.
@@ -354,8 +383,10 @@ environment settings (`RATE_FRAMES`, `RATE_PHOT`, `RATE_LOOKUP`, `MAX_COLD_BUILD
   (8-bit, already stretched): for looking, not for measuring; a new place takes seconds to fill in.
 - Super-resolution cannot beat the telescope's own blur (about 9″): the 3″ grid samples that blur
   better than the 6.15″ pixels do, it does not make new detail.
-- Not checked after the merges: the phone layout on a real phone, Turkish wording of the new texts
-  by a native speaker, the embed mode, and the deployment.
+- Not checked: the phone layout on a real phone, Turkish wording of the new texts by a native
+  speaker, the embed mode, the deployment, a 10′ view on the new 300-pixel grid against the live
+  archive, and the known-planets lookup against the live NASA Exoplanet Archive (it answered with
+  an error page while this was built; the page then says it could not be reached).
 
 ## Use of AI
 
