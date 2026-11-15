@@ -170,11 +170,12 @@ async function run(opts) {
   stop();
   els.empty.hidden = true;
   const t0 = performance.now();
-  let poll = null, showProgress = false;
+  let poll = null, showProgress = false, retrying = false;
   els.loadingBar.hidden = true;
   const tick = setInterval(() => {
     const s = Math.round((performance.now() - t0) / 1000);
-    if (!showProgress) els.loadingSub.textContent = s < 8 ? '' : t('slow', { s });
+    // while waiting to ask IRSA again, the retry countdown owns this line
+    if (!showProgress && !retrying) els.loadingSub.textContent = s < 8 ? '' : t('slow', { s });
   }, 1000);
   try {
     let target;
@@ -217,10 +218,12 @@ async function run(opts) {
         break;
       } catch (e) {
         if (e.code !== 'unavailable' || attempt >= 4) throw e;
+        retrying = true;
         for (let s = 20; s > 0; s--) {
           setLoading(true, t('irsaRetry'), t('irsaRetryIn', { s, n: attempt, max: 3 }));
           await sleep(1000, ctl.signal);
         }
+        retrying = false;
         setLoading(true, t('reading'));
       }
     }
@@ -243,13 +246,29 @@ async function run(opts) {
     if (e.name !== 'AbortError') {
       depthHide();
       toast(e.message, true);
-      if (!state.data) els.empty.hidden = false;
+      if (e.code === 'unavailable') showOutage();
+      else if (!state.data) els.empty.hidden = false;
     }
   } finally {
     clearInterval(tick);
     clearInterval(poll);
     if (state.abort === ctl) { setLoading(false); els.loadingBar.hidden = true; }
   }
+}
+
+/** IRSA is down and this spot is not cached: say so, and offer the prepared targets, which open from the cache. */
+function showOutage() {
+  state.data = null;
+  els.empty.replaceChildren(el('p', '', t('irsaOutageTitle')), el('p', 'muted', t('irsaOutageBody')));
+  const row = el('div', 'outage-targets');
+  for (const b of els.examples.querySelectorAll('button[data-q]')) {
+    const c = el('button', 'chip outage-target', b.querySelector('.tname')?.textContent || b.dataset.q);
+    c.type = 'button';
+    c.onclick = () => b.click();          // same path as the landing cards (bands, wavelength matching)
+    row.append(c);
+  }
+  els.empty.append(row);
+  els.empty.hidden = false;
 }
 
 function load(data, startIdx) {
