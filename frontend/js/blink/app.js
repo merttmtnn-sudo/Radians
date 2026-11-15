@@ -102,6 +102,9 @@ const isTimeColor = () => els.view.value === 'timecolor';
 /** One combined picture instead of one per visit (the stack, or colour by time). */
 const isStack = () => els.view.value === 'stack' || isTimeColor();
 const isMatched = () => els.view.value === 'diff_matched';
+/** Views that subtract the first visit from every other one. The first visit minus itself is an empty
+ * picture, so in these views it is the reference: the player starts at the second visit and skips it. */
+const skipsFirst = () => (isMatched() || els.view.value === 'diff_first') && state.shown.length > 1;
 
 // ------------------------------------------------------------------ detectors
 function buildDetChips() {
@@ -497,6 +500,7 @@ function applyView(startIdx = state.idx) {
   const md = isMatched() ? matchedDiffs() : null;
   state.shown = md ? md.images : computeView(state.images, state.variances, isMatched() ? 'diff_first' : els.view.value);
   els.scrub.max = state.shown.length - 1;
+  els.scrub.min = skipsFirst() ? 1 : 0;
   els.viewHelp.textContent = isMatched() ? '' : isDiffView(els.view.value) ? t('viewHelpDiff') + (!state.data.quick && els.wlMatch.checked ? ' ' + t('viewHelpDiffWl') : '')
     : isTimeColor() ? t('viewHelpTime') : isStack() ? t('viewHelpStack') : '';
   computeLevels();
@@ -536,7 +540,7 @@ function computeLevels() {
   if (isTimeColor()) state.tcLevels = percentiles(state.images, [Number(els.lo.value), Number(els.hi.value)]);
   if (isDiffView(els.view.value)) {
     // symmetric limit from the absolute differences; "white point" slider still applies
-    const abs = state.shown.map(a => a.map(Math.abs));
+    const abs = (skipsFirst() ? state.shown.slice(1) : state.shown).map(a => a.map(Math.abs));
     state.levels = [0, percentiles(abs, [Number(els.hi.value)])[0] || 1];
   } else {
     // one set of levels for every frame, so brightness changes are real, not display artefacts
@@ -615,7 +619,12 @@ function renderTimeColor() {
 // ------------------------------------------------------------------ before / after
 const compareOn = () => state.compare && !isStack() && state.shown.length > 1;
 const compareB = () => (state.idx === 0 ? state.shown.length - 1 : state.idx);
-const frameLabel = (i) => { const f = state.data.frames[i]; return `E${f.epoch} · ${f.date_start.slice(0, 7)}`; };
+/** "2026-08", or "2026-08 → 09" for a visit that runs into the next month. */
+const monthSpan = (f) => {
+  const a = f.date_start.slice(0, 7), b = f.date_end.slice(0, 7);
+  return a === b ? a : `${a} → ${a.slice(0, 4) === b.slice(0, 4) ? b.slice(5) : b}`;
+};
+const frameLabel = (i) => { const f = state.data.frames[i]; return `E${f.epoch} · ${monthSpan(f)}`; };
 
 function drawSplit(ctx) {
   const W = els.overlay.width, x = state.split * W, fs = Math.max(13, W / 38);
@@ -1095,7 +1104,9 @@ function show(i) {
   const { data } = state;
   if (!data) return;
   const N = state.shown.length;
-  state.idx = ((i % N) + N) % N;
+  let k = ((i % N) + N) % N;
+  if (k === 0 && skipsFirst()) k = i < state.idx ? N - 1 : 1;      // the reference visit has no picture of its own
+  state.idx = k;
   els.scrub.value = state.idx;
   render();
   const tgt = state.target;
@@ -1113,7 +1124,7 @@ function show(i) {
     const f = data.frames[state.idx];
     const sameDay = f.date_start.slice(0, 10) === f.date_end.slice(0, 10);
     els.hudDate.textContent = sameDay ? f.date_start.slice(0, 10) : `${f.date_start.slice(0, 10)} → ${f.date_end.slice(0, 10)}`;
-    els.hudIdx.textContent = `${state.idx + 1} / ${N}`;
+    els.hudIdx.textContent = skipsFirst() ? t('minusFirst', { e: f.epoch, first: data.frames[0].epoch }) : `${state.idx + 1} / ${N}`;
     if (compareOn()) els.hudDate.textContent = `${frameLabel(0)}  ⟷  ${frameLabel(compareB())}`;
     const wl = f.wavelength_min ? (f.wavelength_min === f.wavelength_max ? `${f.wavelength_min.toFixed(3)} µm`
       : `${f.wavelength_min.toFixed(2)}–${f.wavelength_max.toFixed(2)} µm`) : '—';
@@ -1166,10 +1177,11 @@ function buildTimeline() {
   els.timeline.replaceChildren(...frames.map((f, i) => {
     const li = el('li');
     const b = el('button', '', frames.length > 12 ? `${i + 1}`
-      : `E${f.epoch} · ${f.date_start.slice(0, 7)}${f.detectors.length === 1 ? ' D' + f.detectors[0] : ''}`);
+      : `E${f.epoch} · ${monthSpan(f)}${f.detectors.length === 1 ? ' D' + f.detectors[0] : ''}`);
     b.type = 'button';
     b.title = `${f.date_start} → ${f.date_end}`;
     b.onclick = () => { stop(); show(i); };
+    if (i === 0 && skipsFirst()) { b.disabled = true; b.classList.add('ref'); b.title = t('refChip'); }
     li.append(b);
     return li;
   }));
@@ -1992,7 +2004,7 @@ els.gif.onclick = () => {
     const table = isMatched() && state.md?.images ? lutBeforeNow() : isDiffView(els.view.value) ? lutDiverging() : lut(els.cmap.value);
     const count = isStack() ? 1 : state.shown.length;
     const frames = [];
-    for (let i = 0; i < count; i++) {
+    for (let i = skipsFirst() ? 1 : 0; i < count; i++) {
       const src = frameIndices(i, table), big = new Uint8Array(W * W);
       for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) big[y * W + x] = src[Math.floor(y / k) * n + Math.floor(x / k)];
       frames.push(big);

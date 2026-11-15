@@ -231,6 +231,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .timeline button { font-size: 12px; padding: 4px 11px; font-family: var(--mono); color: var(--fg-2); }
 .timeline button:hover { border-color: var(--fg-3); }
 .timeline button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.timeline button.ref { opacity: .55; border-style: dashed; cursor: default; }
 
 .side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .count { color: var(--fg); background: var(--panel-2); border-radius: 999px; padding: 0 8px; font-size: 12px; }

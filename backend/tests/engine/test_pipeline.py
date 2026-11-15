@@ -59,6 +59,20 @@ def test_group_passes_gaps_and_long_runs():
     assert len(groups) == 3 + 3                  # a 155-day continuous run splits into 3 bins
 
 
+def test_a_short_return_visit_joins_its_neighbour():
+    """SPHEREx came back 22 days after a visit for 3 exposures (the user's field at 240.869 -32.656):
+    three exposures alone make a noisy picture, so they stay with the visit before."""
+    t = list(np.linspace(60888, 60903, 19)) + list(np.linspace(61090, 61096, 18))         + list(np.linspace(61256, 61266, 18)) + [61288, 61289, 61290]
+    assert [len(g) for g in stacking.group_passes(t)] == [19, 18, 21]
+    # with enough exposures the return visit is a visit of its own (the same 20-day rule as all detectors)
+    more = t + [61288.5, 61289.5, 61290.5]
+    assert [len(g) for g in stacking.group_passes(more)] == [19, 18, 18, 6]
+    # a small part far from everything stays alone rather than being glued across months
+    assert [len(g) for g in stacking.group_passes([0, 1, 2, 100, 101, 102, 103, 104, 105])] == [3, 6]
+    # the smaller neighbourless parts do not stop a later small part from joining
+    assert [len(g) for g in stacking.group_passes([0, 200, 201, 202, 203, 204, 205, 230])] == [1, 7]
+
+
 def test_shared_range_and_widening():
     waves = np.array([3.85, 3.9, 4.0, 4.1, 4.3, 4.35, 4.0, 4.05, 4.2])
     sel, info = stacking.shared_range({0: np.arange(6), 1: np.arange(6, 9)}, waves, band=5, min_frames=2)

@@ -24,7 +24,9 @@ BAD_FLAGS = ("TRANSIENT", "NONFUNC", "MISSING_DATA", "HOT", "COLD", "SNOWBALL")
 SATURATED_FLAGS = ("OVERFLOW", "SUR_ERROR", "NONLINEAR")
 
 BANDS_UM = {1: (0.75, 1.09), 2: (1.10, 1.62), 3: (1.63, 2.41), 4: (2.42, 3.82), 5: (3.83, 4.41), 6: (4.42, 5.00)}
-PASS_GAP_DAYS = 45.0
+PASS_GAP_DAYS = 20.0            # the same rule as the all-detector view (config.EPOCH_GAP_DAYS)
+PASS_JOIN_DAYS = 45.0           # a part with too few exposures joins a neighbour that is this close
+PASS_MIN_FRAMES = 6             # ... too few: a median of fewer frames is noisy
 PASS_MAX_SPAN_DAYS = 75.0
 MATCH_TOL_FRACTION = 0.06       # frames pair up within ~one spectral resolution element (6% of a band)
 
@@ -190,16 +192,39 @@ def resample(c: dict, det_wcs, sky, n: int):
     return out.reshape(n, n).astype("f4"), (inside & (satf > 0.2)).reshape(n, n)
 
 
-def group_passes(mjds, gap: float = PASS_GAP_DAYS, max_span: float = PASS_MAX_SPAN_DAYS) -> list[list[int]]:
-    """Indices of each sky pass, in time order. A gap > `gap` days starts a new pass; a pass longer
-    than max_span days (deep fields are observed almost continuously) is cut into equal bins."""
+def join_small(runs: list, t, min_frames: int, join_gap: float) -> list:
+    """Runs (index arrays in time order) with fewer than min_frames members are joined to the nearer
+    neighbour, if that one is at most join_gap days away. SPHEREx sometimes comes back a few weeks
+    after a visit for a handful of exposures: on their own they make a noisy picture."""
+    runs = [np.asarray(r) for r in runs]
+    alone: set[int] = set()                         # first index of small runs with no neighbour close enough
+    while len(runs) > 1:
+        small = [k for k, r in enumerate(runs) if len(r) < min_frames and int(r[0]) not in alone]
+        if not small:
+            break
+        k = min(small, key=lambda j: len(runs[j]))
+        before = t[runs[k][0]] - t[runs[k - 1][-1]] if k > 0 else np.inf
+        after = t[runs[k + 1][0]] - t[runs[k][-1]] if k < len(runs) - 1 else np.inf
+        if min(before, after) > join_gap:
+            alone.add(int(runs[k][0]))
+            continue
+        j = k - 1 if before <= after else k
+        runs[j:j + 2] = [np.concatenate(runs[j:j + 2])]
+    return runs
+
+
+def group_passes(mjds, gap: float = PASS_GAP_DAYS, max_span: float = PASS_MAX_SPAN_DAYS,
+                 min_frames: int = PASS_MIN_FRAMES, join_gap: float = PASS_JOIN_DAYS) -> list[list[int]]:
+    """Indices of each sky pass, in time order. A gap > `gap` days starts a new pass; a part with
+    fewer than min_frames exposures joins a neighbour within join_gap days (see join_small); a pass
+    longer than max_span days (deep fields are observed almost continuously) is cut into equal bins."""
     t = np.asarray(mjds, float)
     if not t.size:
         return []
     order = np.argsort(t, kind="stable")
     cuts = np.flatnonzero(np.diff(t[order]) > gap) + 1
     passes: list[list[int]] = []
-    for run in np.split(order, cuts):
+    for run in join_small(np.split(order, cuts), t, min_frames, join_gap):
         first, last = t[run[0]], t[run[-1]]
         nbins = max(1, math.ceil((last - first) / max_span)) if max_span and max_span > 0 else 1
         width = (last - first) / nbins if nbins > 1 else 0.0
