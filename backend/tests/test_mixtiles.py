@@ -124,3 +124,5 @@ def test_the_maps_bottom_layer_is_an_empty_sky(client):
     assert allsky.size == (27 * img.size[0], 29 * img.size[0]) and allsky.getextrema()[3] == (0, 0)
     moc = client.get("/hips/blank/Moc.fits")
     assert moc.status_code == 200 and moc.content[:6] == b"SIMPLE"
+    for address in ("/hips/spherex-color/Moc.fits", f"/hips/spherex-mix/{BLUE}_{RED}/Moc.fits"):
+        assert client.get(address).content[:6] == b"SIMPLE"                 # no 404 in the browser's console

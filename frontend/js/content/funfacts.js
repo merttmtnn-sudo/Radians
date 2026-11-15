@@ -34,8 +34,8 @@ function start() {
   F.timer = setInterval(() => { if (!F.hold && !document.hidden) show(F.i + 1); }, 8000);
 }
 
-document.addEventListener('radians:loaded', (e) => {
-  const d = e.detail;
+/** Facts about the pictures on screen (d: the viewer's data set). */
+function regionFacts(d) {
   F.region = [];
   if (d && d.exposures && d.exposures.length) {
     const ex = d.exposures, mjd = ex.map(p => p.mjd), wl = ex.map(p => p.wavelength).filter(Number.isFinite);
@@ -46,10 +46,15 @@ document.addEventListener('radians:loaded', (e) => {
     if (visits > 1) F.region.push({ key: 'factRegVisits', vars: { k: visits } });
     if (wl.length) F.region.push({ key: 'factRegWl', vars: { min: Math.min(...wl).toFixed(2), max: Math.max(...wl).toFixed(2) } });
   }
+}
+document.addEventListener('radians:loaded', (e) => {
+  regionFacts(e.detail);
   build();
   show(0);
   start();
 });
+// a newer set of the same spot (the whole band, all detectors): the same card, new numbers
+document.addEventListener('radians:updated', (e) => { regionFacts(e.detail); build(); show(F.i); });
 document.addEventListener('radians:lang', () => show(F.i));
 
 el.prev.onclick = () => { show(F.i - 1); start(); };

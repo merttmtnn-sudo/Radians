@@ -37,7 +37,7 @@ export function catalogueLines(cat, pending, failed) {
   return out;
 }
 
-const cleanName = (id) => String(id || '').replace(/^(NAME|V\*|\*\*|\*|EM\*|PM\*|BD\*)\s+/i, '').trim();
+const cleanName = (id) => String(id || '').replace(/^(NAME|V\*|\*\*|\*|EM\*|PM\*|BD\*)\s+/i, '').replace(/\s+/g, ' ').trim();
 
 /** Our column: [[key, vars], ...] from the "fit" part of the answer. */
 export function oursLines(fit, spot = null) {

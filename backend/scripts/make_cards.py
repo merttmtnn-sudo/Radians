@@ -75,7 +75,7 @@ def render(q: str, dets: str) -> list[Image.Image]:
         x = np.arcsinh(np.clip(im - lo, 0, None) / soft) / np.arcsinh((hi - lo) / soft)
         x = np.nan_to_num(np.flipud(np.clip(x, 0, 1)), nan=0.0)   # row 0 is south: north goes to the top
         # stretched first, enlarged after: the bright cores are already compressed, so no ringing
-        big = Image.fromarray(x.astype(np.float32), "F").resize((SIZE, SIZE), Image.BICUBIC)
+        big = Image.fromarray(x.astype(np.float32)).resize((SIZE, SIZE), Image.BICUBIC)
         grey = Image.fromarray(np.clip(np.asarray(big) * 255, 0, 255).astype(np.uint8)).convert("RGB")
         d = ImageDraw.Draw(grey, "RGBA")
         if f.get("target_px"):

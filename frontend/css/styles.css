@@ -84,7 +84,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .btn svg { width: 16px; height: 16px; }
 .input, select { background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; padding: 9px 12px; outline: none; width: 100%; }
 .input:focus, select:focus { border-color: var(--fg-2); }
-.input.sm, select.sm { padding: 5px 10px; font-size: 13px; width: auto; }
+.input.sm, select.sm { padding: 5px 10px; font-size: 13px; width: auto; max-width: 100%; }   /* a menu is as wide as its longest option: never wider than the page */
 .field { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
 .field > span { font-size: 13px; color: var(--fg-2); }
 .check { display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 6px 0; }
@@ -183,9 +183,12 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 /* ---------------------------------------------------------------- app layout */
 .layout { grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; padding: 18px 24px 24px; width: 100%; max-width: 1500px; margin: 0 auto; flex: 1; }
 @media (max-width: 960px) { .layout { grid-template-columns: 1fr !important; } .appsearch { order: 5; flex-basis: 100%; max-width: none; } .top { flex-wrap: wrap; } }
+/* in the viewer the header also holds the search box and five buttons: between 960 and 1180 px they do not
+   fit on one line (less so in Turkish), so the search box takes a line of its own instead of widening the page */
+@media (max-width: 1180px) { .in-app .top { flex-wrap: wrap; } .in-app .appsearch { order: 5; flex-basis: 100%; max-width: none; } }
 .viewer { min-width: 0; }
 .viewbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-.viewbar #view { margin-left: auto; }
+.viewbar #view { margin-left: auto; min-width: 0; }
 .srcbar { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .srcbar .bandchips { margin-bottom: 0; gap: 4px; }
 .srcbar .bandchips .detchip { padding: 2px 8px; font-size: 12px; }
@@ -318,7 +321,8 @@ details summary { cursor: pointer; color: var(--fg-2); }
 @media (max-width: 640px) { .cutwo { grid-template-columns: 1fr; } }
 .anabar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 10px; }
 .anabar #photSource { flex: 1 1 240px; color: var(--fg-2); }
-.anabar label { display: flex; align-items: center; gap: 6px; margin: 0; }
+.anabar label { display: flex; align-items: center; gap: 6px; margin: 0; min-width: 0; max-width: 100%; }
+.anabar label select { min-width: 0; flex: 1 1 auto; }
 .chart { position: relative; }
 .chart svg { display: block; overflow: visible; }
 .chart .grid { stroke: var(--line); stroke-width: 1; }

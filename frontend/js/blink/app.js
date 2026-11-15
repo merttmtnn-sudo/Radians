@@ -9,6 +9,7 @@ import { encodeGif } from './gif.js';
 import { renderTypeBox } from './typebox.js';
 import { createCurious } from './curious.js';
 import { CUBE_URL, nearestSlice } from '../core/cube.js';
+import { parseCoords } from '../core/coords.js';
 const CUBE_NAME = 'SPHEREx DR1';
 import { getPalette, setPalette, viewerCmap } from '../core/palette.js';
 import { loadAladin, QUIET } from '../core/aladin.js';
@@ -55,6 +56,7 @@ async function api(path, params, signal) {
   const body = await r.json().catch(() => ({}));
   if (!r.ok) {
     const e = new Error(errorText(body.detail, r.status));
+    e.status = r.status;
     e.code = body.detail === 'IRSA_UNAVAILABLE' || (!body.detail && r.status >= 502) ? 'unavailable' : body.detail;
     throw e;
   }
@@ -215,17 +217,17 @@ async function loadSharp() {
   const deep = state.deepData;
   if (!deep?.frames?.length || state.sharpBusy) return;
   state.sharpBusy = true;
-  els.deepStatus.textContent = t('sharpMaking');
+  status(els.deepStatus, 'sharpMaking');
   try {
     const d = await api('api/frames', { ...state.params, mode: 'epoch', sharp: 2, candidates: false }, state.abort?.signal);
     if (state.deepData !== deep) return;             // another spot was opened meanwhile
     if (!d.frames?.length) { els.deepStatus.textContent = d.message || t('sharpNone'); if (state.src === 'sharp') setSrc('deep'); return; }
     state.sharp = d;
     const thin = d.frames.filter(f => f.thin).length;
-    els.deepStatus.textContent = t(thin ? 'sharpReadyThin' : 'sharpReady', { n: thin, min: d.sharp.min_exposures });
+    status(els.deepStatus, thin ? 'sharpReadyThin' : 'sharpReady', { n: thin, min: d.sharp.min_exposures });
     if (state.src === 'sharp') showSet(d);
   } catch (e) {
-    if (e.name !== 'AbortError') { els.deepStatus.textContent = t('deepFailed', { msg: e.message }); if (state.src === 'sharp') setSrc('deep'); }
+    if (e.name !== 'AbortError') { status(els.deepStatus, 'deepFailed', { msg: e.message }); if (state.src === 'sharp') setSrc('deep'); }
   } finally { state.sharpBusy = false; }
 }
 els.srcSeg.onclick = (e) => { const b = e.target.closest('button[data-src]'); if (b) setSrc(b.dataset.src); };
@@ -253,18 +255,30 @@ async function startQuick() {
   }
 }
 
+/** Write a status line and remember which text it is, so a change of language can say it again. */
+function status(node, key, vars) {
+  node.textContent = key ? t(key, vars) : '';
+  node._said = key ? { key, vars, text: node.textContent } : null;
+}
+function restate() {
+  for (const node of [els.srcStatus, els.deepStatus]) {
+    const said = node._said;
+    if (said && node.textContent === said.text) status(node, said.key, said.vars);   // not if something newer was written over it
+  }
+}
+
 function quickStatus(q, shown, blocking) {
   const p = q.progress, b = q.band;
   let msg;
   if (q.state === 'ready') {
     const um = q.band_um || [];
-    msg = t('quickFull', { b, lo: um[0], hi: um[1], n: q.n_band, p: (q.passes || []).length });
-  } else if (shown) msg = p && p.total ? t('quickPreview', { b, done: p.done, total: p.total }) : t('quickPreviewWait', { b });
-  else msg = p && p.total ? t('quickReading', { b, done: p.done, total: p.total }) : t('quickLooking');
+    msg = ['quickFull', { b, lo: um[0], hi: um[1], n: q.n_band, p: (q.passes || []).length }];
+  } else if (shown) msg = p && p.total ? ['quickPreview', { b, done: p.done, total: p.total }] : ['quickPreviewWait', { b }];
+  else msg = p && p.total ? ['quickReading', { b, done: p.done, total: p.total }] : ['quickLooking'];
   if (!shown && blocking) {
-    els.loadingSub.textContent = msg;
+    els.loadingSub.textContent = t(...msg);
     if (p && p.total) { els.loadingBar.hidden = false; els.loadingBar.value = p.done / p.total; }
-  } else els.srcStatus.textContent = msg;
+  } else status(els.srcStatus, ...msg);
 }
 
 /** The fast band: follow the engine's build (/api/quick) and show each revision as it is ready:
@@ -275,19 +289,19 @@ async function runQuick(target, opts, signal, blocking) {
     prefer: state.band ? null : (Number(saved('radians-band')) || null), pmra: target.pmra, pmdec: target.pmdec };
   let have = -1, shown = false;
   if (blocking) setLoading(true, t('reading'), t('quickLooking'));
-  else els.srcStatus.textContent = t('quickLooking');
+  else status(els.srcStatus, 'quickLooking');
   for (;;) {
     let d;
     try {
       d = await api('api/quick', { ...base, have, wait: 12 }, signal);
     } catch (e) {
       if (e.name === 'AbortError') throw e;
-      if (shown) els.srcStatus.textContent = t('quickBroke');
+      if (shown) status(els.srcStatus, 'quickBroke');
       return shown;
     }
     const q = d.quick;
     if (q.state === 'error') {
-      if (shown) els.srcStatus.textContent = t('quickBroke');
+      if (shown) status(els.srcStatus, 'quickBroke');
       return shown;
     }
     if (d.frames) {                                  // a newer revision: preview, then the whole band
@@ -299,7 +313,7 @@ async function runQuick(target, opts, signal, blocking) {
         stop();
         load(d, shown ? state.idx : (opts.frame ?? 0));
         if (shown ? was : opts.autoplay !== false) play();
-        if (!shown && blocking) document.dispatchEvent(new CustomEvent('radians:loaded', { detail: d }));
+        document.dispatchEvent(new CustomEvent(!shown && blocking ? 'radians:loaded' : 'radians:updated', { detail: d }));
         syncUrl(shown);
       }
       if (blocking && !shown) { setLoading(false); els.loadingBar.hidden = true; }
@@ -383,15 +397,15 @@ async function runDeep(target, opts, ctl, background) {
       const was = state.playing;
       stop();
       load(data, background ? 0 : (opts.frame ?? 0));
-      if (!background) document.dispatchEvent(new CustomEvent('radians:loaded', { detail: data }));
+      document.dispatchEvent(new CustomEvent(background ? 'radians:updated' : 'radians:loaded', { detail: data }));
       syncUrl(background);
       if (background ? was : opts.autoplay !== false) play();
     } else adoptDeep(data);
     if (state.src === 'sharp') loadSharp();
-    els.deepStatus.textContent = background ? t('deepReady') : '';
+    status(els.deepStatus, background ? 'deepReady' : null);
   } catch (e) {
     if (e.name === 'AbortError' || !background) throw e;
-    els.deepStatus.textContent = t('deepFailed', { msg: e.message });
+    status(els.deepStatus, 'deepFailed', { msg: e.message });
   } finally {
     clearInterval(tick);
     clearInterval(poll);
@@ -473,14 +487,34 @@ async function run(opts) {
   state.qc = null;
   state.cands = [];
   state.deepBusy = false;
-  els.srcStatus.textContent = els.deepStatus.textContent = '';
+  status(els.srcStatus, null); status(els.deepStatus, null);
+  // a different object: its predecessor's pictures, timeline, cards and "about" panel must not stay
+  // on screen under the new name while the new one loads
+  const asked = `${opts.q ?? ''}|${opts.ra ?? ''}|${opts.dec ?? ''}`;
+  if (asked !== state.asked) {
+    state.asked = asked;
+    state.data = null;
+    state.target = null;
+    els.timeline.replaceChildren();
+    for (const c of [els.sky, els.overlay]) c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    for (const id of ['hudDate', 'hudIdx', 'hudScale']) $(id).textContent = '';
+    e4.analysis.hidden = true;
+    $('aboutPanel').hidden = true;
+    renderCandidates();
+    syncSrcUi();
+  }
   try {
     let target;
     if (opts.ra !== null && opts.ra !== undefined && opts.dec !== null && opts.dec !== undefined) {
       target = { name: opts.name ?? opts.q ?? null, ra: opts.ra, dec: opts.dec, pmra: opts.pmra, pmdec: opts.pmdec };
     } else {
       setLoading(true, t('finding', { q: opts.q }));
-      target = await api('api/resolve', { q: opts.q }, ctl.signal);
+      try {
+        target = await api('api/resolve', { q: opts.q }, ctl.signal);
+      } catch (e) {
+        if (e.status === 404) e.message = t('notFound', { q: opts.q });      // said in the page's language
+        throw e;
+      }
       if (target.matched === 'path') {
         // Typed coordinates that lie on a moving object's path are that object (WISE 0855's own name gives
         // where it was in 2010, two arcminutes from where it is now): say so, and follow the object.
@@ -498,6 +532,7 @@ async function run(opts) {
       if (!shown) { state.src = 'deep'; syncSrcUi(); }        // nothing in that band: the all-detector view still works
     }
     await runDeep(target, opts, ctl, shown);
+    if (opts.sharp && state.abort === ctl && state.deepData?.frames?.length) setSrc('sharp');   // a link to the sharpened pictures
   } catch (e) {
     if (e.name !== 'AbortError') {
       toast(e.message, true);
@@ -1349,7 +1384,7 @@ function syncUrl(replace = false) {
   p.set('fov', els.fov.value);
   p.set('mode', els.mode.value);
   if (state.dets.size < 6) p.set('det', [...state.dets].sort().join(','));
-  if (state.src === 'deep' || state.src === 'sharp') p.set('src', 'deep');
+  if (state.src === 'deep' || state.src === 'sharp') p.set('src', state.src);
   else if (state.quick?.quick.band ?? state.band) p.set('band', state.quick?.quick.band ?? state.band);   // the band on screen
   if (els.view.value !== 'images') p.set('view', els.view.value);
   if (els.fps.value !== '2') p.set('fps', els.fps.value);
@@ -1383,6 +1418,9 @@ function applyLang(l) {
   try { localStorage.setItem('radians-lang', getLang()); } catch { /* private mode */ }
   for (const b of document.querySelectorAll('[data-lang]')) b.setAttribute('aria-pressed', String(b.dataset.lang === getLang()));
   if (state.data) { applyView(state.idx); renderCandidates(); renderAnalysis(); syncUrl(true); }
+  restate();
+  syncSrcUi();                           // the band chips' tooltips
+  els.zoom.title = t('zoomHelp');
   document.dispatchEvent(new CustomEvent('radians:lang'));
 }
 for (const b of document.querySelectorAll('[data-lang]')) b.onclick = () => applyLang(b.dataset.lang);
@@ -1409,17 +1447,22 @@ function fromUrl() {
   syncWlBox();
   setDets(s.det ? s.det.split(',').map(Number) : ALL_DETS);
   // links made before the fast band existed, and settings only the all-detector data has, open on it
-  const deepOnly = s.src === 'deep' || (!s.src && s.band === null && Boolean(s.det || (s.mode && s.mode !== 'epoch') || s.wlc !== null || s.cmap === 'rgb'));
+  const deepOnly = s.src === 'deep' || s.src === 'sharp' || (!s.src && s.band === null && Boolean(s.det || (s.mode && s.mode !== 'epoch') || s.wlc !== null || s.cmap === 'rgb'));
   const common = { fov: els.fov.value, mode: els.mode.value, frame: s.frame, autoplay: s.frame === null,
-    src: deepOnly ? 'deep' : 'quick', band: s.band };
+    src: deepOnly ? 'deep' : 'quick', band: s.band, sharp: s.src === 'sharp' };
   if (s.ra !== null && s.dec !== null) run({ q: s.q, ra: s.ra, dec: s.dec, pmra: s.pmra, pmdec: s.pmdec, ...common });
   else if (s.q) run({ q: s.q, ...common });
 }
 
+const COORD_ERRORS = { unreadable: 'coordErrUnreadable', minutes: 'coordErrMinutes', count: 'coordErrCount', ra: 'coordErrRa', dec: 'coordErrDec' };
 els.search.onsubmit = (e) => {
   e.preventDefault();
   const q = els.q.value.trim();
-  if (q) run({ q, fov: els.fov.value, mode: els.mode.value });
+  if (!q) return;
+  const c = parseCoords(q);
+  // coordinates that cannot be a place in the sky: say what is wrong instead of asking the name service
+  if (c && c.error) { toast(t(COORD_ERRORS[c.error] || 'coordErrUnreadable'), true); return; }
+  run({ q, fov: els.fov.value, mode: els.mode.value });
 };
 els.fov.onchange = () => requery();
 els.mode.onchange = requeryDeep;
@@ -2057,7 +2100,7 @@ els.gif.onclick = () => {
     const delay = Math.round(100 / Number(els.fps.value || 2));
     const blob = new Blob([encodeGif(frames, W, W, table, delay)], { type: 'image/gif' });
     const a = document.createElement('a');
-    const name = (state.target && (state.target.name || els.q.value) || 'radians').toString().replace(/[^\w.-]+/g, '-');
+    const name = (state.target && (state.target.name || els.q.value) || 'radians').toString().replace(/^(NAME|V\*|\*)\s+/, '').replace(/[^\w.-]+/g, '-');
     a.href = URL.createObjectURL(blob);
     a.download = `${name}-spherex.gif`;
     a.click();

@@ -130,8 +130,7 @@ def blank_allsky():
     return Response(buf.getvalue(), media_type="image/png", headers=_BLANK_CACHE)
 
 
-@blank_router.get("/Moc.fits")
-def blank_moc():
+def full_sky_moc() -> Response:
     """The coverage map a HiPS client asks for: the whole sky (the twelve cells of order 0)."""
     from astropy.io import fits
     table = fits.BinTableHDU.from_columns([fits.Column(name="UNIQ", format="1J", array=np.arange(4, 16, dtype="i4"))])
@@ -140,6 +139,21 @@ def blank_moc():
     buf = io.BytesIO()
     fits.HDUList([fits.PrimaryHDU(), table]).writeto(buf)
     return Response(buf.getvalue(), media_type="application/fits", headers=_BLANK_CACHE)
+
+
+@blank_router.get("/Moc.fits")
+def blank_moc():
+    return full_sky_moc()
+
+
+@router.get("/{spec}/Moc.fits")
+def mix_moc(spec: str):
+    return full_sky_moc()                 # a colour picture of the cube covers the sky the cube covers: all of it
+
+
+@colour_router.get("/Moc.fits")
+def colour_moc():
+    return full_sky_moc()
 
 
 def cube_tile(frame, order, npix):
@@ -160,7 +174,7 @@ def cube_tile(frame, order, npix):
 def _png(rgb: np.ndarray) -> bytes:
     from PIL import Image
     buf = io.BytesIO()
-    Image.fromarray(rgb, "RGB").save(buf, "PNG", optimize=False, compress_level=6)
+    Image.fromarray(rgb).save(buf, "PNG", optimize=False, compress_level=6)    # uint8 H x W x 3: read as RGB
     return buf.getvalue()
 
 
