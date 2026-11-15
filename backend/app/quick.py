@@ -11,6 +11,7 @@ Frames are the engine's median stacks, one per sky pass, on its 2" north-up grid
 from __future__ import annotations
 
 import math
+import threading
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query
@@ -156,6 +157,50 @@ def quick(
     query = {"ra": ra, "dec": dec, "pmra": pmra, "pmdec": pmdec, "ref_epoch": ref_epoch, "mode": "epoch",
              "band": spec["band"], "pin": pin["id"] if pin else None}
     return payload(mgr, job, have, query)
+
+
+# ---------------------------------------------------------------- a head start while the visitor is still choosing
+_warming: set[str] = set()
+_warm_lock = threading.Lock()
+
+
+def warm(mgr, spec: dict) -> bool:
+    """Ask the archive, in the background, which exposures cover the spot of an engine view (one
+    request, cached for days), and let the reader learn the file layout if it does not know it.
+    The build that follows a click then starts with the list in hand and an open connection.
+    False if the list is already here or being fetched."""
+    from .engine import sia
+    key = sia.cache_key(spec["ra"], spec["dec"])
+    if sia.is_fresh(spec["ra"], spec["dec"], mgr.sia_dir):
+        return False
+    with _warm_lock:
+        if key in _warming or len(_warming) >= 4:
+            return False
+        _warming.add(key)
+
+    def run():
+        try:
+            exps = sia.exposures(mgr.http, spec["ra"], spec["dec"], mgr.sia_dir)
+            mgr.cache.fast([e for e in exps if e["det"] == spec["band"]][:3])
+        except Exception:  # noqa: BLE001  (a head start only: the real request reports problems)
+            pass
+        finally:
+            with _warm_lock:
+                _warming.discard(key)
+    threading.Thread(target=run, daemon=True, name="warm").start()
+    return True
+
+
+@router.get("/api/quick/warm")
+def quick_warm(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+               band: int | None = Query(None, ge=1, le=6), prefer: int | None = Query(None, ge=1, le=6)):
+    """The page calls this while the visitor is still typing or choosing a suggestion. It answers at
+    once; the archive is asked in the background (no pixels are read)."""
+    try:
+        spec, _ = quick_spec(ra, dec, 240.0, band, None, None, 2000.0, prefer)
+    except ValueError:
+        return {"started": False}
+    return {"started": warm(api_views.manager(), spec)}
 
 
 @router.get("/api/quick/diffs")

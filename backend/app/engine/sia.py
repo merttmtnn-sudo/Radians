@@ -18,6 +18,7 @@ from .http import Http
 
 SIA_URL = "https://irsa.ipac.caltech.edu/SIA"
 COVER_RADIUS_DEG = 0.003     # we want images that contain the point, not ones that merely touch a cone
+LIST_VERSION = 2             # cached lists older than this lack the footprints: they are asked again
 
 
 def parse_sia_csv(text: str) -> list[dict]:
@@ -39,12 +40,25 @@ def parse_sia_csv(text: str) -> list[dict]:
         det = int(band[-1])
         e = dict(obs_id=row["obs_id"].strip(), det=det, url=row["access_url"].strip(), collection=coll,
                  mjd=float(row["t_min"]), size_kb=float(row.get("access_estsize") or 0),
-                 deep=coll.endswith("_deep"))
+                 deep=coll.endswith("_deep"), region=parse_region(row.get("s_region")))
         key = (e["obs_id"], det)
         # the same exposure can be listed by more than one release: keep the newest release
         if key not in best or _release_rank(coll) > _release_rank(best[key]["collection"]):
             best[key] = e
     return sorted(best.values(), key=lambda e: (e["mjd"], e["det"]))
+
+
+def parse_region(text) -> list[float] | None:
+    """The four corners of an exposure's sky footprint, [ra1, dec1, ... ra4, dec4] in degrees, from
+    the s_region column ("POLYGON ICRS ra dec ra dec ..."), or None. The reader uses it to guess
+    where a position falls on the detector before it has read the file's header."""
+    nums = []
+    for word in str(text or "").replace("(", " ").replace(")", " ").replace(",", " ").split():
+        try:
+            nums.append(float(word))
+        except ValueError:
+            continue
+    return [round(v, 7) for v in nums[:8]] if len(nums) >= 8 else None
 
 
 def _release_rank(coll: str) -> int:
@@ -65,13 +79,19 @@ def cache_key(ra: float, dec: float) -> str:
     return hashlib.sha1(f"{ra:.4f},{dec:.4f}".encode()).hexdigest()[:16]
 
 
+def is_fresh(ra: float, dec: float, cache_dir: Path | None = None, ttl_hours: float = settings.SIA_TTL_HOURS) -> bool:
+    """True if exposures() would answer from its cache, without asking the archive."""
+    cached = store.read_json(Path(cache_dir or settings.DATA / "sia") / f"{cache_key(ra, dec)}.json")
+    return bool(cached and cached.get("v") == LIST_VERSION and time.time() - cached.get("at", 0) < ttl_hours * 3600)
+
+
 def exposures(http: Http, ra: float, dec: float, cache_dir: Path | None = None,
               ttl_hours: float = settings.SIA_TTL_HOURS) -> list[dict]:
     """Cached query(). After ttl_hours the archive is asked again so new data appears; if it can't
     be reached, the old list is used."""
     path = Path(cache_dir or settings.DATA / "sia") / f"{cache_key(ra, dec)}.json"
     cached = store.read_json(path)
-    if cached and time.time() - cached.get("at", 0) < ttl_hours * 3600:
+    if cached and cached.get("v") == LIST_VERSION and time.time() - cached.get("at", 0) < ttl_hours * 3600:
         return cached["exposures"]
     try:
         exps = query(http, ra, dec)
@@ -79,7 +99,7 @@ def exposures(http: Http, ra: float, dec: float, cache_dir: Path | None = None,
         if cached:
             return cached["exposures"]
         raise
-    store.write_json(path, {"at": time.time(), "ra": ra, "dec": dec, "exposures": exps})
+    store.write_json(path, {"v": LIST_VERSION, "at": time.time(), "ra": ra, "dec": dec, "exposures": exps})
     return exps
 
 

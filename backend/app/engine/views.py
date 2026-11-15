@@ -55,10 +55,11 @@ def view_id(spec: dict) -> str:
 
 class ViewManager:
     def __init__(self, http: Http | None = None, root: Path | None = None, cutouts: Path | None = None,
-                 workers: int = 2):
+                 workers: int = 2, seed_layouts: Path | None = None):
         self.http = http or Http()
         self.root = Path(root or settings.DATA / "views")
-        self.cache = CutoutCache(Reader(self.http), cutouts)
+        # file layouts learnt while reading are kept next to the views; seed_layouts ships known ones
+        self.cache = CutoutCache(Reader(self.http, layout_file=self.root.parent / "layouts.json", seed_file=seed_layouts), cutouts)
         self.sia_dir = self.root.parent / "sia"
         self.gaia_dir = self.root.parent / "gaia"
         self.jobs: dict[str, dict] = {}
@@ -105,7 +106,9 @@ class ViewManager:
                     self._set(vid, progress=dict(done=done, total=total, stage=quality))
                 self._set(vid, progress=dict(done=0, total=0, stage=quality))
                 res = build_band(self.cache, exps, spec["ra"], spec["dec"], spec["band"], spec["size_arcmin"], quality, progress)
-                final = quality == QUALITIES[-1] or res["timing"]["n_requested"] >= in_band
+                # a preview is the final picture only if nothing can be added: every exposure is in it
+                # and none is waiting for its variance and flags
+                final = quality == QUALITIES[-1] or (res["timing"]["n_requested"] >= in_band and not res["timing"]["fast"])
                 self._save(vid, spec, res, QUALITIES[-1] if final else quality, len(exps))
                 self._set(vid, rev=self.jobs[vid]["rev"] + 1)
                 if final:

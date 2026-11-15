@@ -173,3 +173,26 @@ def test_the_fast_bands_lookups_are_rate_limited():
     for p in ("/api/quick/changes", "/api/quick/diffs", "/api/quick/motion"):
         assert main.LIMITS[p] == config.RATE_LOOKUP
     assert "/api/quick" not in main.LIMITS                                 # long-polled: the build queue limits it
+
+
+def test_a_head_start_asks_the_archive_once_and_reads_no_pixels(client, tmp_path):
+    """While the visitor is still choosing a target the page calls /api/quick/warm: the exposure list
+    is fetched in the background, so the build that follows does not wait for it."""
+    import time
+    mgr = api_views.manager()
+    fake = mgr.http.session
+    assert client.get("/api/quick/warm", params={"ra": 150.0, "dec": 10.0, "band": 5}).json() == {"started": True}
+    for _ in range(100):
+        if not quick._warming:
+            break
+        time.sleep(0.02)
+    lists = [u for u, _ in fake.calls if u.endswith("/SIA")]
+    assert len(lists) == 1 and (mgr.sia_dir).exists()
+    assert not any(h.get("Range", "").count(",") > 5 for _, h in fake.calls)       # headers at most: no image rows
+    before = len(fake.calls)
+    last, _ = _follow(client, fov=120, band=5, ra=150.0, dec=10.0)
+    assert last["quick"]["state"] == "ready"
+    assert not [u for u, _ in fake.calls[before:] if u.endswith("/SIA")]            # the list was already there
+    # nothing to warm once the list is here; and a band that does not exist is refused
+    assert client.get("/api/quick/warm", params={"ra": 150.0, "dec": 10.0, "band": 5}).json() == {"started": False}
+    assert client.get("/api/quick/warm", params={"ra": 150.0, "dec": 10.0, "band": 9}).status_code == 422

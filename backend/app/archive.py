@@ -13,6 +13,7 @@ import requests
 from astropy.coordinates import SkyCoord
 
 from . import config
+from .engine.sia import parse_region
 
 
 @dataclass
@@ -26,6 +27,7 @@ class Exposure:
     wl_max: float
     exptime: float
     collection: str
+    region: list | None = None      # the four sky corners of the exposure (s_region): lets the reader guess the pixel box
 
     @property
     def mjd(self) -> float:
@@ -78,7 +80,8 @@ def _rows(t, coll):
             obs_id=str(row["obs_id"]), detector=int(m.group(1)) if m else 0, url=str(row["access_url"]),
             mjd_start=float(row["t_min"]), mjd_end=float(row["t_max"]),
             wl_min=float(row["em_min"]) * 1e6, wl_max=float(row["em_max"]) * 1e6,
-            exptime=float(row["t_exptime"]), collection=coll))
+            exptime=float(row["t_exptime"]), collection=coll,
+            region=parse_region(row["s_region"]) if "s_region" in t.colnames else None))
     return rows
 
 

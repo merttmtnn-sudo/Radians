@@ -2,10 +2,13 @@
 (with a disk cache), resample onto one grid, group into sky passes and stack them.
 
 Quality levels (measured trade-offs in docs/BUILD_NOTES.md §14):
-- preview:  image only, PREVIEW_PER_PASS exposures per pass chosen to cover the wavelengths all
-            passes share (their headers are read first: one cheap request each);
+- preview:  image only. Where the image search gave the exposures' sky footprints and the file
+            layout is known, every exposure is read in one request each (Reader.read_fast), so the
+            first picture already has the full depth. Otherwise PREVIEW_PER_PASS exposures per pass
+            are chosen to cover the wavelengths all passes share (their headers are read first);
 - standard: image + variance for every exposure, plus quality flags for the detector rows next to
-            the target (so a saturated target is recognised);
+            the target (so a saturated target is recognised). After a fast preview this is one more
+            request per exposure (Reader.finish);
 - full:     quality flags for the whole box (costly: whole compressed detector rows).
 
 The HTTP view API (P5) wraps build_band(); this module has no web code.
@@ -24,7 +27,7 @@ from astropy.time import Time
 from astropy.wcs import WCS
 
 from . import settings, stacking, store
-from .fitsread import Reader, wavelength_at
+from .fitsread import LayoutMismatch, Reader, pipeline_version, wavelength_at
 
 NATIVE_PIX_ARCSEC = 6.15
 DEFAULT_SCALE_ARCSEC = 2.0
@@ -139,13 +142,44 @@ class CutoutCache:
             return None
         if z is not None and int(z["half"]) >= half and int(z.get("level", 0)) >= level:
             return _unpack(z, e)
-        head = e.get("head")
-        if head is None and self.path(e, ra, dec, "head.npz").exists():
-            head = self.probe(e, ra, dec)["head"]          # headers already read for a preview
-        c = self.reader.read(e["url"], ra, dec, half, full=level >= 1, flags=FLAGS_FOR_LEVEL[level], head=head)
+        flags = FLAGS_FOR_LEVEL[level]
+        url = e["url"]
+        # a fast preview left the image here and what the rest needs: one request finishes the job
+        if z is not None and level >= 1 and int(z["half"]) >= half and "pend_tiles" in z:
+            try:
+                h, w = z["img"].shape
+                rest = self.reader.finish(url, int(z["x0"]), int(z["y0"]), w, h, float(z["yc"]), _pending(z), flags)
+                record = {k: v for k, v in z.items() if not k.startswith("pend_")}
+                record.update(level=level, var=rest["var"])
+                if "flags" in rest:
+                    record.update(flags=rest["flags"], flag_names=json.dumps(rest["flag_names"]), flag_rows=rest["flag_rows"])
+                store.save_arrays(p, **record)
+                return _unpack(store.load_arrays(p), e)
+            except (LayoutMismatch, OSError, ValueError, KeyError):
+                pass                                        # read it again the classic way
+        c, pending = None, None
+        if e.get("region"):
+            try:
+                c = self.reader.read_fast(url, ra, dec, half, e["region"])
+            except (LayoutMismatch, OSError, ValueError):
+                c = None
+        if c is not None and not c["off"]:
+            pending = c.pop("pending")
+            if level >= 1:
+                h, w = c["img"].shape
+                try:
+                    c.update(self.reader.finish(url, c["x0"], c["y0"], w, h, c["yc"], pending, flags))
+                    pending = None
+                except LayoutMismatch:
+                    c = None
+        if c is None:
+            head = e.get("head")
+            if head is None and self.path(e, ra, dec, "head.npz").exists():
+                head = self.probe(e, ra, dec)["head"]          # headers already read for a preview
+            c = self.reader.read(url, ra, dec, half, full=level >= 1, flags=flags, head=head)
         wx, wy, wv = c["wave"]
         record = dict(hdr=c["hdr"], mjd=c["mjd"], wave_x=wx, wave_y=wy, wave_v=wv, half=half,
-                      level=level, off=c["off"], collection=e["collection"], url=e["url"])
+                      level=level, off=c["off"], collection=e["collection"], url=url)
         if c["off"]:
             store.save_arrays(p, **record)
             return None
@@ -156,8 +190,29 @@ class CutoutCache:
             record["var"] = c["var"]
         if "flags" in c:
             record.update(flags=c["flags"], flag_names=json.dumps(c["flag_names"]), flag_rows=c["flag_rows"])
+        if pending:                                         # kept for the request that adds variance and flags
+            record.update(yc=c["yc"], pend_key=json.dumps(pending["key"]), pend_var_hdu=pending["var_hdu"],
+                          pend_tiles=pending["tiles"], pend_y0=pending["tiles_y0"])
         store.save_arrays(p, **record)
         return _unpack(store.load_arrays(p), e)
+
+    def fast(self, exps: list[dict]) -> bool:
+        """Can these exposures be read in one request each? They need their sky footprints, and the
+        layout of their files must be known; it is learnt here from one file per pipeline version
+        (three requests, once: the answer is kept on disk)."""
+        if not exps or not all(e.get("region") for e in exps):
+            return False
+        first = {}
+        for e in exps:
+            first.setdefault(pipeline_version(e["url"]), e["url"])
+        try:
+            return all(self.reader.prime(url) for url in first.values())
+        except (OSError, ValueError):
+            return False
+
+
+def _pending(z: dict) -> dict:
+    return dict(key=json.loads(str(z["pend_key"])), var_hdu=int(z["pend_var_hdu"]), tiles=z["pend_tiles"], tiles_y0=int(z["pend_y0"]))
 
 
 def _unpack(z: dict, e: dict) -> dict:
@@ -220,10 +275,15 @@ def build_band(cache: CutoutCache, exps: list[dict], ra: float, dec: float, band
     todo = [e for e in exps if e["det"] == band]
     errors: list[str] = []
     preview_info: dict = {}
+    choose_first = False                 # the classic preview: read headers, then a few exposures per pass
     if level == 0:
         sample = spread_in_time(todo, PROBE_PER_PASS)
-        probed, errors = run_parallel(lambda e: cache.probe(e, ra, dec), sample)
-        todo, preview_info = spread_in_wavelength([p for p in probed if p and p["on"]], band)
+        if cache.fast(sample):           # one request per exposure: the preview uses all of them
+            todo = sample
+        else:
+            choose_first = True
+            probed, errors = run_parallel(lambda e: cache.probe(e, ra, dec), sample)
+            todo, preview_info = spread_in_wavelength([p for p in probed if p and p["on"]], band)
     half = cutout_half(size_arcmin)
     cuts, fetch_errors = fetch_all(cache, todo, ra, dec, half, level, progress)
     errors += fetch_errors
@@ -250,7 +310,7 @@ def build_band(cache: CutoutCache, exps: list[dict], ra: float, dec: float, band
     for number, members in enumerate(pass_lists):
         pass_of[members] = number
     members_of = {number: np.flatnonzero(pass_of == number) for number in range(len(pass_lists))}
-    if level == 0:
+    if choose_first:
         # the preview frames were already chosen to cover one shared range: stack all of them
         used_of, winfo = members_of, dict(preview_info, warning=preview_info.get("warning"))
     else:
@@ -279,4 +339,5 @@ def build_band(cache: CutoutCache, exps: list[dict], ra: float, dec: float, band
                 obs_ids=[c["obs_id"] for c in cuts], passes=passes, stacks=stacks, wavelengths=winfo,
                 levels=levels, warnings=notes, errors=errors,
                 timing=dict(fetch_s=round(t_fetch, 2), resample_s=round(t_resample, 2),
-                            total_s=round(time.time() - started, 2), n_requested=len(todo), n_used=k))
+                            total_s=round(time.time() - started, 2), n_requested=len(todo), n_used=k,
+                            fast=level == 0 and not choose_first))

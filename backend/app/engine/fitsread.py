@@ -5,14 +5,20 @@ VARIANCE (float32), ZODI, PSF/EPSF, and finally WCS-WAVE (a small wavelength loo
 Image row y of a box from x0 to x1 is one contiguous run of bytes, so a box of h rows is h byte
 ranges per HDU. See docs/BUILD_NOTES.md §2 for the reasoning.
 
-Round trips per exposure:
+Round trips per exposure, the classic way (read()):
 1. headers + tail: the first 9 blocks (primary and IMAGE headers) and the last 3 blocks (the
    WCS-WAVE table) in one request. It gives the WCS, so we know which rows we need.
 2. IMAGE rows (preview stops here). For full quality also the FLAGS descriptors and the first block
    of the FLAGS header, whose PCOUNT says where VARIANCE starts.
 3. full quality: the FLAGS heap bytes of those rows, the VARIANCE header and VARIANCE rows.
 The first file of each pipeline version also costs one or two requests to learn its layout
-(header lengths), which is then cached.
+(header lengths), which is then remembered (and kept in a file, so a restart does not forget it).
+
+The fast way (read_fast() + finish()) needs one round trip less. The image search already says
+where each exposure sits on the sky (its footprint), and that predicts the target's pixel to within
+8 pixels (measured on 698 exposures of five fields). So steps 1 and 2 go out as ONE request, for a
+box padded by GUESS_PAD pixels, and the real header that comes back says which part of it to keep.
+A first picture from every exposure then costs one request per exposure, and step 3 one more.
 
 Two FLAGS forms exist: older files store a plain int32 image; pipeline v27 (DR1, QR3) stores a
 Rice-compressed binary table with one tile per image row.
@@ -36,6 +42,7 @@ BLOCK = 2880
 HEAD_BLOCKS = 9
 TAIL_BYTES = 3 * BLOCK
 EDGE_MARGIN = 4                  # the target must be at least this many pixels inside the detector
+GUESS_PAD = 12                   # px added around a box whose place was guessed from the sky footprint
 
 _TFORM_BYTES = {"L": 1, "B": 1, "I": 2, "J": 4, "K": 8, "E": 4, "D": 8, "A": 1}
 _TFORM_DTYPE = {"B": ">u1", "I": ">i2", "J": ">i4", "K": ">i8", "E": ">f4", "D": ">f8"}
@@ -150,6 +157,40 @@ def decode_rice_rows(flags_hdr, blobs: list[bytes]) -> np.ndarray:
 FLAG_NEAR_ROWS = 6              # "near" flags: detector rows within this many pixels (37") of the target
 
 
+def guess_pixel(region, ra: float, dec: float, nx: int, ny: int) -> tuple[float, float] | None:
+    """Where (ra, dec) falls on a detector, guessed from the four sky corners of its footprint
+    (the s_region of the image search: the corners of pixel (0,0), (nx,0), (nx,ny), (0,ny), in that
+    order). A projective map through the four corners; it ignores the optical distortion, which
+    costs a few pixels. None if the corners are unusable."""
+    if not region or len(region) < 8:
+        return None
+    pts = np.radians(np.asarray(region[:8], float).reshape(4, 2))
+    xyz = np.stack([np.cos(pts[:, 1]) * np.cos(pts[:, 0]), np.cos(pts[:, 1]) * np.sin(pts[:, 0]), np.sin(pts[:, 1])])
+    mid = xyz.mean(axis=1)
+    norm = float(np.linalg.norm(mid))
+    if not norm > 0:
+        return None
+    ra0, dec0 = float(np.arctan2(mid[1], mid[0])), float(np.arcsin(mid[2] / norm))
+
+    def plane(r, d):                                       # gnomonic projection about the footprint's centre
+        c = np.sin(dec0) * np.sin(d) + np.cos(dec0) * np.cos(d) * np.cos(r - ra0)
+        return np.cos(d) * np.sin(r - ra0) / c, (np.cos(dec0) * np.sin(d) - np.sin(dec0) * np.cos(d) * np.cos(r - ra0)) / c, c
+    sx, sy, sc = plane(pts[:, 0], pts[:, 1])
+    tx, ty, tc = plane(np.radians(ra), np.radians(dec))
+    if np.any(sc <= 0) or tc <= 0:
+        return None
+    corners = [(-0.5, -0.5), (nx - 0.5, -0.5), (nx - 0.5, ny - 0.5), (-0.5, ny - 0.5)]
+    rows = []
+    for (x, y), (u, v) in zip(zip(sx, sy), corners):
+        rows.append([x, y, 1, 0, 0, 0, -u * x, -u * y, -u])
+        rows.append([0, 0, 0, x, y, 1, -v * x, -v * y, -v])
+    hom = np.linalg.svd(np.array(rows, float))[2][-1].reshape(3, 3)
+    u, v, w = hom @ np.array([float(tx), float(ty), 1.0])
+    if not np.isfinite([u, v, w]).all() or abs(w) < 1e-12:
+        return None
+    return float(u / w), float(v / w)
+
+
 def _expect(hdr, extname: str, url: str) -> None:
     found = hdr.get("EXTNAME") if hdr is not None else None
     if found != extname:
@@ -159,10 +200,89 @@ def _expect(hdr, extname: str, url: str) -> None:
 class Reader:
     """Reads cutouts; remembers each pipeline version's layout so later files cost fewer requests."""
 
-    def __init__(self, http: Http):
+    def __init__(self, http: Http, layout_file=None, seed_file=None):
+        """layout_file: where what is learnt about file layouts is kept between runs (optional);
+        seed_file: layouts shipped with the app, read first, so a new server knows them at once."""
         self.http = http
         self.layouts: dict[tuple, dict] = {}
+        self.shapes: dict[str, dict] = {}            # pipeline version -> header lengths and detector size
         self.lock = threading.Lock()
+        self.learning: dict[tuple, threading.Lock] = {}
+        self.layout_file = layout_file
+        for path in (seed_file, layout_file):
+            self._load_layouts(path)
+
+    # -- what is known about the files ------------------------------------------------------
+    def _load_layouts(self, path) -> None:
+        import json
+        from pathlib import Path
+        try:
+            known = json.loads(Path(path).read_text()) if path and Path(path).exists() else None
+        except (OSError, ValueError):
+            known = None
+        if not known:
+            return
+        for ver, shape in (known.get("shapes") or {}).items():
+            self.shapes[ver] = {k: int(shape[k]) for k in ("n0", "n1", "nx", "ny")}
+        for name, lay in (known.get("layouts") or {}).items():
+            ver, *rest = name.split("|")
+            self.layouts[(ver, *(int(v) for v in rest))] = lay
+
+    def _save_layouts(self) -> None:
+        if not self.layout_file:
+            return
+        import json
+        from pathlib import Path
+        with self.lock:
+            known = {"shapes": dict(self.shapes), "layouts": {"|".join(str(v) for v in key): lay for key, lay in self.layouts.items()}}
+        try:
+            path = Path(self.layout_file)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(known))
+            tmp.replace(path)
+        except OSError:
+            pass                                      # only a speed-up: never worth failing a read
+
+    def _note_shape(self, url: str, n0: int, n1: int, hdr) -> None:
+        ver = pipeline_version(url)
+        shape = dict(n0=int(n0), n1=int(n1), nx=int(hdr["NAXIS1"]), ny=int(hdr["NAXIS2"]))
+        if self.shapes.get(ver) != shape:
+            with self.lock:
+                self.shapes[ver] = shape
+            self._save_layouts()
+
+    def _layout(self, url: str, head: dict, key: tuple) -> dict:
+        """The layout of this kind of file, learnt once: threads asking at the same time wait for
+        the first one instead of each spending two requests on it."""
+        lay = self.layouts.get(key)
+        if lay is not None:
+            return lay
+        with self.lock:
+            gate = self.learning.setdefault(key, threading.Lock())
+        with gate:
+            lay = self.layouts.get(key)
+            if lay is None:
+                lay = self._learn_layout(url, head, key)
+                self._save_layouts()
+        return lay
+
+    def knows(self, url: str) -> bool:
+        """True if files of this pipeline version can be read the fast way (read_fast)."""
+        shape = self.shapes.get(pipeline_version(url))
+        if not shape:
+            return False
+        lay = self.layouts.get((pipeline_version(url), shape["n0"], shape["n1"], shape["nx"], shape["ny"]))
+        return bool(lay) and lay["form"] == "rice"
+
+    def prime(self, url: str) -> bool:
+        """Learn the layout of this file's pipeline version (three requests, once per version)."""
+        if self.knows(url):
+            return True
+        head = self.head(url)
+        hdr = head["hdr"]
+        self._layout(url, head, (pipeline_version(url), head["n0"], head["n1"], int(hdr["NAXIS1"]), int(hdr["NAXIS2"])))
+        return self.knows(url)
 
     # -- step 1 ---------------------------------------------------------------------------
     def head(self, url: str) -> dict:
@@ -186,6 +306,7 @@ class Reader:
             wave = find_wave_table(self.http.get_ranges(url, [(-20 * BLOCK, None)])[0])
         if wave is None:
             raise IOError(f"no WCS-WAVE table at the end of {url}")
+        self._note_shape(url, n0, n1, h1)
         return dict(total=total, n0=n0, n1=n1, hdr=h1, wave=wave)
 
     def probe(self, url: str, ra: float, dec: float) -> dict:
@@ -273,16 +394,11 @@ class Reader:
         if not full:
             out["img"] = box.image(self.http.get_ranges(url, box.rows(img_off)), ">f4")
             return out
-        flag_span = None
-        if flags == "all":
-            flag_span = (y0, y1)
-        elif flags == "near":
-            cy = int(round(yc))
-            flag_span = (max(y0, cy - FLAG_NEAR_ROWS), min(y1, cy + FLAG_NEAR_ROWS + 1))
+        flag_span = self._flag_span(flags, y0, y1, yc)
         key = (pipeline_version(url), head["n0"], head["n1"], nx, ny)
         flags_hdu = img_off + pad(nx * ny * 4)
         for attempt in (0, 1):
-            lay = self.layouts.get(key) or self._learn_layout(url, head, key)
+            lay = self._layout(url, head, key)
             reader = self._full_plain if lay["form"] == "plain" else self._full_rice
             try:
                 out.update(reader(url, lay, img_off, flags_hdu, box, ny, flag_span))
@@ -325,15 +441,22 @@ class Reader:
         if not first_block.startswith(b"XTENSION") or card_value(first_block, "NAXIS1") != rb:
             raise LayoutMismatch("FLAGS header not where the cached layout says")
         var_hdu = flags_data + pad(rb * card_value(first_block, "NAXIS2") + card_value(first_block, "PCOUNT"))
-        var_data = var_hdu + lay["var_hlen"]
         tiles = np.frombuffer(desc_bytes, ">i4" if rb == 8 else ">i8").reshape(-1, 2)   # (length, heap offset)
+        out = dict(img=box.image(img_parts, ">f4"))
+        out.update(self._rice_rest(url, lay, flags_data, box, flag_span, tiles, var_hdu))
+        return out
+
+    def _rice_rest(self, url, lay, flags_data, box, flag_span, tiles, var_hdu) -> dict:
+        """The last round trip of a v27 file: the FLAGS heap bytes of the wanted rows (tiles: their
+        (length, heap offset) descriptors), the VARIANCE header and the VARIANCE rows of the box."""
+        var_data = var_hdu + lay["var_hlen"]
         heap = flags_data + lay["theap"]
         spans = _merge_spans([(heap + int(off), int(n)) for n, off in tiles]) if flag_span else []
         got2 = self.http.get_ranges(url, spans + [(var_hdu, var_data - 1)] + box.rows(var_data))
         vh, vn = parse_header(got2[len(spans)], 0)
         if vh is None or vh.get("EXTNAME") != "VARIANCE" or vn != lay["var_hlen"]:
             raise LayoutMismatch("VARIANCE header not where the cached layout says")
-        out = dict(img=box.image(img_parts, ">f4"), var=box.image(got2[len(spans) + 1:], ">f4"))
+        out = dict(var=box.image(got2[len(spans) + 1:], ">f4"))
         if flag_span:
             starts = [a for a, _ in spans]
             blobs = []
@@ -343,6 +466,95 @@ class Reader:
                 blobs.append(got2[k][pos - starts[k]:pos - starts[k] + int(n)])
             rows = decode_rice_rows(fits.Header.fromstring(lay["flags_hdr"]), blobs)[:, box.x0:box.x1]
             out["flags"] = box.partial_flags(rows, flag_span)
+        return out
+
+    # -- the cutout, one round trip sooner ---------------------------------------------------
+    @staticmethod
+    def _flag_span(flags, y0: int, y1: int, yc: float):
+        if flags == "all":
+            return (y0, y1)
+        if flags == "near":
+            cy = int(round(yc))
+            return (max(y0, cy - FLAG_NEAR_ROWS), min(y1, cy + FLAG_NEAR_ROWS + 1))
+        return None
+
+    def read_fast(self, url: str, ra: float, dec: float, half: int, region) -> dict | None:
+        """The image cutout in ONE request: the headers, the wavelength table, and the image rows of
+        a box whose place is guessed from the exposure's sky footprint (region) and padded by
+        GUESS_PAD pixels. The real header then says which part of the box to keep.
+
+        Returns what read(full=False) returns, plus "pending": what finish() needs to add variance
+        and flags with one more request. Returns None whenever the fast way cannot be trusted (an
+        unknown file layout, no footprint, a guess that missed): the caller then uses read()."""
+        ver = pipeline_version(url)
+        shape = self.shapes.get(ver)
+        if not shape or not region:
+            return None
+        nx, ny = shape["nx"], shape["ny"]
+        key = (ver, shape["n0"], shape["n1"], nx, ny)
+        lay = self.layouts.get(key)
+        if not lay or lay["form"] != "rice":
+            return None
+        guess = guess_pixel(region, ra, dec, nx, ny)
+        if guess is None:
+            return None
+        gx, gy, reach = int(round(guess[0])), int(round(guess[1])), half + GUESS_PAD
+        x0, y0, x1, y1 = max(0, gx - reach), max(0, gy - reach), min(nx, gx + reach + 1), min(ny, gy + reach + 1)
+        if x1 - x0 < 3 or y1 - y0 < 3:
+            return None
+        img_off = shape["n0"] + shape["n1"]
+        flags_hdu = img_off + pad(nx * ny * 4)
+        flags_data = flags_hdu + lay["flags_hlen"]
+        rb = int(lay["row_bytes"])
+        big = _Box(x0, y0, x1, y1, nx)
+        got, total = self.http.fetch_ranges(url, [(0, HEAD_BLOCKS * BLOCK - 1), (-TAIL_BYTES, None)] + big.rows(img_off)
+                                            + [(flags_data + y0 * rb, flags_data + y1 * rb - 1), (flags_hdu, flags_hdu + BLOCK - 1)])
+        h0, n0 = parse_header(got[0], 0)
+        h1, n1 = parse_header(got[0], n0) if h0 is not None else (None, None)
+        desc, first_block = got[-2], got[-1]
+        if (h1 is None or (n0, n1) != (shape["n0"], shape["n1"]) or h1.get("EXTNAME") != "IMAGE"
+                or (int(h1["NAXIS1"]), int(h1["NAXIS2"])) != (nx, ny) or int(h1["BITPIX"]) != -32
+                or not first_block.startswith(b"XTENSION") or card_value(first_block, "NAXIS1") != rb):
+            return None                                     # not the layout we assumed
+        wave = find_wave_table(got[1])
+        if wave is None:
+            return None
+        meta = dict(hdr=h1.tostring(), mjd=float(h1.get("MJD-AVG", h1.get("MJD-OBS", np.nan))), wave=wave, total=total)
+        b = self.box(h1, ra, dec, half)
+        if b is None:
+            return dict(meta, off=True)
+        bx0, by0, bx1, by1, xc, yc = b
+        if bx0 < x0 or by0 < y0 or bx1 > x1 or by1 > y1:
+            return None                                     # the guess missed: read it the classic way
+        padded = big.image(got[2:2 + big.h], ">f4")
+        tiles = np.frombuffer(desc, ">i4" if rb == 8 else ">i8").reshape(-1, 2).astype("i8")
+        var_hdu = flags_data + pad(rb * card_value(first_block, "NAXIS2") + card_value(first_block, "PCOUNT"))
+        return dict(meta, off=False, x0=bx0, y0=by0, xc=xc, yc=yc,
+                    img=np.ascontiguousarray(padded[by0 - y0:by1 - y0, bx0 - x0:bx1 - x0]),
+                    pending=dict(key=list(key), var_hdu=int(var_hdu), tiles=tiles, tiles_y0=int(y0)))
+
+    def finish(self, url: str, x0: int, y0: int, w: int, h: int, yc: float, pending: dict, flags="near") -> dict:
+        """One more request after read_fast(): {"var", and with flags also "flags", "flag_names",
+        "flag_rows"} of the box (x0, y0, w, h). Raises LayoutMismatch if the file is not laid out
+        as read_fast() assumed (the caller then reads it the classic way)."""
+        key = tuple(pending["key"])
+        key = (str(key[0]), *(int(v) for v in key[1:]))
+        lay = self.layouts.get(key)
+        if not lay or lay["form"] != "rice":
+            raise LayoutMismatch("layout of this file is not known any more")
+        _, n0, n1, nx, ny = key
+        flags_data = n0 + n1 + pad(nx * ny * 4) + lay["flags_hlen"]
+        box = _Box(x0, y0, x0 + w, y0 + h, nx)
+        span = self._flag_span(flags, y0, y0 + h, yc)
+        tiles = np.asarray(pending["tiles"]).reshape(-1, 2)
+        ty0 = int(pending["tiles_y0"])
+        mine = tiles[span[0] - ty0:span[1] - ty0] if span else tiles[:0]
+        if span and len(mine) != span[1] - span[0]:
+            raise LayoutMismatch("flag descriptors do not cover the wanted rows")
+        out = self._rice_rest(url, lay, flags_data, box, span, mine, int(pending["var_hdu"]))
+        if span:
+            out["flag_names"] = lay["flag_names"]
+            out["flag_rows"] = [span[0] - y0, span[1] - y0]
         return out
 
 

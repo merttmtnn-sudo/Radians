@@ -33,7 +33,7 @@ LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/coverage", "/api/crossmatch
                                               "/api/object")})
 LIMITS["/api/sharp"] = config.RATE_FRAMES
 # the fast band's own lookups (its pictures, /api/quick, are long-polled and limited by the engine's build queue)
-LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/quick/changes", "/api/quick/diffs", "/api/quick/motion")})
+LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/quick/changes", "/api/quick/diffs", "/api/quick/motion", "/api/quick/warm")})
 
 
 def _client(request: Request) -> str:

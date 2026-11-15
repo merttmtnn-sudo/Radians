@@ -84,7 +84,10 @@ def _cutout_cached(exp: Exposure, ra, dec, half):
         if not p.exists():
             config.atomic_write(p, pickle.dumps(c))
         return c
-    c = fitsrange.read_cutout(exp.url, ra, dec, half)
+    # with the exposure's sky footprint: two requests instead of four (False: the short cut did not apply)
+    c = fitsrange.read_cutout_fast(exp.url, ra, dec, half, exp.region) if getattr(exp, "region", None) else False
+    if c is False:
+        c = fitsrange.read_cutout(exp.url, ra, dec, half)
     p.parent.mkdir(parents=True, exist_ok=True)
     if c is not None:
         config.atomic_write(p, pickle.dumps(c))

@@ -89,6 +89,10 @@ class FakeResponse:
     def close(self):
         self.closed = True
 
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise IOError(f"HTTP {self.status_code}")
+
 
 class FakeIrsa:
     """session.get(url, headers=, params=, ...) over in-memory files; counts requests."""
@@ -138,8 +142,24 @@ class FakeIrsa:
         return FakeResponse(206, body, {"Content-Type": f"multipart/byteranges; boundary={bnd}"})
 
 
+def region_of(data: bytes) -> list[float]:
+    """The sky footprint of a file as the image search lists it: the corners of pixel (0,0), (nx,0),
+    (nx,ny), (0,ny)."""
+    from astropy.wcs import WCS
+    with fits.open(io.BytesIO(data)) as hl:
+        hdr = hl["IMAGE"].header
+    nx, ny = hdr["NAXIS1"], hdr["NAXIS2"]
+    sky = WCS(hdr).all_pix2world([[-0.5, -0.5], [nx - 0.5, -0.5], [nx - 0.5, ny - 0.5], [-0.5, ny - 0.5]], 0)
+    return [float(v) for v in sky.ravel()]
+
+
 def sia_csv(rows: list[dict]) -> str:
-    head = "obs_id,energy_bandpassname,access_url,obs_collection,dataproduct_subtype,calib_level,t_min,access_estsize"
-    lines = [head] + [f"{r['obs_id']},SPHEREx-D{r['det']},{r['url']},{r.get('coll', 'spherex_dr1')},science,2,{r['mjd']},64000"
+    """The image search's CSV. A row with "region" (see region_of) also gets an s_region column."""
+    head = "obs_id,energy_bandpassname,access_url,obs_collection,dataproduct_subtype,calib_level,t_min,access_estsize,s_region"
+
+    def region(r):
+        pts = r.get("region")
+        return "POLYGON ICRS " + " ".join(f"{v!r}" for v in list(pts) + list(pts[:2])) if pts else ""
+    lines = [head] + [f"{r['obs_id']},SPHEREx-D{r['det']},{r['url']},{r.get('coll', 'spherex_dr1')},science,2,{r['mjd']},64000,{region(r)}"
                       for r in rows]
     return "\n".join(lines) + "\n"

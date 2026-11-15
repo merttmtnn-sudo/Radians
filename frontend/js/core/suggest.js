@@ -24,7 +24,31 @@ const ERR = { unreadable: 'coordErrUnreadable', minutes: 'coordErrMinutes', coun
 /** "269.45210 +4.69330": the form every part of the site reads. */
 export const plainCoords = (c) => `${c.ra.toFixed(5)} ${c.dec >= 0 ? '+' : ''}${c.dec.toFixed(5)}`;
 
+// While the visitor is still choosing, the server already asks NASA's archive which exposures cover
+// the spot (one request, no pixels). Pressing Enter then starts with that list in hand. It waits for
+// a pause in the typing, and asks once per spot.
+const warmed = new Set();
+let warmTimer = null;
+function warm(ra, dec) {
+  clearTimeout(warmTimer);
+  if (!Number.isFinite(ra) || !Number.isFinite(dec)) return;
+  const key = `${ra.toFixed(3)},${dec.toFixed(3)}`;
+  if (warmed.has(key) || warmed.size >= 30) return;
+  warmTimer = setTimeout(() => {
+    warmed.add(key);
+    let band = null;
+    try { band = localStorage.getItem('radians-band'); } catch { /* private window */ }
+    const u = new URL('api/quick/warm', location.href);
+    u.searchParams.set('ra', ra.toFixed(5));
+    u.searchParams.set('dec', dec.toFixed(5));
+    if (band) u.searchParams.set('prefer', band);
+    fetch(u).catch(() => {});
+  }, 700);
+}
+const warmPin = (p) => p && warm(p.ra_now ?? p.ra, p.dec_now ?? p.dec);
+
 function close() {
+  clearTimeout(warmTimer);
   list.hidden = true;
   list.replaceChildren();
   s.rows = [];
@@ -74,6 +98,7 @@ async function update() {
       : [{ title: `${t('coordReadAs')}: ${formatBoth(c.ra, c.dec)}`, sub: t('coordGo'), coords: c }];
     s.on = c.error ? -1 : 0;
     draw();
+    if (!c.error) warm(c.ra, c.dec);
     return;
   }
   if (text.length < 2) { close(); return; }
@@ -84,6 +109,7 @@ async function update() {
     s.rows = pins.map(p => ({ title: p[`name_${L()}`] || p.name_en, sub: p[`blurb_${L()}`] || '', pin: p }));
     s.on = -1;
     draw();
+    if (pins.length === 1) warmPin(pins[0]);                     // one match left: that is where this is going
   } catch { if (seq === s.seq) close(); }
 }
 
@@ -99,6 +125,7 @@ input.addEventListener('keydown', (e) => {
     const at = pick.indexOf(s.on);
     s.on = pick[(at + (e.key === 'ArrowDown' ? 1 : -1) + pick.length) % pick.length];
     draw();
+    warmPin(s.rows[s.on]?.pin);
   } else if (e.key === 'Escape') close();
   else if (e.key === 'Enter' && s.on >= 0 && s.rows[s.on]?.pin) { e.preventDefault(); choose(s.on); }
 });

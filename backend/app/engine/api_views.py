@@ -1,6 +1,8 @@
 """Time-lapse view endpoints (see docs/API.md)."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -16,7 +18,7 @@ PICTURE_CACHE = {"Cache-Control": "public, max-age=300"}
 def manager() -> ViewManager:
     global _manager
     if _manager is None:
-        _manager = ViewManager(http=api_find.HTTP)
+        _manager = ViewManager(http=api_find.HTTP, seed_layouts=Path(__file__).parent / "data" / "layouts.json")
     return _manager
 
 

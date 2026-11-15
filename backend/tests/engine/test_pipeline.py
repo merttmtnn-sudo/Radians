@@ -8,7 +8,7 @@ from app.engine import sia, stacking, store
 from app.engine.field import CutoutCache, build_band, snap, spread_in_time, spread_in_wavelength
 from app.engine.fitsread import Reader
 from app.engine.http import Http
-from tests.engine.fakes import FakeIrsa, make_file, sia_csv
+from tests.engine.fakes import FakeIrsa, make_file, sia_csv, region_of
 
 
 # -- SIA ----------------------------------------------------------------------------------------
@@ -182,6 +182,42 @@ def _two_pass_archive(stars_for_pass, n_per_pass=6, **file_kw):
                                    stars=stars_for_pass(p), seed=10 * p + i, **file_kw)
             rows.append(dict(obs_id=f"{p}_{i}", det=5, url=url, mjd=mjd + i))
     return files, rows
+
+
+def test_fast_preview_reads_every_exposure_in_one_request(tmp_path):
+    """With the exposures' sky footprints the preview is one request per exposure and already has
+    the full depth; the standard pass is one more request each and gives the classic result."""
+    files, rows = _two_pass_archive(lambda p: [(150.0 + p * 12 / 3600 / np.cos(np.radians(10)), 10.0, 30.0)],
+                                    n_per_pass=12, flag_above=20.0)
+    for r in rows:
+        r["region"] = region_of(files[r["url"]])
+    fake = FakeIrsa(files, sia_csv=sia_csv(rows))
+    http = Http(session=fake, sleep=lambda s: None)
+    exps = sia.exposures(http, 150.0, 10.0, tmp_path / "sia")
+    assert all(len(e["region"]) == 8 for e in exps)
+    cache = CutoutCache(Reader(http), tmp_path / "cut")
+    start = len(fake.calls)
+    prev = build_band(cache, exps, 150.0, 10.0, band=5, size_arcmin=2.0, quality="preview")
+    assert prev["timing"]["fast"] and [p["n_frames"] for p in prev["passes"]] == [12, 12]
+    assert not prev["sats"].any()                                              # no flags yet
+    assert 24 <= len(fake.calls) - start <= 24 + 4                             # 24 exposures + learning the layout once
+    before = len(fake.calls)
+    std = build_band(cache, exps, 150.0, 10.0, band=5, size_arcmin=2.0, quality="standard")
+    assert len(fake.calls) - before == 24 and not std["timing"]["fast"]
+    assert std["sats"].any()                                                   # the saturated target is now marked
+    # the same pictures as the classic way (no footprints: headers first, then the rows)
+    plain = FakeIrsa(files, sia_csv=sia_csv([{k: v for k, v in r.items() if k != "region"} for r in rows]))
+    http2 = Http(session=plain, sleep=lambda s: None)
+    exps2 = sia.exposures(http2, 150.0, 10.0, tmp_path / "sia2")
+    assert all(e["region"] is None for e in exps2)
+    classic = build_band(CutoutCache(Reader(http2), tmp_path / "cut2"), exps2, 150.0, 10.0, band=5, size_arcmin=2.0, quality="standard")
+    assert len(plain.calls) > len(fake.calls)
+    for p in (0, 1):
+        np.testing.assert_array_equal(std["stacks"][p], classic["stacks"][p])
+    np.testing.assert_array_equal(std["sats"], classic["sats"])
+    # a preview of the classic kind (no footprints) still picks a few exposures per pass
+    old = build_band(CutoutCache(Reader(http2), tmp_path / "cut3"), exps2, 150.0, 10.0, band=5, size_arcmin=2.0, quality="preview")
+    assert not old["timing"]["fast"] and [p["n_used"] for p in old["passes"]] == [8, 8]
 
 
 def test_standard_quality_sees_saturated_but_finite_target(tmp_path):
