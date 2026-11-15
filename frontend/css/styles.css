@@ -726,3 +726,28 @@ body.embed .depth { display: none !important; }
 .looknote { margin: 10px 0 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent, #ffb347) 55%, transparent);
   border-radius: 14px; background: color-mix(in srgb, var(--accent, #ffb347) 9%, transparent); }
 .looknote p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.45; }
+
+/* ---------------------------------------------------------------- phones: nothing wider than the screen, every control reachable */
+@media (max-width: 700px) {
+  body { overflow-x: clip; }                                   /* safety net; clip (not hidden) keeps the sticky header */
+  .top { flex-wrap: wrap; gap: 8px 10px; padding: 10px 16px; }
+  .nav { order: 3; flex: 1 1 100%; flex-wrap: wrap; overflow: visible; gap: 2px; margin: 0 -8px; }
+  .nav a { font-size: 13px; padding: 5px 8px; }
+  .topright { flex-wrap: wrap; justify-content: flex-end; gap: 6px; min-width: 0; }
+  .in-app .topright { order: 4; flex: 1 1 100%; justify-content: flex-start; margin-left: 0; }
+  .in-app .topright .btn.sm:not(.icon) { padding-inline: 9px; font-size: 12.5px; }
+  .in-app .topright { gap: 4px; }
+  .in-app .nav { order: 2; flex: 0 1 auto; margin: 0; }
+  .in-app .topright .seg button { padding-inline: 8px; }
+  .controls { flex-wrap: wrap; gap: 6px; }
+  .controls #scrub { order: -1; flex: 1 1 100%; margin: 4px 0 2px; }
+  .controls .btn.sm { padding-inline: 10px; }
+  .viewbar #view { margin-left: 0; flex: 1 1 100%; }
+  .in-sky .palchips, .in-sky .chips { flex-wrap: wrap; overflow: visible; }
+  .in-sky .mapchip, .in-map .mapchip { height: 34px; }
+  .maptools { flex-wrap: wrap; }
+  .maplegend { max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: center; row-gap: 4px; padding: 6px 10px; }
+  .bandbar { flex: 1 1 100%; }
+}
+@media (max-width: 420px) { .in-app #tourBtn { display: none !important; } }
+@media (max-width: 700px) { .in-app .appsearch .search, .in-app .appsearch form { max-width: none; width: 100%; } }
