@@ -87,9 +87,12 @@ async function initMap() {
   try {
     await loadAladin();
     $('mapStatus').replaceChildren();
-    // The fill plane is the view's own first survey, so Aladin never asks CDS for its default one
-    // (blocked on some networks: the map then opened with a console error and a blank sky).
-    map.base = window.A.imageHiPS('radians-spherex-fill', { url: CUBE_URL, name: 'SPHEREx DR1 (fill)', successCallback: () => setFill(true) });
+    // Aladin needs a bottom layer, and it cannot change the wavelength of a cube there (only of a layer above).
+    // So the bottom layer is an empty sky from our own server: Aladin never asks CDS for its default survey
+    // (blocked on some networks), nothing is fetched twice from the archive, and where SPHEREx has no data at
+    // the chosen wavelength (a masked part of a detector) the map stays empty. Nothing from another
+    // wavelength is put there.
+    map.base = window.A.imageHiPS('radians-blank', { url: new URL('/hips/blank', location.href).href, name: 'Empty sky' });
     map.aladin = window.A.aladin('#skymapAladin', {
       ...QUIET, survey: map.base,
       fov: HOME.fov, cooFrame: 'galactic', projection: 'AIT', showReticle: false,
@@ -102,11 +105,8 @@ async function initMap() {
     if (c.length === 2 && c.every(Number.isFinite)) map.aladin.gotoRaDec(c[0], c[1]); else map.aladin.gotoRaDec(HOME.ra, HOME.dec);
     if (Number(P.get('z')) > 0) map.aladin.setFoV(Number(P.get('z')));
     if (Number(P.get('wl')) > 0) map.slice = nearestSlice(Number(P.get('wl')));
-    // a slice set before the layer is added is stored but not applied: set it again once the layer is ready
-    // Pixels with no data are transparent in IRSA's tiles, and they sit where one detector is masked. Underneath
-    // the chosen plane sits the same channel from a neighbouring band (another detector, see fillOf), so a hole
-    // shows SPHEREx sky at a nearby wavelength instead of black.
-    // (A second id for the same cube keeps Aladin from treating the two layers as one.)
+    // the chosen wavelength: one plane of the cube, above the empty bottom layer
+    // (a slice set before the layer is ready is stored but not applied: it is set again once it is)
     map.hips = window.A.imageHiPS('radians-spherex', { url: CUBE_URL, name: 'SPHEREx DR1', successCallback: () => setSlice(map.slice) });
     map.aladin.setOverlayImageLayer(map.hips, 'spherex');
     map.aladin.on('zoomChanged', deepChip);
@@ -143,7 +143,6 @@ function setSlice(i) {
   showPick(i);
   for (const b of $('mapPresets').children) b.classList.toggle('on', Number(b.dataset.slice) === i);
   try { map.hips?.setSliceNumber(i); } catch { /* older Aladin: one plane only */ }
-  setFill();
   deepChip();
 }
 
@@ -157,31 +156,6 @@ function showPick(i) {
   $('mapWlGo').disabled = !waiting;
   $('mapOne').classList.toggle('picked', waiting);
   $('mapWlNote').textContent = waiting ? t('mapWlPicked', { shown: CUBE_WL[map.slice].toFixed(3) }) : t('mapWlShown');
-}
-
-// The fill plane: the same channel on the neighbouring band whose detector has (almost) no holes.
-// Measured over all 12 order-0 tiles: D1, D3, D4 and D6 each have ~2,100 empty pixels, D2 and D5 ~50;
-// D2 fills every hole of D1 and D3, D5 every hole of D4 and D6, and D3 / D4 fill D2 / D5.
-const FILL_BAND = { 1: 2, 2: 3, 3: 2, 4: 5, 5: 4, 6: 5 };
-function fillOf(i) {
-  const band = FILL_BAND[bandOf(i)];
-  let j = (band - 1) * 17 + (i % 17);
-  if (BLANK.has(j)) j = band === 3 ? 49 : 52;            // the two dichroic channels are empty
-  return j;
-}
-// It only shows through small holes, so after a change of wavelength it waits until the chosen plane's own
-// tiles are in: both layers come from the same server, and the picture should not queue behind its filler.
-function setFill(now = false) {
-  clearTimeout(map.fillTimer);
-  const apply = () => { try { map.base?.setSliceNumber(fillOf(map.slice)); } catch { /* single plane */ } };
-  if (now) { apply(); return; }
-  const began = performance.now();
-  const tick = () => {
-    const t1 = performance.now();
-    if ((t1 - began > 600 && t1 - lastTile > 700) || t1 - began > 8000) apply();
-    else map.fillTimer = setTimeout(tick, 200);
-  };
-  map.fillTimer = setTimeout(tick, 200);
 }
 
 // ticks under the slider, at the plane of each wavelength
@@ -434,9 +408,8 @@ $('mapPopGo').onclick = () => {
 
 // ---------------------------------------------------------------- faster: fetch the picked plane ahead of time
 // Every tile the map shows is remembered. While a wavelength is picked but not confirmed yet, the same tiles
-// of that plane (and of its fill plane) are fetched into the browser cache, so confirming finds them there.
+// of that plane are fetched into the browser cache, so confirming finds them there.
 const seen = new Map();                                  // 'Norder3/Dir0/Npix100' -> last time on screen
-let lastTile = 0;                                        // when a tile of the cube last arrived
 const fetched = new Set();
 const queue = [];
 let active = 0;
@@ -445,7 +418,7 @@ try {
   new PerformanceObserver((list) => {
     for (const e of list.getEntries()) {
       const m = e.name.match(/spherex_allsky_cube\/+(Norder\d+\/Dir\d+\/Npix\d+)(?:_\d+)?\.png/);
-      if (m) { lastTile = performance.now(); seen.set(m[1], lastTile); fetched.add(e.name.replace(/cube\/\//, 'cube/')); }
+      if (m) { seen.set(m[1], performance.now()); fetched.add(e.name.replace(/cube\/\//, 'cube/')); }
     }
     if (performance.getEntriesByType('resource').length > 3000) performance.clearResourceTimings();
   }).observe({ type: 'resource' });
@@ -469,7 +442,6 @@ function prefetchPick() {
     const paths = [...seen].sort((x, y) => y[1] - x[1]).slice(0, 48).map(([k]) => k);   // what is on screen now
     queue.length = 0;                                     // only what is useful now
     for (const path of paths) queue.push(tileUrl(path, j));
-    for (const path of paths) queue.push(tileUrl(path, fillOf(j)));
     pump();
   }, 400);
 }

@@ -316,11 +316,12 @@ async function runQuick(target, opts, signal, blocking) {
  * is covered, progress goes to the status line, and the result fills the panels that need every band. */
 async function runDeep(target, opts, ctl, background) {
   const t0 = performance.now();
-  let showProgress = false;
+  let showProgress = false, retrying = false;
   const say = (msg, sub = '') => (background ? (els.deepStatus.textContent = sub || msg) : setLoading(true, msg, sub));
   const tick = background ? null : setInterval(() => {
     const s = Math.round((performance.now() - t0) / 1000);
-    if (!showProgress) els.loadingSub.textContent = s < 8 ? '' : t('slow', { s });
+    // while waiting to ask IRSA again, the retry countdown owns this line
+    if (!showProgress && !retrying) els.loadingSub.textContent = s < 8 ? '' : t('slow', { s });
   }, 1000);
   say(t('reading'), background ? t('deepStart') : '');
   state.deepBusy = true;
@@ -359,10 +360,12 @@ async function runDeep(target, opts, ctl, background) {
         break;
       } catch (e) {
         if (e.code !== 'unavailable' || attempt >= 4) throw e;
+        retrying = true;
         for (let s = 20; s > 0; s--) {
           say(t('irsaRetry'), t('irsaRetryIn', { s, n: attempt, max: 3 }));
           await sleep(1000, ctl.signal);
         }
+        retrying = false;
         say(t('reading'), background ? t('deepStart') : '');
       }
     }
@@ -483,6 +486,14 @@ async function run(opts) {
     } else {
       setLoading(true, t('finding', { q: opts.q }));
       target = await api('api/resolve', { q: opts.q }, ctl.signal);
+      if (target.matched === 'path') {
+        // Typed coordinates that lie on a moving object's path are that object (WISE 0855's own name gives
+        // where it was in 2010, two arcminutes from where it is now): say so, and follow the object.
+        toast(t('onPath', { name: target.name, d: Math.round(target.moved_arcsec) }));
+        const known = TARGETS.find(x => Math.hypot((x.ra - target.ra) * Math.cos(target.dec * Math.PI / 180), x.dec - target.dec) * 3600 < 3);
+        const card = known && [...els.examples.querySelectorAll('button[data-q]')].find(b => b.dataset.q === known.q);
+        if (card) { card.click(); return; }            // a challenge target: opened with its own settings (WISE 0855: D5 + D6)
+      }
     }
     state.target = target;
     syncSrcUi();
@@ -496,11 +507,27 @@ async function run(opts) {
     if (e.name !== 'AbortError') {
       depthHide();
       toast(e.message, true);
-      if (!state.data) els.empty.hidden = false;
+      if (e.code === 'unavailable' && !state.data) showOutage();
+      else if (!state.data) els.empty.hidden = false;
     }
   } finally {
     if (state.abort === ctl) { setLoading(false); els.loadingBar.hidden = true; }
   }
+}
+
+/** IRSA is down and this spot is not cached: say so, and offer the prepared targets, which open from
+ * the data shipped with the app. (From Efe's PR #11.) */
+function showOutage() {
+  els.empty.replaceChildren(el('p', '', t('irsaOutageTitle')), el('p', 'muted', t('irsaOutageBody')));
+  const row = el('div', 'outage-targets');
+  for (const b of els.examples.querySelectorAll('button[data-q]')) {
+    const c = el('button', 'chip outage-target', b.querySelector('.tname')?.textContent || b.dataset.q);
+    c.type = 'button';
+    c.onclick = () => b.click();          // same path as the home page's cards (bands, wavelength matching)
+    row.append(c);
+  }
+  els.empty.append(row);
+  els.empty.hidden = false;
 }
 
 function load(data, startIdx) {

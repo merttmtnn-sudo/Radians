@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+import threading
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
@@ -85,6 +87,45 @@ def _rows(t, coll):
     return rows
 
 
+# While IRSA is down, an exposure list cached for a spot this close is used instead: one SPHEREx
+# exposure covers about 3.5° x 11°, so a few arcseconds hardly ever changes which exposures see it.
+NEAR_ARCSEC = 30.0
+_sia_index_lock = threading.Lock()
+
+
+def _sia_index_path():
+    return config.CACHE_DIR / "sia" / "index.json"
+
+
+def _sia_index() -> dict:
+    try:
+        return json.loads(_sia_index_path().read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _sia_index_add(coll, ra, dec, path):
+    """Remember where each cached list was asked for, so a nearby spot can find it during an outage."""
+    with _sia_index_lock:
+        idx = _sia_index()
+        idx[path.name] = [coll, round(ra, 6), round(dec, 6)]
+        config.atomic_write(_sia_index_path(), json.dumps(idx))
+
+
+def _sia_nearby(coll, ra, dec):
+    """The closest cached exposure list for this collection within NEAR_ARCSEC, or None."""
+    best, best_d = None, NEAR_ARCSEC
+    for name, (c, r, d) in _sia_index().items():
+        if c != coll:
+            continue
+        dra = (r - ra + 180.0) % 360.0 - 180.0
+        sep = 3600.0 * math.hypot(dra * math.cos(math.radians(dec)), d - dec)
+        p = config.CACHE_DIR / "sia" / name
+        if sep <= best_d and p.exists():
+            best, best_d = p, sep
+    return best
+
+
 def query_exposures(ra: float, dec: float) -> list[Exposure]:
     out: list[Exposure] = []
     for coll in config.COLLECTIONS:
@@ -97,11 +138,18 @@ def query_exposures(ra: float, dec: float) -> list[Exposure]:
         try:
             rows = _rows(_sia_table(coll, ra, dec), coll)
         except ArchiveUnavailable:
-            if path.exists():                          # IRSA down: an older list is far better than nothing
-                out += [Exposure(**e) for e in json.loads(path.read_text())]
+            # IRSA down: an older list for this spot, or one for a spot a few arcseconds away,
+            # is far better than nothing
+            old = path if path.exists() else _sia_nearby(coll, ra, dec)
+            if old is not None:
+                out += [Exposure(**e) for e in json.loads(old.read_text())]
                 continue
             raise
         config.atomic_write(path, json.dumps([asdict(e) for e in rows]))
+        try:
+            _sia_index_add(coll, ra, dec, path)
+        except OSError:
+            pass                                       # the index only helps during outages
         out += rows
     # the same exposure can appear in two releases: keep the newest collection listed first
     seen, uniq = set(), []

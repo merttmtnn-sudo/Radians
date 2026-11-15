@@ -432,3 +432,25 @@ def test_injected_faint_mover_recovered_two_ways():
     finds = detect.difference_finds(eps, eps[0])
     for sx, sy in ((8.2, 30.1), (31.6, 9.4), (28.3, 33.7)):
         assert not any(math.hypot(f["x"] - sx, f["y"] - sy) < 2 for f in finds)
+
+
+def test_outage_falls_back_to_a_nearby_cached_list(tmp_path, monkeypatch):
+    """IRSA down and this exact spot never asked: a list cached a few arcseconds away is used,
+    one cached far away is not. (From Efe's PR #11.)"""
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(config, "COLLECTIONS", ["spherex_qr3"])
+    exp = Exposure(obs_id="X", detector=1, url="u", mjd_start=60000.0, mjd_end=60000.1,
+                   wl_min=1.0, wl_max=1.1, exptime=100.0, collection="spherex_qr3")
+
+    monkeypatch.setattr(archive, "_sia_table", lambda coll, ra, dec, tries=5: "table")
+    monkeypatch.setattr(archive, "_rows", lambda t, coll: [exp])
+    assert [e.obs_id for e in archive.query_exposures(269.4521, 4.6934)] == ["X"]
+
+    def down(coll, ra, dec, tries=5):
+        raise archive.ArchiveUnavailable("HTTP 502")
+
+    monkeypatch.setattr(archive, "_sia_table", down)
+    near = archive.query_exposures(269.4521 + 5 / 3600, 4.6934 - 5 / 3600)    # about 7 arcsec away
+    assert [e.obs_id for e in near] == ["X"]
+    with pytest.raises(archive.ArchiveUnavailable):
+        archive.query_exposures(269.4521 + 0.1, 4.6934)                       # 6 arcmin away: too far

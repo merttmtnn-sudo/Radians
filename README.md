@@ -210,7 +210,7 @@ Radians/
 │   │       └── data/            curated objects (pins.json), known file layouts
 │   ├── demo/                    the five challenge targets, pre-built (cache/ + built.pkl.gz; engine/ for the fast band)
 │   ├── scripts/                 cache warming, demo media, validation; scripts/engine/ for the engine's builders
-│   ├── tests/                   pytest (158 tests, no network); tests/engine/ against a fake IRSA
+│   ├── tests/                   pytest (161 tests, no network); tests/engine/ against a fake IRSA
 │   └── requirements.txt
 ├── frontend/                    the website (plain ES modules, no build step)
 │   ├── index.html               the single page: Home, Blink viewer, Map
@@ -270,7 +270,7 @@ been measured.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/resolve?q=Barnard's Star` | name or coordinates → RA/Dec (+ proper motion); falls back to the built-in objects |
+| `GET /api/resolve?q=Barnard's Star` | name or coordinates → RA/Dec (+ proper motion); falls back to the built-in objects. Coordinates on the path of a moving built-in object (where it was at some date since 2000) are answered as that object: WISE 0855's own name gives its 2010 position, 134″ from where it is now |
 | `GET /api/search?q=barn` | suggestions while typing: curated objects with their stories |
 | `GET /api/pins` | the curated objects (challenge targets and famous sky) |
 | `GET /api/coverage?ra=&dec=` | has SPHEREx seen this spot: exposures, sky passes, exposures per detector band |
@@ -287,6 +287,7 @@ been measured.
 | `GET /api/sharp?ra=&dec=&fov=&det=&factor=` | super-resolution: one detector band of a spot drizzled onto 3″ pixels (SPHEREx's are 6.15″) from its dithered exposures, plus the ordinary 6.15″ stack for a before / after comparison (the Map's deep zoom; cached a week) |
 | `GET /api/curious/hr`, `/motion`, `/xmatch`, `/variable`, `/facts`, `POST /api/curious/period` | H-R diagram data, Gaia motion and speed, 2MASS / AllWISE (with fluxes), known variable stars (VSX, Gaia DR3), the star itself (distance, speeds, companion hints, radius, luminosity, mass, age, known planets), and the brightness check (change between visits, rhythm inside visits) |
 | `GET /api/gaia`, `/api/crossmatch`, `/api/sso` | Gaia DR3; SIMBAD and CatWISE2020; SkyBoT |
+| `GET /hips/blank/…`, `GET /hips/warm` | the Map's empty bottom layer; opens the server's connections to the archive when the Map opens |
 | `GET /hips/spherex-color/…` | infrared colour sky as a HiPS (B = D1+D2, G = D3+D4, R = D5+D6) |
 | `GET /hips/spherex-mix/{spec}/…` | planes of the all-sky cube mixed into false colour, as a HiPS: 2–3 tinted layers (`f21c0080ffg089_…`), or three plane numbers as red-green-blue (`88-65-18`) |
 
@@ -305,6 +306,13 @@ been measured.
   now; a view that subtracts the first visit starts at the second, since the first minus itself is
   empty); **Colour by time** (every visit in its own colour, first blue, last red: what stays put is
   white, what moves leaves a trail); Stack.
+- **A fast mover found by old coordinates.** Type `08h55m10.83s -07d14m42.5s` (the position in WISE
+  0855's name) and the viewer says the coordinates lie on that object's path, then opens the object
+  itself where it is today, with its own settings (D5 + D6). The same holds for any built-in moving
+  object and any date between 2000 and now.
+- **When NASA's archive is down** a new spot cannot be read. The viewer tries three more times with
+  a countdown, then says so and offers the five prepared targets, which come with the app. An
+  exposure list cached for a spot within 30″ is used meanwhile (from the team's PR #11).
 - **Space** play/pause, **← →** step frames, the timeline jumps to a visit. All frames share one
   brightness scale, so a star that brightens really is brighter.
 - Hover the image for RA/Dec, pixel value and the SPHEREx flags of that pixel; click any star to
@@ -352,8 +360,10 @@ One wavelength (Regular, Inverted): the tiles go straight from NASA's archive (I
 the browser. Measured from Turkey: about 1.1 s for a tile on a new connection, 0.2–0.4 s on an open
 one; a screen needs 12 to 40 tiles, so a new view takes 1 to 5 seconds and nothing on our side can
 shorten the trip. What we do: the wavelength you picked is fetched in the background before you
-confirm it, and the filler layer (the neighbouring band that shows through a detector's small
-holes) waits until the chosen wavelength's own tiles are in. Colour and Scientific: our server
+confirm it, and only that wavelength is fetched. (An earlier version drew a second layer under it
+to hide a detector's small holes; it turned out to be the 0.75 µm picture at every wavelength,
+loaded a second time. It is gone: where SPHEREx has no data at a wavelength the map stays empty.)
+Colour and Scientific: our server
 makes each tile from 12 (Colour) or 2–3 (Scientific) archive tiles, then keeps it for ever. It
 keeps its connections to the archive open and opens them when the Map opens (`/hips/warm`): a new
 Colour tile takes 0.7 s (it took 2.6 s), a new Scientific tile 0.3 s (2.4 s), a screenful of twelve

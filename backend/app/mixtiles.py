@@ -86,6 +86,62 @@ def warm_route():
     return {"started": warm()}
 
 
+# ---------------------------------------------------------------- an empty sky for the map's bottom layer
+# The sky viewer (Aladin Lite) needs a bottom layer, and cannot change the wavelength of a cube there:
+# the chosen wavelength is a layer above it. This one is empty and comes from here, so the map shows
+# nothing but the chosen wavelength, and no second set of tiles is fetched from the archive.
+blank_router = APIRouter(prefix="/hips/blank")
+BLANK_TILE_PX = 64
+_blank_png = None
+
+
+def blank_png() -> bytes:
+    global _blank_png
+    if _blank_png is None:
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.new("RGBA", (BLANK_TILE_PX, BLANK_TILE_PX), (0, 0, 0, 0)).save(buf, "PNG")
+        _blank_png = buf.getvalue()
+    return _blank_png
+
+
+@blank_router.get("/properties")
+def blank_properties():
+    txt = "\n".join(["creator_did = ivo://radians/P/blank", "obs_title = Empty sky (bottom layer of the map)",
+                     "dataproduct_type = image", "hips_version = 1.4", "hips_frame = equatorial", "hips_order = 0",
+                     "hips_order_min = 0", f"hips_tile_width = {BLANK_TILE_PX}", "hips_tile_format = png", ""])
+    return Response(txt, media_type="text/plain", headers={"Cache-Control": "max-age=86400"})
+
+
+_BLANK_CACHE = {"Cache-Control": "max-age=31536000, immutable"}
+
+
+@blank_router.get("/Norder{order}/Dir{d}/Npix{npix}.png")
+def blank_tile(order: int, d: int, npix: int):
+    return Response(blank_png(), media_type="image/png", headers=_BLANK_CACHE)
+
+
+@blank_router.get("/Norder3/Allsky.png")
+def blank_allsky():
+    """The whole-sky preview a HiPS client asks for first: 768 tiles of order 3 in a 27 x 29 grid, all empty."""
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGBA", (27 * BLANK_TILE_PX, 29 * BLANK_TILE_PX), (0, 0, 0, 0)).save(buf, "PNG")
+    return Response(buf.getvalue(), media_type="image/png", headers=_BLANK_CACHE)
+
+
+@blank_router.get("/Moc.fits")
+def blank_moc():
+    """The coverage map a HiPS client asks for: the whole sky (the twelve cells of order 0)."""
+    from astropy.io import fits
+    table = fits.BinTableHDU.from_columns([fits.Column(name="UNIQ", format="1J", array=np.arange(4, 16, dtype="i4"))])
+    for key, value in (("PIXTYPE", "HEALPIX"), ("ORDERING", "NUNIQ"), ("COORDSYS", "C"), ("MOCORDER", 0), ("MOCTOOL", "Radians")):
+        table.header[key] = value
+    buf = io.BytesIO()
+    fits.HDUList([fits.PrimaryHDU(), table]).writeto(buf)
+    return Response(buf.getvalue(), media_type="application/fits", headers=_BLANK_CACHE)
+
+
 def cube_tile(frame, order, npix):
     """One display tile of one plane of the cube as float32 grey levels 0..255; None where IRSA has none."""
     from PIL import Image

@@ -82,7 +82,8 @@ def health():
 @app.get("/api/resolve")
 def resolve(q: str = Query(..., min_length=1, max_length=200)):
     try:
-        return archive.resolve(q)
+        got = archive.resolve(q)
+        return _object_on_path(got) or got
     except LookupError as e:
         known = _builtin_object(q)
         if known:
@@ -93,6 +94,21 @@ def resolve(q: str = Query(..., min_length=1, max_length=200)):
         if known:
             return known
         raise HTTPException(502, f"name resolver unavailable: {e}")
+
+
+def _object_on_path(got: dict) -> dict | None:
+    """Typed coordinates that lie on the path of a curated moving object (where it was at some date
+    between 2000 and today) are that object: it is answered with its catalogue position and motion,
+    so the viewer follows it and uses its settings. The challenge text gives WISE 0855 this way."""
+    if got.get("source") != "coordinates":
+        return None
+    from . import quick
+    p = quick.find_pin(got["ra"], got["dec"])
+    if not p or abs(p.get("pmra") or 0.0) + abs(p.get("pmdec") or 0.0) <= quick.MOVING_MAS_YR:
+        return None
+    return {"name": p["name_en"], "ra": p["ra"], "dec": p["dec"], "pmra": p.get("pmra") or None, "pmdec": p.get("pmdec") or None,
+            "source": "built-in list", "matched": "path", "pin": p["id"], "typed": {"ra": got["ra"], "dec": got["dec"]},
+            "moved_arcsec": round(quick._separation_arcsec(got["ra"], got["dec"], p["ra_now"], p["dec_now"]), 1)}
 
 
 def _builtin_object(q: str) -> dict | None:
@@ -643,5 +659,6 @@ app.include_router(quick.router)        # /api/quick: an engine view in the view
 app.include_router(mixtiles.router)          # /hips/spherex-mix: false-colour mixes of the all-sky cube for the map
 app.include_router(mixtiles.colour_router)   # /hips/spherex-color: the map's Colour theme
 app.include_router(mixtiles.warm_router)     # /hips/warm: opens the tile connections when the Map opens
+app.include_router(mixtiles.blank_router)    # /hips/blank: the empty bottom layer of the Map
 for _router in engine.routers:
     app.include_router(_router)

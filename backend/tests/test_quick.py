@@ -198,3 +198,21 @@ def test_a_head_start_asks_the_archive_once_and_reads_no_pixels(client, tmp_path
     # not again for the same spot within seconds; and a band that does not exist is refused
     assert client.get("/api/quick/warm", params={"ra": 150.0, "dec": 10.0, "band": 5}).json() == {"started": False}
     assert client.get("/api/quick/warm", params={"ra": 150.0, "dec": 10.0, "band": 9}).status_code == 422
+
+
+def test_a_position_on_a_movers_path_is_that_object(client):
+    """WISE 0855 moves 8 arcsec a year. Its name, and the challenge text, give where it was in 2010:
+    85 arcsec from its J2000 position and more than 2 arcmin from where it is today."""
+    assert quick.find_pin(133.795125, -7.245139)["id"] == "wise-0855"            # 08h55m10.83s -07d14m42.5s
+    assert quick.find_pin(133.795, -7.245)["id"] == "wise-0855"                  # the example in the search box
+    assert quick.find_pin(133.795, -7.245 + 30 / 3600) is None                   # 30 arcsec off the path
+    barnard = next(p for p in quick.api_find.pins() if p["id"] == "barnard")
+    mid = ((barnard["ra"] + barnard["ra_now"]) / 2, (barnard["dec"] + barnard["dec_now"]) / 2)
+    assert quick.find_pin(*mid)["id"] == "barnard" and quick.path_distance_arcsec(*mid, barnard) < 0.5
+    spec, pin = quick.quick_spec(133.795125, -7.245139, 240, None, None, None, 2000.0)
+    assert pin["id"] == "wise-0855" and spec == views.demo_spec("wise-0855", pin["band"], 4.0)   # its pre-built view
+    r = client.get("/api/resolve", params={"q": "08h55m10.83s -07d14m42.5s"}).json()
+    assert r["matched"] == "path" and r["pin"] == "wise-0855" and r["pmra"] < -8000 and r["moved_arcsec"] > 120
+    assert abs(r["ra"] - 133.8189) < 1e-3                                         # answered with its catalogue position
+    still = client.get("/api/resolve", params={"q": "150.0 10.0"}).json()         # empty sky stays what was typed
+    assert still["source"] == "coordinates" and "matched" not in still

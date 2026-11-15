@@ -23,7 +23,7 @@ from .engine.views import SIZE_RANGE, _plain as engine_plain, demo_spec, make_sp
 router = APIRouter()
 
 DEFAULT_BAND = 5                    # good signal, and cold objects show (as in the engine)
-PIN_MATCH_ARCSEC = 5.0              # a request this close to a curated object is that object
+PIN_MATCH_ARCSEC = 5.0              # a request this close to a curated object, or to its path, is that object
 SATURATED_SHARE = 0.3               # a pixel saturated or blank in this share of a pass's exposures is marked
 MOVING_MAS_YR = 20.0                # slower targets are not tracked from pass to pass
 
@@ -37,13 +37,28 @@ def _separation_arcsec(ra1, dec1, ra2, dec2) -> float:
     return 3600.0 * math.hypot(dra * math.cos(math.radians(dec1)), dec1 - dec2)
 
 
+def path_distance_arcsec(ra: float, dec: float, p: dict) -> float:
+    """How far (ra, dec) is from the path a curated object has taken across the sky, from its
+    catalogue position (J2000) to where it is today. For an object that does not move, its distance."""
+    cosd = math.cos(math.radians(dec))
+    ax, ay = ((p["ra"] - ra + 180.0) % 360.0 - 180.0) * cosd * 3600.0, (p["dec"] - dec) * 3600.0
+    bx, by = ((p["ra_now"] - ra + 180.0) % 360.0 - 180.0) * cosd * 3600.0, (p["dec_now"] - dec) * 3600.0
+    dx, dy = bx - ax, by - ay
+    length2 = dx * dx + dy * dy
+    along = 0.0 if length2 == 0 else min(1.0, max(0.0, -(ax * dx + ay * dy) / length2))
+    return math.hypot(ax + along * dx, ay + along * dy)
+
+
 def find_pin(ra: float, dec: float) -> dict | None:
-    """The curated object at this catalogue position (its J2000 or today's position), if any."""
+    """The curated object at this position, if any. A position counts when it lies on the object's
+    path between its J2000 position and today's: a fast mover's coordinates are quoted for many
+    dates (WISE 0855's own name gives where it was in 2010, 134 arcsec from where it is now)."""
+    best = None
     for p in api_find.pins():
-        if min(_separation_arcsec(ra, dec, p["ra"], p["dec"]),
-               _separation_arcsec(ra, dec, p["ra_now"], p["dec_now"])) <= PIN_MATCH_ARCSEC:
-            return p
-    return None
+        d = path_distance_arcsec(ra, dec, p)
+        if d <= PIN_MATCH_ARCSEC and (best is None or d < best[0]):
+            best = (d, p)
+    return best[1] if best else None
 
 
 def quick_spec(ra, dec, fov_arcsec, band, pmra, pmdec, ref_epoch, prefer=None) -> tuple[dict, dict | None]:

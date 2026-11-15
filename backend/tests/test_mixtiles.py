@@ -111,3 +111,16 @@ def test_opening_the_map_opens_the_tile_connections_once(client, monkeypatch):
     assert client.get("/hips/warm").json() == {"started": False}
     time.sleep(0.05)
     assert len(asked) == mixtiles.WARM_CONNECTIONS
+
+
+def test_the_maps_bottom_layer_is_an_empty_sky(client):
+    props = client.get("/hips/blank/properties")
+    assert props.status_code == 200 and "hips_order = 0" in props.text and "hips_tile_format = png" in props.text
+    r = client.get("/hips/blank/Norder0/Dir0/Npix7.png")
+    img = Image.open(io.BytesIO(r.content))
+    assert r.status_code == 200 and img.mode == "RGBA" and img.getextrema()[3] == (0, 0)      # fully see-through
+    assert f"hips_tile_width = {img.size[0]}" in props.text
+    allsky = Image.open(io.BytesIO(client.get("/hips/blank/Norder3/Allsky.png").content))
+    assert allsky.size == (27 * img.size[0], 29 * img.size[0]) and allsky.getextrema()[3] == (0, 0)
+    moc = client.get("/hips/blank/Moc.fits")
+    assert moc.status_code == 200 and moc.content[:6] == b"SIMPLE"

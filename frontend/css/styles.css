@@ -211,6 +211,9 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .empty, .loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 28px; color: #eee; }
 .empty .muted, .loading .muted { color: #9a9a9a; max-width: 440px; }
 .empty[hidden], .loading[hidden] { display: none; }
+.outage-targets { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
+.outage-target { cursor: pointer; background: transparent; padding: 5px 12px; font-size: 13px; color: var(--fg); }
+.outage-target:hover { border-color: var(--fg-3); }
 .loading { background: rgba(0, 0, 0, .78); }
 .spinner { width: 36px; height: 36px; border: 2px solid #333; border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 6px; }
 @keyframes spin { to { transform: rotate(360deg); } }
