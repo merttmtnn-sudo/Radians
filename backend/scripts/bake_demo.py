@@ -3,7 +3,7 @@
     python scripts/bake_demo.py
 
 Writes backend/demo/built.pkl.gz (the aligned frames, exactly as /api/frames builds them) and copies
-the small look-up caches (name resolution, exposure lists, Gaia, SkyBoT, NEOSSat, FITS layouts) to
+the small look-up caches (name resolution, exposure lists, Gaia, SkyBoT, FITS layouts) to
 backend/demo/cache/. The server loads both at start-up (app.main.load_demo)."""
 import gzip
 import pickle
@@ -26,7 +26,7 @@ print(f"built.pkl.gz: {(DEMO_DIR / 'built.pkl.gz').stat().st_size / 1e6:.1f} MB"
 
 dst = DEMO_DIR / "cache"
 shutil.rmtree(dst, ignore_errors=True)
-for kind in ("sesame", "sia", "gaia", "skybot", "neossat", "layout", "wave"):
+for kind in ("sesame", "sia", "gaia", "skybot", "layout", "wave"):
     src = config.CACHE_DIR / kind
     if src.exists():
         shutil.copytree(src, dst / kind)

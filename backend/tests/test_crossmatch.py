@@ -1,7 +1,7 @@
 """Catalogue cross-match (SIMBAD + CatWISE2020): parsing and "one catalogue down" behaviour, no network."""
 from fastapi.testclient import TestClient
 
-from app import config, crossmatch, explorer
+from app import config, crossmatch, net
 from app.main import app
 
 
@@ -22,14 +22,14 @@ def fake_get(simbad=SIMBAD_CSV, catwise=CATWISE_CSV):
     def get(url, params=None, **kw):
         text = simbad if "simbad" in url else catwise
         if text is None:
-            raise explorer.Upstream("down")
+            raise net.Upstream("down")
         return Reply(text)
     return get
 
 
 def test_parses_both_catalogues(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
-    monkeypatch.setattr(explorer, "_get", fake_get())
+    monkeypatch.setattr(net, "get", fake_get())
     out = crossmatch.crossmatch(270.1, -28.2, 0.06)
     assert out["simbad"]["ok"] and out["catwise"]["ok"]
     ids = [r["id"] for r in out["simbad"]["rows"]]
@@ -44,7 +44,7 @@ def test_parses_both_catalogues(tmp_path, monkeypatch):
 
 def test_one_catalogue_down_is_reported_not_raised(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
-    monkeypatch.setattr(explorer, "_get", fake_get(catwise=None))
+    monkeypatch.setattr(net, "get", fake_get(catwise=None))
     r = TestClient(app).get("/api/crossmatch", params={"ra": 270.1, "dec": -28.2})
     assert r.status_code == 200
     out = r.json()
@@ -58,14 +58,14 @@ def test_one_catalogue_down_is_reported_not_raised(tmp_path, monkeypatch):
 
 def test_error_page_is_not_taken_for_an_empty_catalogue(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
-    monkeypatch.setattr(explorer, "_get", fake_get(simbad="<html>busy</html>", catwise="<VOTABLE>error</VOTABLE>"))
+    monkeypatch.setattr(net, "get", fake_get(simbad="<html>busy</html>", catwise="<VOTABLE>error</VOTABLE>"))
     out = crossmatch.crossmatch(10.0, 10.0, 0.06)
     assert not out["simbad"]["ok"] and not out["catwise"]["ok"]
 
 
 def test_failures_are_not_cached(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
-    monkeypatch.setattr(explorer, "_get", fake_get(simbad=None))
+    monkeypatch.setattr(net, "get", fake_get(simbad=None))
     assert not crossmatch.crossmatch(270.1, -28.2, 0.06)["simbad"]["ok"]
-    monkeypatch.setattr(explorer, "_get", fake_get())
+    monkeypatch.setattr(net, "get", fake_get())
     assert crossmatch.crossmatch(270.1, -28.2, 0.06)["simbad"]["ok"]

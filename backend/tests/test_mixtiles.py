@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import config, explorer, mixtiles
+from app import config, mixtiles
 from app.main import app
 
 BLUE, GREEN, RED = "f21c0000ffg100", "f46c00ff00g100", "f72cff0000g100"
@@ -57,7 +57,7 @@ def client(tmp_path, monkeypatch):
             return None                                                         # IRSA has no tile here
         return np.full((4, 4), 254.0 if frame == 72 else 0.0, np.float32)
 
-    monkeypatch.setattr(explorer, "_cube_tile", fake_tile)
+    monkeypatch.setattr(mixtiles, "cube_tile", fake_tile)
     c = TestClient(app)
     c.calls = calls
     return c
@@ -80,8 +80,8 @@ def test_routes_serve_a_colour_hips(client):
 
 
 def test_three_planes_as_red_green_blue_at_the_same_address(client):
-    """The team's "R-G-B" spec (three plane numbers) is answered by explorer.py's recipe, the tinted
-    layers by this module: one address, two spec forms."""
+    """The team's "R-G-B" spec (three plane numbers) and the tinted layers are both answered
+    by this module: one address, two spec forms."""
     props = client.get("/hips/spherex-mix/72-46-21/properties")
     assert props.status_code == 200 and "planes 72-46-21 as R-G-B" in props.text
     r = client.get("/hips/spherex-mix/72-46-21/Norder0/Dir0/Npix3.png")

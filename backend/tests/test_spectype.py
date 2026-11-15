@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from app import archive, config, explorer, spectype, typecat
+from app import archive, config, net, spectype, typecat
 from app.main import app
 
 LIB = spectype.library()
@@ -88,7 +88,7 @@ GAIA = ("source_id,teff_gspphot,logg_gspphot,mh_gspphot,distance_gspphot,paralla
 
 def test_catalogue_lookup(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
-    monkeypatch.setattr(explorer, "_get", lambda url, params=None, **kw: Reply(SIMBAD if "simbad" in url else GAIA))
+    monkeypatch.setattr(net, "get", lambda url, params=None, **kw: Reply(SIMBAD if "simbad" in url else GAIA))
     out = typecat.lookup(10.0, 5.0, None, "Gaia DR3 123")
     assert out["simbad"] == {"ok": True, "found": True, "id": "V* near", "sptype": "M4V", "otype": "BY*"}
     g = out["gaia"]
@@ -103,7 +103,7 @@ def test_named_target_uses_its_simbad_entry_not_the_position(tmp_path, monkeypat
 
     def no_network(*a, **kw):
         raise AssertionError("should not query by position")
-    monkeypatch.setattr(explorer, "_get", no_network)
+    monkeypatch.setattr(net, "get", no_network)
     assert typecat.lookup(269.45, 4.69, "Barnard's Star", None)["simbad"]["sptype"] == "M4V"
 
 
@@ -111,8 +111,8 @@ def test_route_fit_first_then_catalogues(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
 
     def down(*a, **kw):
-        raise explorer.Upstream("down")
-    monkeypatch.setattr(explorer, "_get", down)
+        raise net.Upstream("down")
+    monkeypatch.setattr(net, "get", down)
     c = TestClient(app)
     body = {"points": synth("M4V"), "ra": 10, "dec": 5}
     r = c.post("/api/spectype", json=body).json()

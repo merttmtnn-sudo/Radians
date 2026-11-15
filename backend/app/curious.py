@@ -7,7 +7,7 @@ import math
 
 import numpy as np
 
-from . import explorer, pulse
+from . import net, pulse
 from .external import GAIA_TAP
 
 TTL = 30 * 86400
@@ -33,17 +33,17 @@ def tangential_speed(rate_arcsec_yr: float, parallax_mas) -> float | None:
 
 
 def _gaia(adql):
-    r = explorer._get(GAIA_TAP, {"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": adql},
+    r = net.get(GAIA_TAP, {"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": adql},
                       timeout=TIMEOUT, tries=1)
     if not r.ok or "source_id" not in r.text.split("\n", 1)[0]:
-        raise explorer.Upstream("Gaia unavailable")
-    return explorer._csv(r.text)
+        raise net.Upstream("Gaia unavailable")
+    return net.rows(r.text)
 
 
 # ---------------------------------------------------------------- one Gaia star: place in the H-R diagram, motion
 def star_summary(row: dict) -> dict:
     """Colour, absolute magnitude, motion and speed of one Gaia row (values as text or numbers)."""
-    n = lambda k: explorer._num(row.get(k))  # noqa: E731
+    n = lambda k: net.num(row.get(k))  # noqa: E731
     plx, g, colour = n("parallax"), n("phot_g_mean_mag"), n("bp_rp")
     good = plx is not None and plx > 0 and (n("parallax_over_error") or 0) >= 5
     pmra, pmdec = n("pmra") or 0.0, n("pmdec") or 0.0
@@ -66,7 +66,7 @@ def gaia_star(source_id) -> dict:
     def run():
         rows = _gaia(adql)
         return star_summary(rows[0]) if rows else {"found": False}
-    return explorer._cached_json("cugaia", adql, TTL, run)
+    return net.cached_json("cugaia", adql, TTL, run)
 
 
 def hr_field(ra: float, dec: float, radius: float = 0.5) -> list:
@@ -78,11 +78,11 @@ def hr_field(ra: float, dec: float, radius: float = 0.5) -> list:
     def run():
         out = []
         for row in _gaia(adql):
-            plx, g, c = (explorer._num(row.get(k)) for k in ("parallax", "phot_g_mean_mag", "bp_rp"))
+            plx, g, c = (net.num(row.get(k)) for k in ("parallax", "phot_g_mean_mag", "bp_rp"))
             if plx and plx > 0 and g is not None and c is not None:
                 out.append([round(c, 3), round(g + 5 * math.log10(plx / 100.0), 3)])
         return out
-    return explorer._cached_json("cuhr", adql, TTL, run)
+    return net.cached_json("cuhr", adql, TTL, run)
 
 
 # ---------------------------------------------------------------- does it pulse?
@@ -109,24 +109,24 @@ def vsx_star(ra: float, dec: float) -> dict:
     key = f"{VSX_TABLE}:{ra:.5f}:{dec:+.5f}"
 
     def run():
-        r = explorer._get(VIZIER, {"-source": VSX_TABLE, "-c": f"{ra:.6f} {dec:+.6f}", "-c.rs": f"{VSX_RADIUS_ARCSEC:.0f}",
+        r = net.get(VIZIER, {"-source": VSX_TABLE, "-c": f"{ra:.6f} {dec:+.6f}", "-c.rs": f"{VSX_RADIUS_ARCSEC:.0f}",
                                    "-out": "Name,RAJ2000,DEJ2000,Type,Period,max,min", "-out.max": "5"},
                           timeout=TIMEOUT, tries=1)
         if not r.ok or "#" not in r.text[:200]:
-            raise explorer.Upstream("VizieR unavailable")
+            raise net.Upstream("VizieR unavailable")
         return parse_tsv(r.text)
-    rows = explorer._cached_json("cuvsx", key, TTL, run)
+    rows = net.cached_json("cuvsx", key, TTL, run)
     cosd = math.cos(math.radians(dec))
 
     def apart(row):
-        return math.hypot(((explorer._num(row.get("RAJ2000")) or 0) - ra) * cosd, (explorer._num(row.get("DEJ2000")) or 0) - dec) * 3600
+        return math.hypot(((net.num(row.get("RAJ2000")) or 0) - ra) * cosd, (net.num(row.get("DEJ2000")) or 0) - dec) * 3600
     best = min(rows, key=apart, default=None)
     if best is None:
         return {"found": False}
-    period = explorer._num(best.get("Period"))
+    period = net.num(best.get("Period"))
     return {"found": True, "name": (best.get("Name") or "").strip(), "type": (best.get("Type") or "").strip() or None,
             "period_d": round(period, 3) if period and period > 0 else None,
-            "max": explorer._num(best.get("max")), "min": explorer._num(best.get("min")), "sep_arcsec": round(apart(best), 1)}
+            "max": net.num(best.get("max")), "min": net.num(best.get("min")), "sep_arcsec": round(apart(best), 1)}
 
 
 GAIA_MAIN, GAIA_CLASSES = "I/355/gaiadr3", "I/358/vclassre"      # Gaia DR3 at VizieR: main table, variability classifier
@@ -143,17 +143,17 @@ def gaia_variable(source_id) -> dict:
 
     def table(source, cols):
         def run():
-            r = explorer._get(VIZIER, {"-source": source, "Source": sid, "-out": cols, "-out.max": "1"}, timeout=TIMEOUT, tries=1)
+            r = net.get(VIZIER, {"-source": source, "Source": sid, "-out": cols, "-out.max": "1"}, timeout=TIMEOUT, tries=1)
             if not r.ok or "#" not in r.text[:200]:
-                raise explorer.Upstream("VizieR unavailable")
+                raise net.Upstream("VizieR unavailable")
             return parse_tsv(r.text)
-        return explorer._cached_json("cugvar", f"{source}:{sid}", TTL, run)
+        return net.cached_json("cugvar", f"{source}:{sid}", TTL, run)
     main = table(GAIA_MAIN, "Source,VarFlag")
     if not main:
         return {"found": False}
     classes = table(GAIA_CLASSES, "Source,Class,ClassSc")
     cls = (classes[0].get("Class") or "").strip() or None if classes else None
-    score = explorer._num(classes[0].get("ClassSc")) if classes else None
+    score = net.num(classes[0].get("ClassSc")) if classes else None
     return {"found": True, "variable": (main[0].get("VarFlag") or "").strip().upper() == "VARIABLE" or cls is not None,
             "class": cls, "score": round(score, 2) if score is not None else None}
 
@@ -168,11 +168,11 @@ RUWE_DOUBLE = 1.4                           # above this Gaia's single-star fit 
 
 def _vizier_rows(source: str, params: dict, cols: str, kind: str, key: str) -> list[dict]:
     def run():
-        r = explorer._get(VIZIER, {"-source": source, **params, "-out": cols, "-out.max": "1"}, timeout=TIMEOUT, tries=1)
+        r = net.get(VIZIER, {"-source": source, **params, "-out": cols, "-out.max": "1"}, timeout=TIMEOUT, tries=1)
         if not r.ok or "#" not in r.text[:200]:
-            raise explorer.Upstream("VizieR unavailable")
+            raise net.Upstream("VizieR unavailable")
         return parse_tsv(r.text)
-    return explorer._cached_json(kind, f"{source}:{key}", TTL, run)
+    return net.cached_json(kind, f"{source}:{key}", TTL, run)
 
 
 def star_facts(source_id) -> dict:
@@ -186,7 +186,7 @@ def star_facts(source_id) -> dict:
     rows = _vizier_rows(GAIA_MAIN, {"Source": sid}, "Source,Plx,e_Plx,pmRA,pmDE,RV,e_RV,RUWE,Teff,logg,Dist,NSS,Dup", "cufacts", sid)
     if not rows:
         return {"found": False}
-    n = lambda k: explorer._num(rows[0].get(k))  # noqa: E731
+    n = lambda k: net.num(rows[0].get(k))  # noqa: E731
     plx, e_plx = n("Plx"), n("e_Plx")
     good = plx is not None and plx > 0 and e_plx and plx / e_plx >= 5
     dist_pc = 1000.0 / plx if good else n("Dist")
@@ -210,7 +210,7 @@ def star_facts(source_id) -> dict:
     except Exception:  # noqa: BLE001  (an extra: the facts above stand without it)
         flame = []
     if flame:
-        f = lambda k: explorer._num(flame[0].get(k))  # noqa: E731
+        f = lambda k: net.num(flame[0].get(k))  # noqa: E731
         out.update(radius_sun=f("Rad-Flame"), luminosity_sun=f("Lum-Flame"), mass_sun=f("Mass-Flame"), age_gyr=f("Age-Flame"))
     return out
 
@@ -222,14 +222,14 @@ def known_planets(ra: float, dec: float) -> dict:
             f"where contains(point('icrs',ra,dec),circle('icrs',{ra:.5f},{dec:.5f},{PLANET_RADIUS_DEG}))=1 order by pl_orbper")
 
     def run():
-        r = explorer._get(EXOPLANETS, {"query": adql, "format": "csv"}, timeout=TIMEOUT, tries=1)
+        r = net.get(EXOPLANETS, {"query": adql, "format": "csv"}, timeout=TIMEOUT, tries=1)
         if not r.ok or not r.text.lstrip().startswith("pl_name"):
-            raise explorer.Upstream("Exoplanet Archive unavailable")
-        return explorer._csv(r.text)
-    rows = explorer._cached_json("cuplanets", adql, TTL, run)
-    planets = [{"name": (row.get("pl_name") or "").strip(), "period_d": explorer._num(row.get("pl_orbper")),
-                "mass_earth": explorer._num(row.get("pl_bmasse")), "radius_earth": explorer._num(row.get("pl_rade")),
-                "year": int(explorer._num(row.get("disc_year")) or 0) or None, "method": (row.get("discoverymethod") or "").strip() or None}
+            raise net.Upstream("Exoplanet Archive unavailable")
+        return net.rows(r.text)
+    rows = net.cached_json("cuplanets", adql, TTL, run)
+    planets = [{"name": (row.get("pl_name") or "").strip(), "period_d": net.num(row.get("pl_orbper")),
+                "mass_earth": net.num(row.get("pl_bmasse")), "radius_earth": net.num(row.get("pl_rade")),
+                "year": int(net.num(row.get("disc_year")) or 0) or None, "method": (row.get("discoverymethod") or "").strip() or None}
                for row in rows]
     return {"host": (rows[0].get("hostname") or "").strip() if rows else None, "planets": planets}
 
@@ -280,26 +280,26 @@ def cross_match(ra, dec, pmra=0.0, pmdec=0.0, mjd=51544.5, radius_arcsec=6.0) ->
         key = f"{table}:{sra:.5f}:{sdec:+.5f}:{radius_arcsec}"
 
         def run(table=table, idcol=idcol, mags=mags, sra=sra, sdec=sdec):
-            r = explorer._get(VIZIER, {"-source": table, "-c": f"{sra:.6f} {sdec:+.6f}", "-c.rs": f"{radius_arcsec:.1f}",
+            r = net.get(VIZIER, {"-source": table, "-c": f"{sra:.6f} {sdec:+.6f}", "-c.rs": f"{radius_arcsec:.1f}",
                                        "-out": ",".join((idcol, "RAJ2000", "DEJ2000", *mags)), "-out.max": "5"},
                               timeout=TIMEOUT, tries=1)
             if not r.ok or "#" not in r.text[:200]:
-                raise explorer.Upstream("VizieR unavailable")
+                raise net.Upstream("VizieR unavailable")
             return parse_tsv(r.text)
         try:
-            rows = explorer._cached_json("cuxmatch", key, TTL, run)
+            rows = net.cached_json("cuxmatch", key, TTL, run)
         except Exception:  # noqa: BLE001  (optional service)
             out.append({"survey": name, "state": "unreachable"})
             continue
         cosd = math.cos(math.radians(sdec))
 
         def apart(r, sra=sra, sdec=sdec, cosd=cosd):
-            return math.hypot(((explorer._num(r.get("RAJ2000")) or 0) - sra) * cosd, (explorer._num(r.get("DEJ2000")) or 0) - sdec) * 3600
+            return math.hypot(((net.num(r.get("RAJ2000")) or 0) - sra) * cosd, (net.num(r.get("DEJ2000")) or 0) - sdec) * 3600
         best = min(rows, key=apart, default=None)
         if best is None:
             out.append({"survey": name, "state": "none"})
             continue
-        found = {m.replace("mag", ""): explorer._num(best.get(m)) for m in mags}
+        found = {m.replace("mag", ""): net.num(best.get(m)) for m in mags}
         out.append({"survey": name, "state": "found", "id": best.get(idcol, "").strip(), "sep_arcsec": round(apart(best), 2),
                     "epoch": epoch, "mags": found, "fluxes": band_fluxes(found)})
     return out

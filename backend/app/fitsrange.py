@@ -67,7 +67,7 @@ def _parse_multipart(body: bytes, ctype: str):
 
 
 # One cap on IRSA requests for the whole server, however many visitors and worker threads there are
-# (config.IRSA_MAX_INFLIGHT; from Efe's PR #9). The fast engine, the Sky Explorer's cut-outs and the
+# (config.IRSA_MAX_INFLIGHT; from Efe's PR #9). The fast engine and the
 # colour tiles share it (app/irsa.py).
 IRSA_SLOTS = irsa.SLOTS
 

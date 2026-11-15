@@ -1,5 +1,5 @@
-"""Other missions and services shown next to SPHEREx: Gaia DR3 (ESA), known Solar System objects
-(IMCCE SkyBoT) and NEOSSat observations (Canadian Space Agency, via CADC)."""
+"""Catalogues drawn over the SPHEREx pictures: Gaia DR3 (ESA) and known Solar System objects
+(IMCCE SkyBoT)."""
 from __future__ import annotations
 
 import csv
@@ -16,7 +16,6 @@ from astropy.coordinates import Angle
 from . import config
 
 GAIA_TAP = "https://gea.esac.esa.int/tap-server/tap/sync"
-CADC_TAP = "https://ws.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/argus/sync"
 SKYBOT = "https://ssp.imcce.fr/webservices/skybot/api/conesearch.php"
 UA = {"User-Agent": "Radians/0.1 (NASA Space Apps 2026)"}
 
@@ -98,25 +97,3 @@ def skybot(ra: float, dec: float, radius_arcsec: float, mjds: list[float]):
     with ThreadPoolExecutor(8) as pool:
         res = list(pool.map(lambda m: _skybot_one(ra, dec, radius_arcsec, m), mjds))
     return [{"mjd": m, "objects": r} for m, r in zip(mjds, res)]
-
-
-# ---------------------------------------------------------------- NEOSSat (CSA) via CADC
-def neossat(ra: float, dec: float, radius: float, limit: int = 50):
-    adql = (f"SELECT TOP {limit} obs_id, t_min, t_exptime, target_name, s_ra, s_dec, access_url "
-            f"FROM ivoa.ObsCore WHERE obs_collection='NEOSSAT' "
-            f"AND INTERSECTS(CIRCLE('ICRS',{ra:.6f},{dec:.6f},{radius:.5f}), s_region)=1 ORDER BY t_min DESC")
-
-    def run():
-        rows = _tap_csv(CADC_TAP, adql, timeout=90)
-        seen, out = set(), []
-        for row in rows:
-            if row["obs_id"] in seen:
-                continue
-            seen.add(row["obs_id"])
-            out.append({"obs_id": row["obs_id"], "mjd": _f(row["t_min"]), "exptime": _f(row["t_exptime"]),
-                        "target": row.get("target_name") or None, "ra": _f(row["s_ra"]), "dec": _f(row["s_dec"]),
-                        "access_url": row.get("access_url") or None,
-                        "cadc_url": "https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/en/search/?collection=NEOSSAT"
-                                    f"&Observation.observationID={row['obs_id']}#resultTableTab"})
-        return out
-    return _cached("neossat", f"{ra:.4f}:{dec:.4f}:{radius:.4f}", 86400, run)

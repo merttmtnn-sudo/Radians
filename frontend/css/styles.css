@@ -476,37 +476,7 @@ body.embed .stage { max-height: calc(100vh - 70px); }
 .wlbox p { grid-column: 1 / -1; margin: 0; }      /* a component's own display rule must never beat [hidden] */
 .map-only { display: none !important; }
 .in-map .map-only { display: block !important; }
-.sky-only { display: none; }
-.in-sky .sky-only { display: block !important; }
-#skyPage { width: 100%; box-sizing: border-box; }
-.in-sky .landing-only, .in-sky .app-only, .in-sky .map-only { display: none !important; }
-.skywrap #skyFrame, .skywrap iframe { width: 100%; height: min(70vh, 740px); min-height: 420px; border: 0; display: block; }
-.skywrap:fullscreen #skyFrame, .skywrap:fullscreen iframe { height: 100vh; }
-.skyfull { position: absolute; right: 12px; top: 12px; z-index: 5; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, .16); background: rgba(0, 0, 0, .6); color: #fff; cursor: pointer; backdrop-filter: blur(8px); }
-.skyfull svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
-.skyfull:hover { border-color: rgba(255, 255, 255, .4); }
-.mapchip.togg::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--fg-3); }
-.mapchip.togg[aria-pressed="true"] { color: var(--fg); border-color: #ffb347; background: rgba(255, 179, 71, .1); }
-.mapchip.togg[aria-pressed="true"]::before { background: #ffb347; border-color: #ffb347; }
-#skyAdv[aria-pressed="true"] { color: #ffb347; border-color: #ffb347; }
-.roundplay { width: 46px; height: 46px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; cursor: pointer;
-  background: var(--fg); color: var(--bg, #000); transition: transform .12s; }
-.roundplay:hover { transform: scale(1.05); }
-.roundplay svg { width: 18px; height: 18px; fill: currentColor; }
-.roundplay .ic-pause, .roundplay.on .ic-play { display: none; }
-.roundplay.on .ic-pause { display: block; }
-.roundplay.on { background: #ffb347; color: #1a1205; }
-#skyTime { accent-color: #ffb347; }
-.wlticks.skyticks { display: flex; justify-content: space-between; }
-.wlticks.skyticks span { position: static; transform: none !important; }
-#skyNow.on { color: var(--fg); border-color: #ffb347; background: rgba(255, 179, 71, .1); }
-.in-sky .maptools .btn { margin-left: auto; }
 @media (max-width: 700px) {
-  .in-sky .palchips, .in-sky .chips { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0; }
-  .in-sky .palchips button, .in-sky .mapchip { flex: none; }
-  .in-sky .maplabel { min-width: 0; }
-  .in-sky .skywrap iframe, .in-sky .skywrap #skyFrame { height: min(62vh, 400px); min-height: 340px; }
   .nav { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; max-width: 100%; }
   .nav a { white-space: nowrap; }
 }
@@ -561,11 +531,6 @@ body.embed .stage { max-height: calc(100vh - 70px); }
 .mapdeep > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #mapDeepGo { flex: none; height: 30px; padding: 0 14px; border: 0; border-radius: 999px; background: #ffb347; color: #1a1205; font: inherit; font-weight: 600; cursor: pointer; }
 #mapDeepGo:hover { filter: brightness(1.08); }
-.maptm { position: absolute; z-index: 16; left: 14px; bottom: 64px; max-width: min(420px, calc(100% - 28px)); padding: 8px 12px;
-  border-radius: 12px; background: rgba(12, 12, 14, .82); border: 1px solid rgba(120, 190, 255, .45); color: #dfe6f0; font-size: 12px; line-height: 1.4;
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-.maptm[hidden] { display: none; }
-.maptm b { color: #8cc8ff; margin-right: 4px; }
 .mapdeepseg { display: inline-flex; flex: none; gap: 2px; padding: 2px; border-radius: 999px; background: rgba(255, 255, 255, .08); }
 .mapdeepseg[hidden] { display: none; }
 .mapdeepseg button { height: 26px; padding: 0 11px; border: 0; border-radius: 999px; background: none; color: #cfd2d8; font: inherit; cursor: pointer; }
@@ -670,6 +635,7 @@ i.ring.f { border-color: #8cc8ff; }
 }
 /* Aladin: controls we switched off still leave empty dark boxes behind */
 #skymapAladin .aladin-stack-control, #skymapAladin .aladin-simbadPointer-control { display: none !important; }
+#aladin .aladin-stack-control { display: none !important; }   /* the wider view shows SPHEREx only: no menu of other surveys */
 #skymapAladin .aladin-tooltip-container, #aladin .aladin-tooltip-container { background: transparent !important; }
 #aladin { isolation: isolate; }   /* keep Aladin's own z-indexes under the sticky header */
 
@@ -738,8 +704,8 @@ body.embed .depth { display: none !important; }
   text-shadow: 0 0 6px #000, 0 0 2px #000; }
 .maplooking b { color: #fff; font-weight: 600; }
 /* a colour picture on top (a mix, or another survey): no grey filter and no tint over it */
-.mapwrap[data-sky] #skymapAladin .aladin-imageCanvas { filter: var(--bc); }
-.mapwrap[data-sky] .maptint { display: none; }
+.mapwrap[data-top] #skymapAladin .aladin-imageCanvas { filter: var(--bc); }
+.mapwrap[data-top] .maptint { display: none; }
 .mixbody { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .mixbody:empty { display: none; }
 .mixrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -768,8 +734,7 @@ body.embed .depth { display: none !important; }
   .controls #scrub { order: -1; flex: 1 1 100%; margin: 4px 0 2px; }
   .controls .btn.sm { padding-inline: 10px; }
   .viewbar #view { margin-left: 0; flex: 1 1 100%; }
-  .in-sky .palchips, .in-sky .chips { flex-wrap: wrap; overflow: visible; }
-  .in-sky .mapchip, .in-map .mapchip { height: 34px; }
+  .in-map .mapchip { height: 34px; }
   .maptools { flex-wrap: wrap; }
   .maplegend { max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: center; row-gap: 4px; padding: 6px 10px; }
 }

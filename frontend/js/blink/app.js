@@ -9,6 +9,7 @@ import { encodeGif } from './gif.js';
 import { renderTypeBox } from './typebox.js';
 import { createCurious } from './curious.js';
 import { CUBE_URL, nearestSlice } from '../core/cube.js';
+const CUBE_NAME = 'SPHEREx DR1';
 import { depthStart, depthLive, depthLoad, depthHide } from './depth.js';
 import { getPalette, setPalette, viewerCmap } from '../core/palette.js';
 import { loadAladin, QUIET } from '../core/aladin.js';
@@ -1360,7 +1361,7 @@ function applyLang(l) {
   setLang(l);
   try { localStorage.setItem('radians-lang', getLang()); } catch { /* private mode */ }
   for (const b of document.querySelectorAll('[data-lang]')) b.setAttribute('aria-pressed', String(b.dataset.lang === getLang()));
-  if (state.data) { applyView(state.idx); renderCandidates(); renderAnalysis(); renderNeossat(); syncUrl(true); }
+  if (state.data) { applyView(state.idx); renderCandidates(); renderAnalysis(); syncUrl(true); }
   document.dispatchEvent(new CustomEvent('radians:lang'));
 }
 for (const b of document.querySelectorAll('[data-lang]')) b.onclick = () => applyLang(b.dataset.lang);
@@ -1423,10 +1424,10 @@ document.addEventListener('radians:open', (e) => {
 
 
 // ================================================================== phase 4
-// spectra and light curves, Gaia / SkyBoT overlays, NEOSSat archive, Aladin Lite context
-const ex = { phot: null, click: null, tab: 'spectrum', gaia: [], gaiaState: 'wait', xm: {}, sso: [], neo: null, deep: null, photAbort: null, aladin: null };
+// spectra and light curves, Gaia / SkyBoT overlays, Aladin Lite context
+const ex = { phot: null, click: null, tab: 'spectrum', gaia: [], gaiaState: 'wait', xm: {}, sso: [], deep: null, photAbort: null, aladin: null };
 const e4 = Object.fromEntries(['analysis', 'photSource', 'photMode', 'photFlagged', 'chart', 'chartNote', 'ovGaia', 'ovSso',
-  'ovStatus', 'neossat', 'ctx', 'ctxSurvey', 'ctxGaia', 'ctxCatwise', 'aladin'].map(id => [id, $(id)]));
+  'ovStatus', 'ctx', 'ctxGaia', 'ctxCatwise', 'aladin'].map(id => [id, $(id)]));
 const MJD_J2016 = 57388.5;
 // absorption bands that shape cool stars, brown dwarfs and ices in SPHEREx's range
 const SPECTRAL_BANDS = [{ x: 1.4, label: 'H₂O' }, { x: 1.9, label: 'H₂O' }, { x: 2.7, label: 'H₂O' },
@@ -1448,7 +1449,6 @@ function onLoaded() {
   if (cur?.look === 'brightness') ex.tab = 'lightcurve';
   setPhot((state.deepData || state.data).exposures || [], null, (state.deepData || state.data).spot);
   loadCatalogues();
-  loadNeossat();
   if (e4.ctx.open) updateAladin();
 }
 
@@ -1888,35 +1888,6 @@ function extraCursorRows(x, y) {
 e4.ovGaia.onchange = drawOverlay;
 e4.ovSso.onchange = drawOverlay;
 
-// ------------------------------------------------------------------ NEOSSat (CSA) via CADC
-async function loadNeossat() {
-  const d = state.data;
-  ex.neo = 'loading';
-  renderNeossat();
-  try {
-    const rows = await api('api/neossat', { ra: d.grid.ra.toFixed(6), dec: d.grid.dec.toFixed(6), radius: 0.25 });
-    if (state.data === d) ex.neo = rows;
-  } catch {
-    if (state.data === d) ex.neo = 'fail';
-  }
-  renderNeossat();
-}
-
-function renderNeossat() {
-  const ul = e4.neossat;
-  if (ex.neo === 'loading') return ul.replaceChildren(el('li', 'muted small', t('neossatLoading')));
-  if (ex.neo === 'fail') return ul.replaceChildren(el('li', 'muted small', t('neossatFail')));
-  if (!Array.isArray(ex.neo) || !ex.neo.length) return ul.replaceChildren(el('li', 'muted small', t('neossatNone')));
-  ul.replaceChildren(...ex.neo.slice(0, 12).map(o => {
-    const li = el('li', 'small');
-    const a = el('a', '', `${mjdDate(o.mjd)}${o.target ? ' · ' + o.target : ''}`);
-    a.href = o.cadc_url; a.target = '_blank'; a.rel = 'noopener';
-    li.append(a, el('span', 'muted', o.exptime ? ` ${o.exptime.toFixed(0)} s` : ''));
-    return li;
-  }));
-  if (ex.neo.length > 12) ul.append(el('li', 'muted small', `+${ex.neo.length - 12}`));
-}
-
 // ------------------------------------------------------------------ Aladin Lite context view
 
 async function updateAladin() {
@@ -1925,10 +1896,10 @@ async function updateAladin() {
     await loadAladin();
     const g = state.data.grid;
     if (!ex.aladin) {
-      const first = e4.ctxSurvey.selectedOptions[0];        // its own first survey: nothing is asked from CDS
-      ex.aladin = window.A.aladin('#aladin', { ...QUIET, survey: window.A.imageHiPS(first.value, { name: first.textContent }),
+      // the SPHEREx all-sky cube as its own first survey: nothing is asked from CDS
+      ex.aladin = window.A.aladin('#aladin', { ...QUIET, survey: window.A.imageHiPS(CUBE_URL, { name: CUBE_NAME }),
         fov: g.fov / 3600 * 3, target: `${g.ra} ${g.dec}`,
-        cooFrame: 'ICRS', showReticle: false, showFullscreenControl: true, showLayersControl: true });
+        cooFrame: 'ICRS', showReticle: false, showFullscreenControl: true, showLayersControl: false });
       ex.ovl = window.A.graphicOverlay({ color: '#ffb347', lineWidth: 2 });
       ex.aladin.addOverlay(ex.ovl);
     } else {
@@ -1945,10 +1916,10 @@ async function updateAladin() {
   }
 }
 
+// the wider view shows SPHEREx only: its all-sky cube, at the wavelength of the frame on screen
 function setSurvey() {
-  const opt = e4.ctxSurvey.selectedOptions[0];
   try {
-    ex.hips = window.A.imageHiPS(opt.value, { name: opt.textContent, successCallback: () => { ex.hipsSlice = null; syncCube(); } });
+    ex.hips = window.A.imageHiPS(CUBE_URL, { name: CUBE_NAME, successCallback: () => { ex.hipsSlice = null; syncCube(); } });
     ex.aladin.setImageSurvey(ex.hips);
     ex.hipsSlice = null;
     syncCube();
@@ -1973,7 +1944,6 @@ function setAladinCats() {
 }
 
 e4.ctx.addEventListener('toggle', () => { if (e4.ctx.open) updateAladin(); });
-e4.ctxSurvey.onchange = () => ex.aladin && setSurvey();
 e4.ctxGaia.onchange = e4.ctxCatwise.onchange = () => ex.aladin && setAladinCats();
 
 // ------------------------------------------------------------------ start
@@ -2204,7 +2174,7 @@ if (new URLSearchParams(location.search).get('compare') === '1') {
 
 // ------------------------------------------------------------------ SPHEREx all-sky cube in the context view follows the frame's wavelength
 function syncCube() {
-  if (!ex.hips || !ex.aladin || !state.data || e4.ctxSurvey.value !== CUBE_URL) return;
+  if (!ex.hips || !ex.aladin || !state.data) return;
   const f = isStack() ? null : state.data.frames[state.idx];
   // only a narrow-band frame has a meaningful wavelength; a whole-epoch stack spans 0.75-5 µm
   const narrow = f && f.wavelength_min && f.wavelength_max && f.wavelength_max - f.wavelength_min <= 0.3;

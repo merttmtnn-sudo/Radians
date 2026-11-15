@@ -47,7 +47,7 @@ MAX_COLD_BUILDS = int(os.getenv("MAX_COLD_BUILDS", "2"))    # positions read fro
 CACHE_MAX_MB = int(os.getenv("CACHE_MAX_MB", "4000"))       # cut-out cache size before oldest files go
 # IRSA throttles parallel requests per client (measured by Efe, PR #9: 12 in flight gave 1.3 exposures/s,
 # 32 gave 0.6/s, 64 gave 0.3/s), so the whole server shares one cap: the all-detector reader, the fast
-# engine, the Sky Explorer cut-outs and the colour tiles (app/irsa.py holds the semaphore)
+# engine and the colour tiles (app/irsa.py holds the semaphore)
 IRSA_MAX_INFLIGHT = int(os.getenv("IRSA_MAX_INFLIGHT", "12"))
 
 

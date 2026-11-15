@@ -1,48 +1,114 @@
-"""Colour mixes of the SPHEREx all-sky cube as a HiPS: any two or three wavelengths, each in its own tint.
+"""Colour pictures of the SPHEREx all-sky cube, served as ordinary colour HiPS so the map (Aladin Lite)
+can show them like any other survey. All of it is false colour: infrared light has no colour of its own.
 
-The all-sky map's "Infrared RGB" palette is a fixed recipe (explorer.py). This is the open version
-of the same idea: the page chooses up to three planes of the cube, a tint and a brightness gain for
-each, and gets an ordinary colour HiPS back that Aladin Lite shows like any other survey:
+Three recipes, all made from the cube's 8-bit display tiles (read from IRSA, cached on disk):
 
-    /hips/spherex-mix/{spec}/properties
-    /hips/spherex-mix/{spec}/Norder{o}/Dir{d}/Npix{n}.png
+1. Tinted layers, /hips/spherex-mix/{spec}/... : the page chooses up to three planes of the cube, a tint
+   and a brightness gain for each. `spec` lists the layers, bottom to top, joined by "_":
+   f<frame>c<rrggbb>g<gain x 100>, for example f21c0080ffg089_f46c00ff00g100_f72cff0000g146 . Used for
+   "mix your own colours" (the shortest wavelength blue, the longest red) and for the two-colour science
+   views (a feature wavelength in orange against its neighbouring continuum in blue: equal = white,
+   absorbed = blue, glowing = orange). The tiles are already asinh-stretched; a layer is
+   tint x min(1, gain x level^1.3)  (the gamma keeps the faint speckle down, the gain saturates towards
+   the tint and never changes its hue), and layers are added with the "screen" rule
+   1 - (1-a)(1-b)(1-c) , which cannot overflow.
 
-`spec` lists the layers, bottom to top, joined by "_": f<frame>c<rrggbb>g<gain x 100>, for example
-f21c0080ffg089_f46c00ff00g100_f72cff0000g146 . It is used for the "mix your own colours" tool
-(the shortest wavelength blue, the longest red) and for the science views (a feature wavelength in
-orange against its neighbouring continuum in blue: equal = white, absorbed = blue, glowing = orange).
+2. Three planes as red, green and blue, at the same address with the spec "R-G-B" (three plane numbers,
+   for example 88-65-18): each plane stretched on its own sky level. The map's three ready-made
+   three-colour views (ices, hydrogen gas, warm dust) use it.
 
-The maths is the one measured for the map tiles (docs/COLOUR_DATA.md of the merged-in engine): the
-tiles are 8-bit and already asinh-stretched; a layer is  tint x min(1, gain x level^1.3)  (the
-gamma keeps the faint speckle down, the gain saturates towards the tint and never changes its hue),
-and layers are added with the "screen" rule  1 - (1-a)(1-b)(1-c) , which cannot overflow.
-All of it is false colour: infrared light has no colour of its own.
-
-A second, simpler spec is served at the same address: three plane numbers "R-G-B" (for example
-88-65-18), the recipe in explorer.py (mix_tile): pure red, green and blue, each plane stretched on
-its own sky level. The map's three ready-made three-colour views (ices, hydrogen gas, warm dust) use it.
+3. The fixed "Infrared RGB" palette, /hips/spherex-color/... : each colour is the average of four planes
+   (B = D1+D2, G = D3+D4, R = D5+D6, skipping the blank dichroic frames 50/51), which colours the sky and
+   beats down the noise. Background, gain, saturation and gamma as tuned by Emre Bozkaya on DR1 tiles.
 """
 from __future__ import annotations
 
 import hashlib
 import io
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from fastapi import APIRouter
 from fastapi.responses import Response
 
-from . import config, explorer
+from . import config, irsa, net
 
+HIPS_ROOT = net.IRSA + "/data/hips/SPHEREx/spherex_allsky_cube"
 router = APIRouter(prefix="/hips/spherex-mix")
+colour_router = APIRouter(prefix="/hips/spherex-color")
 
 BLANK_FRAMES = {50, 51}             # the two channels next to the dichroic: the cube has no tiles for them
 MAX_LAYERS = 3
 GAMMA = 1.3
 VERSION = "m1"
 _LAYER = re.compile(r"^f(\d{1,3})c([0-9a-f]{6})g(\d{2,3})$")
+_tile_pool = ThreadPoolExecutor(16)
+_slots = threading.BoundedSemaphore(6)            # colour tiles being made at the same time
+_HIPS_COMMON = ["dataproduct_type = image", "dataproduct_subtype = color", "hips_version = 1.4", "hips_frame = equatorial",
+                "hips_order = 5", "hips_order_min = 0", "hips_tile_width = 512", "hips_tile_format = png",
+                "hips_initial_fov = 60"]
 
 
+def cube_tile(frame, order, npix):
+    """One display tile of one plane of the cube as float32 grey levels 0..255; None where IRSA has none."""
+    from PIL import Image
+    d = npix // 10000 * 10000
+    url = f"{HIPS_ROOT}/Norder{order}/Dir{d}/Npix{npix}{'_' + str(frame) if frame else ''}.png"
+    try:
+        with irsa.SLOTS:
+            r = net.get(url, timeout=40, tries=3)
+    except net.Upstream:
+        return None
+    if r.status_code != 200:
+        return None
+    return np.asarray(Image.open(io.BytesIO(r.content)).convert("L"), dtype=np.float32)
+
+
+def _png(rgb: np.ndarray) -> bytes:
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.fromarray(rgb, "RGB").save(buf, "PNG", optimize=False, compress_level=6)
+    return buf.getvalue()
+
+
+def _cached_tile(path, make) -> bytes | None:
+    """The PNG at path, made once (make() returns uint8 RGB or None when IRSA has no tile)."""
+    if path.exists():
+        return path.read_bytes()
+    with _slots:
+        if path.exists():
+            return path.read_bytes()
+        rgb = make()
+        if rgb is None:
+            return None
+        out = _png(rgb)
+        config.atomic_write(path, out)
+        return out
+
+
+def _tile_reply(make_png, order, npix):
+    if not 0 <= order <= 5 or not 0 <= npix < 12 * 4 ** order:
+        return Response(status_code=404)
+    try:
+        png = make_png()
+    except ValueError:
+        return Response(status_code=404)
+    except Exception as e:  # noqa: BLE001  (IRSA trouble: say so, never a traceback)
+        return net.err(f"tile: {e}")
+    if png is None:
+        return Response(status_code=404)
+    return Response(png, media_type="image/png", headers={"Cache-Control": "max-age=604800"})
+
+
+def _properties(did, title, rights):
+    txt = "\n".join([f"creator_did = ivo://radians/P/SPHEREx/DR1/{did}", f"obs_title = {title}", *_HIPS_COMMON,
+                     f"obs_copyright = {rights}", ""])
+    return Response(txt, media_type="text/plain", headers={"Cache-Control": "max-age=86400"})
+
+
+# ---------------------------------------------------------------- 1. tinted layers
 def parse_spec(spec: str) -> list[dict]:
     """[{frame, rgb: (r, g, b) 0..1, gain}], bottom layer first. ValueError on anything else."""
     parts = spec.split("_")
@@ -80,54 +146,92 @@ def mix(tiles: list[np.ndarray | None], layers: list[dict]) -> np.ndarray | None
 
 def mix_tile(spec: str, order: int, npix: int) -> bytes | None:
     layers = parse_spec(spec)
-    key = hashlib.sha1(f"{VERSION}|{spec}".encode()).hexdigest()[:16]
-    p = config.CACHE_DIR / "sxmix" / key / f"{order}_{npix}.png"
-    if p.exists():
-        return p.read_bytes()
-    from PIL import Image
-    with explorer._color_slots:
-        if p.exists():
-            return p.read_bytes()
-        jobs = [explorer._tile_pool.submit(explorer._cube_tile, layer["frame"], order, npix) for layer in layers]
-        rgb = mix([j.result() for j in jobs], layers)
-        if rgb is None:
+    name = hashlib.sha1(f"{VERSION}|{spec}".encode()).hexdigest()[:16]
+
+    def make():
+        jobs = [_tile_pool.submit(cube_tile, layer["frame"], order, npix) for layer in layers]
+        return mix([j.result() for j in jobs], layers)
+    return _cached_tile(config.CACHE_DIR / "sxmix" / name / f"{order}_{npix}.png", make)
+
+
+# ---------------------------------------------------------------- 2. three planes as red, green, blue
+def rgb_planes(spec: str) -> tuple[int, int, int] | None:
+    """The three plane numbers of an "R-G-B" spec, or None when it is not one."""
+    m = re.fullmatch(r"(\d{1,3})-(\d{1,3})-(\d{1,3})", spec)
+    if not m:
+        return None
+    t = tuple(int(x) for x in m.groups())
+    return t if all(0 <= x < 102 for x in t) else None
+
+
+def rgb_tile(order: int, npix: int, r: int, g: int, b: int) -> bytes | None:
+    def make():
+        tiles = list(_tile_pool.map(lambda f: cube_tile(f, order, npix), (r, g, b)))
+        any_t = next((t for t in tiles if t is not None), None)
+        if any_t is None:
             return None
-        buf = io.BytesIO()
-        Image.fromarray(rgb, "RGB").save(buf, "PNG", optimize=False, compress_level=6)
-        out = buf.getvalue()
-        config.atomic_write(p, out)
-        return out
+        rgb = np.zeros(any_t.shape + (3,), np.float32)
+        for ci, t in enumerate(tiles):
+            if t is not None:          # each plane's own sky level off (zodiacal light differs a lot per band)
+                lit = t[t > 0]
+                bk = float(np.percentile(lit, 25)) if lit.size > 100 else 4.0
+                rgb[..., ci] = np.maximum(0, t - bk) / max(40.0, 255 - bk)
+        return np.clip(np.power(rgb, 1 / 1.15) * 255, 0, 255).astype(np.uint8)
+    return _cached_tile(config.CACHE_DIR / "sxmix" / "rgb" / f"{r}-{g}-{b}_{order}_{npix}.png", make)
 
 
 @router.get("/{spec}/properties")
 def properties(spec: str):
-    if explorer._mix_ok(spec):                      # "R-G-B": three planes as red, green and blue
-        return explorer.mix_properties(spec)
+    if rgb_planes(spec):
+        return _properties(f"mix/{spec}", f"SPHEREx DR1 planes {spec} as R-G-B", "NASA/JPL-Caltech/IPAC SPHEREx")
     try:
         layers = parse_spec(spec)
     except ValueError:
         return Response(status_code=404)
-    txt = "\n".join([
-        f"creator_did = ivo://radians/P/SPHEREx/DR1/mix/{spec}",
-        f"obs_title = SPHEREx DR1 false colour: planes {', '.join(str(layer['frame']) for layer in layers)} of the all-sky cube",
-        "dataproduct_type = image", "dataproduct_subtype = color", "hips_version = 1.4", "hips_frame = equatorial",
-        "hips_order = 5", "hips_order_min = 0", "hips_tile_width = 512", "hips_tile_format = png", "hips_initial_fov = 60",
-        "obs_copyright = NASA/JPL-Caltech/IPAC SPHEREx; false-colour mix made by Radians", ""])
-    return Response(txt, media_type="text/plain", headers={"Cache-Control": "max-age=86400"})
+    planes = ", ".join(str(layer["frame"]) for layer in layers)
+    return _properties(f"mix/{spec}", f"SPHEREx DR1 false colour: planes {planes} of the all-sky cube",
+                       "NASA/JPL-Caltech/IPAC SPHEREx; false-colour mix made by Radians")
 
 
 @router.get("/{spec}/Norder{order}/Dir{d}/Npix{npix}.png")
 def tile(spec: str, order: int, d: int, npix: int):
-    if explorer._mix_ok(spec):
-        return explorer.mix_tile_route(spec, order, d, npix)
-    if not 0 <= order <= 5 or not 0 <= npix < 12 * 4 ** order:
-        return Response(status_code=404)
-    try:
-        png = mix_tile(spec, order, npix)
-    except ValueError:
-        return Response(status_code=404)
-    except Exception as e:  # noqa: BLE001  (IRSA trouble: say so, never a traceback)
-        return explorer._err(f"tile: {e}")
-    if png is None:
-        return Response(status_code=404)
-    return Response(png, media_type="image/png", headers={"Cache-Control": "max-age=604800"})
+    planes = rgb_planes(spec)
+    if planes:
+        return _tile_reply(lambda: rgb_tile(order, npix, *planes), order, npix)
+    return _tile_reply(lambda: mix_tile(spec, order, npix), order, npix)
+
+
+# ---------------------------------------------------------------- 3. the fixed "Infrared RGB" palette
+COLOR_FRAMES = {"r": [72, 78, 89, 97], "g": [38, 46, 55, 63], "b": [4, 12, 21, 29]}
+COLOR_BAL = {"r": (4, 1.35), "g": (4, 1.1), "b": (4, 1.0)}             # background level, gain
+COLOR_SAT, COLOR_GAMMA, COLOR_VERSION = 1.45, 1.6, "v3"
+
+
+def color_tile(order: int, npix: int) -> bytes | None:
+    def make():
+        jobs = {c: [_tile_pool.submit(cube_tile, f, order, npix) for f in fr] for c, fr in COLOR_FRAMES.items()}
+        chans = {c: [t for t in (j.result() for j in js) if t is not None] for c, js in jobs.items()}
+        any_t = next((t for ts in chans.values() for t in ts), None)
+        if any_t is None:
+            return None
+        lin = np.zeros(any_t.shape + (3,), np.float32)
+        for ci, c in enumerate("rgb"):
+            if chans[c]:
+                bk, gain = COLOR_BAL[c]
+                lin[..., ci] = np.maximum(0, np.mean(chans[c], axis=0) - bk) * gain / 255
+        L = lin.mean(axis=2, keepdims=True)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            k = np.where(L > 0, np.power(np.minimum(L, 1.5), COLOR_GAMMA) / np.where(L > 0, L, 1), 0)
+        return np.clip((L + (lin - L) * COLOR_SAT) * k * 255, 0, 255).astype(np.uint8)
+    return _cached_tile(config.CACHE_DIR / "sxcolor" / f"{COLOR_VERSION}_{order}_{npix}.png", make)
+
+
+@colour_router.get("/properties")
+def color_properties():
+    return _properties("color", "SPHEREx DR1 infrared colour (B 0.75-1.6, G 1.6-3.8, R 3.8-5 um)",
+                       "NASA/JPL-Caltech/IPAC SPHEREx; colour composite after Emre Bozkaya")
+
+
+@colour_router.get("/Norder{order}/Dir{d}/Npix{npix}.png")
+def color_tile_route(order: int, d: int, npix: int):
+    return _tile_reply(lambda: color_tile(order, npix), order, npix)

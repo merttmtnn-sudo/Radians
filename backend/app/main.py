@@ -16,12 +16,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import archive, config, crossmatch, detect, explorer, external, stack
+from . import archive, config, crossmatch, detect, external, net, stack
 
 app = FastAPI(title="Radians", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
-app.include_router(explorer.router)
-app.include_router(explorer.hips_router)
 
 # ---------------------------------------------------------------- fair sharing of one server
 _hits: dict = {}
@@ -29,8 +27,7 @@ _hits_lock = threading.Lock()
 LIMITS = {"/api/frames": config.RATE_FRAMES, "/api/photometry": config.RATE_PHOT}
 # endpoints that ask SIMBAD / Gaia / VizieR / IRSA for a visitor or fit on the server: one budget each
 LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr",
-                                              "/api/curious/facts", "/api/curious/motion", "/api/curious/period", "/api/curious/variable", "/api/curious/xmatch",
-                                              "/api/object")})
+                                              "/api/curious/facts", "/api/curious/motion", "/api/curious/period", "/api/curious/variable", "/api/curious/xmatch")})
 LIMITS["/api/sharp"] = config.RATE_FRAMES
 # the fast band's own lookups (its pictures, /api/quick, are long-polled and limited by the engine's build queue)
 LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/quick/changes", "/api/quick/diffs", "/api/quick/motion", "/api/quick/warm")})
@@ -49,7 +46,7 @@ async def _revalidate(request: Request, call_next):
     browsers keep running an old app.js / styles.css after a deploy."""
     resp = await call_next(request)
     path = request.url.path
-    if path == "/" or path.startswith(("/static/", "/planet/")) and not path.startswith("/planet/data/"):
+    if path == "/" or path.startswith("/static/"):
         resp.headers["Cache-Control"] = "no-cache"
     return resp
 
@@ -470,18 +467,9 @@ def sso(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le
     return _external(external.skybot, ra, dec, radius, mjds)
 
 
-@app.get("/api/neossat")
-def neossat(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
-            radius: float = Query(0.25, gt=0, le=2)):
-    """NEOSSat (Canadian Space Agency) observations of this position, from the CADC archive."""
-    return _external(external.neossat, ra, dec, radius)
-
-
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 if FRONTEND.exists():
     app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
-    # the planetarium (Emre Bozkaya's SPHEREx Sky Explorer) is a page of its own
-    app.mount("/planet", StaticFiles(directory=FRONTEND / "planet", html=True), name="planet")
 
     @app.get("/")
     def index():
@@ -511,8 +499,7 @@ def warm(targets=DEMO, fov=240):
             if g:
                 ra, dec, rdeg = r6(g["ra"]), r6(g["dec"]), g["fov"] / 3600 / math.sqrt(2)
                 for fn, args in ((external.gaia, (ra, dec, round(rdeg, 4), 19.0)),
-                                 (external.skybot, (ra, dec, math.ceil(rdeg * 3600), [round(f["mjd"], 3) for f in d["frames"][:40]])),
-                                 (external.neossat, (ra, dec, 0.25))):
+                                 (external.skybot, (ra, dec, math.ceil(rdeg * 3600), [round(f["mjd"], 3) for f in d["frames"][:40]]))):
                     try:
                         fn(*args)
                     except Exception as e:           # an external service being down must not stop the warm-up
@@ -606,19 +593,6 @@ def curious_xmatch(ra: float = Query(..., ge=0, lt=360), dec: float = Query(...,
     return {"surveys": curious.cross_match(ra, dec, pmra, pmdec, mjd)}
 
 
-# ---------------------------------------------------------------- planetarium info panel
-from . import objinfo  # noqa: E402
-
-
-@app.get("/api/object")
-def object_info(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
-                id: str | None = Query(None, max_length=40), lang: str = Query("en", max_length=5),
-                kind: str = Query("star", pattern="^(star|dso|target|point)$")):
-    """SIMBAD facts and a Wikipedia summary for the object clicked in the planetarium (each part may fail alone)."""
-    return JSONResponse(objinfo.lookup((id or "").strip() or None, round(ra, 5), round(dec, 5), lang, kind),
-                        headers={"Cache-Control": "public, max-age=86400"})
-
-
 # ---------------------------------------------------------------- sharper than one pixel (drizzle)
 from . import sharp  # noqa: E402
 sharp_views = sharp          # /api/frames has a parameter called "sharp"
@@ -654,7 +628,7 @@ def sharp_view(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=
         threading.Thread(target=stack.prune_cache, daemon=True).start()
         return {**out, "det": det} if out else {"count": 0}
 
-    out = explorer._cached_json("sharp", key, 7 * 86400, run)
+    out = net.cached_json("sharp", key, 7 * 86400, run)
     _report(job, stage="done")
     return JSONResponse(out, headers={"Cache-Control": "public, max-age=3600"})
 
@@ -667,7 +641,7 @@ from . import mixtiles, quick  # noqa: E402
 from .engine import main as engine  # noqa: E402
 
 app.include_router(quick.router)        # /api/quick: an engine view in the viewer's frame format
-app.include_router(mixtiles.router)     # /hips/spherex-mix: false-colour mixes of the all-sky cube for the map
-                                        # (also the three-plane R-G-B recipe in explorer.py, same address)
+app.include_router(mixtiles.router)          # /hips/spherex-mix: false-colour mixes of the all-sky cube for the map
+app.include_router(mixtiles.colour_router)   # /hips/spherex-color: the map's fixed "Infrared RGB" palette
 for _router in engine.routers:
     app.include_router(_router)

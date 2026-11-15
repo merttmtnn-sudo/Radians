@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
-from . import explorer
+from . import net
 
 TTL = 30 * 86400
 TIMEOUT = (6, 25)            # connect, read: a catalogue slower than this counts as unreachable
@@ -37,26 +37,26 @@ def simbad(ra, dec, radius):
         last = None
         for host in SIMBAD_HOSTS:
             try:
-                r = explorer._get(host + "/simbad/sim-tap/sync",
+                r = net.get(host + "/simbad/sim-tap/sync",
                                   {"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": adql},
                                   timeout=TIMEOUT, tries=1)
                 if not r.ok or "main_id" not in r.text.split("\n", 1)[0]:
-                    raise explorer.Upstream(host + " unavailable")
+                    raise net.Upstream(host + " unavailable")
                 rows = []
-                for x in explorer._csv(r.text):
-                    pra, pdec = explorer._num(x.get("ra")), explorer._num(x.get("dec"))
+                for x in net.rows(r.text):
+                    pra, pdec = net.num(x.get("ra")), net.num(x.get("dec"))
                     otype = _clean(x.get("otype"))
                     # a planet shares its star's position and is not what the image shows
                     if pra is None or pdec is None or otype == "Pl":
                         continue
                     rows.append({"id": _clean(x.get("main_id")), "type": otype, "ra": pra, "dec": pdec,
-                                 "pmra": explorer._num(x.get("pmra")) or 0, "pmdec": explorer._num(x.get("pmdec")) or 0,
+                                 "pmra": net.num(x.get("pmra")) or 0, "pmdec": net.num(x.get("pmdec")) or 0,
                                  "epoch": 2000.0})
                 return rows
             except Exception as e:  # noqa: BLE001  (try the mirror)
                 last = e
-        raise explorer.Upstream(str(last or "SIMBAD unavailable"))
-    return explorer._cached_json("xmsimbad", adql, TTL, run)
+        raise net.Upstream(str(last or "SIMBAD unavailable"))
+    return net.cached_json("xmsimbad", adql, TTL, run)
 
 
 def catwise(ra, dec, radius):
@@ -65,21 +65,21 @@ def catwise(ra, dec, radius):
             + _circle(ra, dec, radius))
 
     def run():
-        r = explorer._get(IRSA_TAP, {"LANG": "ADQL", "FORMAT": "csv", "QUERY": adql}, timeout=TIMEOUT, tries=1)
+        r = net.get(IRSA_TAP, {"LANG": "ADQL", "FORMAT": "csv", "QUERY": adql}, timeout=TIMEOUT, tries=1)
         if not r.ok or "source_name" not in r.text.split("\n", 1)[0]:
-            raise explorer.Upstream("CatWISE2020 unavailable")
+            raise net.Upstream("CatWISE2020 unavailable")
         rows = []
-        for x in explorer._csv(r.text):
-            pra, pdec = explorer._num(x.get("ra")), explorer._num(x.get("dec"))
+        for x in net.rows(r.text):
+            pra, pdec = net.num(x.get("ra")), net.num(x.get("dec"))
             if pra is None or pdec is None:
                 continue
-            mjd = explorer._num(x.get("meanobsmjd")) or 57170.0
+            mjd = net.num(x.get("meanobsmjd")) or 57170.0
             rows.append({"id": "CatWISE2020 " + _clean(x.get("source_name")), "ra": pra, "dec": pdec,
-                         "pmra": (explorer._num(x.get("pmra")) or 0) * 1000,       # arcsec/yr in the catalogue
-                         "pmdec": (explorer._num(x.get("pmdec")) or 0) * 1000,
-                         "mag": explorer._num(x.get("w1mpro")), "epoch": round(2000 + (mjd - 51544.5) / 365.25, 3)})
+                         "pmra": (net.num(x.get("pmra")) or 0) * 1000,       # arcsec/yr in the catalogue
+                         "pmdec": (net.num(x.get("pmdec")) or 0) * 1000,
+                         "mag": net.num(x.get("w1mpro")), "epoch": round(2000 + (mjd - 51544.5) / 365.25, 3)})
         return rows
-    return explorer._cached_json("xmcatwise", adql, TTL, run)
+    return net.cached_json("xmcatwise", adql, TTL, run)
 
 
 CATALOGUES = {"simbad": simbad, "catwise": catwise}

@@ -50,7 +50,6 @@ const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 // ---------------------------------------------------------------- open / close
 function openMap(push = true) {
-  root.classList.remove('in-app', 'in-sky');
   root.classList.add('in-map');
   if (push) {
     const u = new URL(location.href);
@@ -80,7 +79,6 @@ for (const a of document.querySelectorAll('.nav .navl')) {
   });
 }
 document.addEventListener('radians:run', closeMap);
-document.addEventListener('radians:sky', closeMap);
 addEventListener('popstate', () => { if (new URLSearchParams(location.search).get('map') === '1') openMap(false); else closeMap(); });
 
 // ---------------------------------------------------------------- the map
@@ -111,7 +109,7 @@ async function initMap() {
     // (A second id for the same cube keeps Aladin from treating the two layers as one.)
     map.hips = window.A.imageHiPS('radians-spherex', { url: CUBE_URL, name: 'SPHEREx DR1', successCallback: () => setSlice(map.slice) });
     map.aladin.setOverlayImageLayer(map.hips, 'spherex');
-    map.aladin.on('zoomChanged', () => { deepChip(); twoMass(); });
+    map.aladin.on('zoomChanged', deepChip);
     // tint layer between the sky image and the markers, in the colour of the wavelength
     const div = $('skymapAladin');
     map.tint = document.createElement('div');
@@ -158,7 +156,6 @@ function setSlice(i) {
   setFill();
   prefetchSoon();
   deepChip();
-  twoMass();                                      // a link that opens zoomed in gets its 2MASS note at once
 }
 
 // The fill plane: the same channel on the neighbouring band whose detector has (almost) no holes.
@@ -621,28 +618,9 @@ function showDeep() {
   map.aladin.setOverlayImageLayer(img, 'native');
   deep.layer = true;
   deep.n = d.count;
-  twoMass();
 }
 $('mapDeepGo').onclick = loadDeep;
 
-// Closer still, past what any SPHEREx picture holds, the map fades to 2MASS (IRSA's copy of the CDS colour
-// HiPS: J, H, Ks at 1″) and says so on screen. Not while a SPHEREx deep picture is shown: that one wins.
-const TWOMASS_URL = 'https://irsa.ipac.caltech.edu/data/hips/CDS/2MASS/Color';
-const TM_FROM = 0.25, TM_FULL = 0.08;   // degrees: start fading in / fully 2MASS
-function twoMass() {
-  if (!map.aladin) return;
-  let fov = 180;
-  try { fov = map.aladin.getFov()[0]; } catch { /* default */ }
-  const a = deep.layer || deep.busy || extra.sky !== 'spherex' ? 0 : Math.max(0, Math.min(1, (TM_FROM - fov) / (TM_FROM - TM_FULL)));
-  if (a > 0 && !map.tm) {
-    try {
-      map.tm = window.A.imageHiPS('radians-2mass', { url: TWOMASS_URL, name: '2MASS J H Ks', imgFormat: 'jpeg' });
-      map.aladin.setOverlayImageLayer(map.tm, 'twomass');
-    } catch { map.tm = null; }
-  }
-  try { map.tm?.setOpacity(a); } catch { /* older Aladin */ }
-  $('mapTm').hidden = a < 0.05;
-}
 $('mapDeepSeg').onclick = e => {
   const v = e.target.closest('button')?.dataset.v;
   if (!v || !deep.data || v === deep.view) return;
@@ -654,7 +632,6 @@ $('mapDeepOff').onclick = () => {
   deep.data = null;
   deep.err = '';
   deepChip();
-  twoMass();
 };
 
 // ---------------------------------------------------------------- start
@@ -664,32 +641,25 @@ buildPals();
 if (new URLSearchParams(location.search).get('map') === '1') openMap(false);
 // ================================================================ merged in from Skyshift
 // Famous-object pins with one-line stories, constellation lines and "You're looking at", colour
-// mixes of two or three wavelengths and science views, and other surveys of the same sky to compare.
+// mixes of two or three wavelengths and science views.
 const extra = {
   pins: [], catalog: null,
   cons: { on: false, lines: null, names: null, ready: false },
-  sky: 'spherex', layer: null,
+  layer: null,
   mix: { mode: 'off', picks: [1.254, 2.089, 3.570].map(nearestSlice), mapping: 'stretch', preset: SCI_PRESETS[0].id },
 };
-const SKIES = {
-  spherex: null,
-  twomass: TWOMASS_URL,
-  dss: 'https://irsa.ipac.caltech.edu/data/hips/CDS/DSS2/color',
-};
 // Three ready-made three-colour views (the team's "Science views"): red, green and blue are three planes of
-// the cube, each stretched on its own sky level by the server (explorer.py, /hips/spherex-mix/R-G-B).
+// the cube, each stretched on its own sky level by the server (mixtiles.py, /hips/spherex-mix/R-G-B).
 const RGB_VIEWS = [
   { id: 'rgb-ices', key: 'mixIces', um: [4.27, 3.05, 1.10] },
   { id: 'rgb-gas', key: 'mixGas', um: [4.05, 2.166, 1.875] },
   { id: 'rgb-dust', key: 'mixDust', um: [3.29, 2.2, 1.10] },
 ];
 const rgbView = () => (extra.mix.mode === 'science' ? RGB_VIEWS.find(x => x.id === extra.mix.preset) || null : null);
-const SKY_KEYS = { spherex: 'skySpherex', twomass: 'skyTwomass', dss: 'skyDss' };
 const um = (w) => `${w.toFixed(w < 1 ? 3 : 2)} µm`;
 const blank = new Set(BLANK_FRAMES);
 
 function initExtras() {
-  buildSkies();
   buildMix();
   loadPins();
   try { if (localStorage.getItem('radians-mapconst') === '1') setConstellations(true); } catch { /* private mode */ }
@@ -697,11 +667,11 @@ function initExtras() {
   map.aladin.on('positionChanged', looking);
   map.aladin.on('zoomChanged', looking);
   const m = P.get('mix');                                  // ?mix=<spec>: open on a shared colour mix
-  if (m && /^[a-z0-9_-]+$/.test(m)) setTop('mix', new URL(`/hips/spherex-mix/${m}`, location.href).href, `mix ${m}`);
+  if (m && /^[a-z0-9_-]+$/.test(m)) setTop(new URL(`/hips/spherex-mix/${m}`, location.href).href, `mix ${m}`);
 }
 
 // ---------------------------------------------------------------- one colour picture on top of the SPHEREx layers
-function setTop(kind, url, name) {
+function setTop(url, name) {
   if (!map.aladin || !window.A) return;
   try {
     if (extra.layer) { map.aladin.removeImageLayer('extra'); extra.layer = null; }
@@ -710,31 +680,9 @@ function setTop(kind, url, name) {
       const id = 'radians-top-' + [...url].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36);
       extra.layer = window.A.imageHiPS(id, { url, name });
       map.aladin.setOverlayImageLayer(extra.layer, 'extra');
-      $('mapWrap').dataset.sky = kind;
-    } else delete $('mapWrap').dataset.sky;
+      $('mapWrap').dataset.top = 'mix';
+    } else delete $('mapWrap').dataset.top;
   } catch (e) { console.warn('map layer', e); }
-}
-
-// ---------------------------------------------------------------- other skies to compare with
-function buildSkies() {
-  $('mapSkies').replaceChildren(...Object.keys(SKIES).map((k) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.dataset.sky = k;
-    b.title = t(`skyTip${k[0].toUpperCase()}${k.slice(1)}`);
-    b.textContent = t(SKY_KEYS[k]);
-    b.setAttribute('aria-pressed', String(k === extra.sky));
-    b.onclick = () => setSky(k);
-    return b;
-  }));
-  $('mapSkyNote').textContent = extra.sky === 'spherex' ? '' : t('skyNoteOther');
-}
-function setSky(k) {
-  extra.sky = k;
-  if (k !== 'spherex') { stopTour(); extra.mix.mode = 'off'; buildMix(); setTop('cmp', SKIES[k], t(SKY_KEYS[k])); }
-  else applyMix();
-  buildSkies();
-  twoMass();
 }
 
 // ---------------------------------------------------------------- colour mixes (tiles from /hips/spherex-mix)
@@ -761,11 +709,10 @@ function mixLayers() {
   return null;
 }
 function applyMix() {
-  if (extra.sky !== 'spherex') return;
   const rv = rgbView();
   if (rv) {
     stopTour();
-    setTop('mix', new URL(`/hips/spherex-mix/${rv.um.map(nearestSlice).join('-')}`, location.href).href, `SPHEREx ${t(rv.key)}`);
+    setTop(new URL(`/hips/spherex-mix/${rv.um.map(nearestSlice).join('-')}`, location.href).href, `SPHEREx ${t(rv.key)}`);
     return;
   }
   const layers = mixLayers();
@@ -773,7 +720,7 @@ function applyMix() {
   stopTour();
   // FRAME_GAIN is the measured white balance of each plane: an ordinary star comes out white
   const spec = layers.map(l => layerSpec(l.frame, l.rgb, FRAME_GAIN[l.frame] ?? 1)).join('_');
-  setTop('mix', new URL(`/hips/spherex-mix/${spec}`, location.href).href, 'SPHEREx false colour');
+  setTop(new URL(`/hips/spherex-mix/${spec}`, location.href).href, 'SPHEREx false colour');
 }
 const regionOf = (w) => REGIONS.find(r => w >= r.lo && w < r.hi) || REGIONS[REGIONS.length - 1];
 
@@ -785,7 +732,7 @@ function buildMix() {
     b.className = 'mapchip' + (m.mode === mode ? ' on' : '');
     b.setAttribute('aria-pressed', String(m.mode === mode));
     b.textContent = t(key);
-    b.onclick = () => { m.mode = mode; if (mode !== 'off' && extra.sky !== 'spherex') { extra.sky = 'spherex'; buildSkies(); } buildMix(); applyMix(); };
+    b.onclick = () => { m.mode = mode; buildMix(); applyMix(); };
     return b;
   };
   $('mixModes').replaceChildren(chip('off', 'mixOff'), chip('mix', 'mixMix'), chip('science', 'mixScience'));
@@ -952,6 +899,6 @@ function looking() {
 
 document.addEventListener('radians:lang', () => {
   buildPresets(); buildChips(); buildPals(); hidePop(); setSlice(map.slice); stopTour(); deepChip();
-  buildSkies(); buildMix(); buildFamous(); looking();
+  buildMix(); buildFamous(); looking();
   if (extra.cons.names) { drawConstellationNames(); if (!extra.cons.on) extra.cons.names.hide(); }
 });

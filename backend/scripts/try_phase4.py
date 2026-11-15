@@ -24,12 +24,6 @@ if d:
 d = timed("sso ecliptic", "/api/sso", {"ra": 0, "dec": 0, "radius": 600, "mjd": "60986.5,61100.25"})
 if d:
     print("   ", [(e["mjd"], len(e["objects"])) for e in d], d[0]["objects"][:1])
-for q, (ra, dec) in {"Barnard": (269.452, 4.693), "RW Aur": (76.9565, 30.4014), "eps Indi": (331.04, -56.78),
-                     "WISE0855": (133.8, -7.25), "R Dra": (248.17, 66.75)}.items():
-    d = timed(f"neossat {q}", "/api/neossat", {"ra": ra, "dec": dec, "radius": 0.5})
-    if d is not None:
-        print("   ", len(d), d[:1])
-
 p = {"ra": 269.4520769586187, "dec": 4.69336496657667, "pmra": -801.551, "pmdec": 10362.394, "fov": 240}
 f = timed("frames Barnard", "/api/frames", p)
 print("    target phot sample:", f["exposures"][0])

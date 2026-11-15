@@ -2,7 +2,7 @@
 import numpy as np
 from fastapi.testclient import TestClient
 
-from app import config, curious, explorer, pulse
+from app import config, curious, net, pulse
 from app.main import app
 
 
@@ -64,11 +64,11 @@ NO_ROWS = "#\n#   VizieR\n\n"
 
 def test_known_variable_stars(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
-    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply(VSX))
+    monkeypatch.setattr(net, "get", lambda *a, **kw: Reply(VSX))
     v = curious.vsx_star(248.1675, 66.7550)
     assert v == {"found": True, "name": "R Dra", "type": "M", "period_d": 246.12, "max": 6.7, "min": 13.2, "sep_arcsec": v["sep_arcsec"]}
     assert v["sep_arcsec"] < 1
-    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply(NO_ROWS))
+    monkeypatch.setattr(net, "get", lambda *a, **kw: Reply(NO_ROWS))
     assert curious.vsx_star(10.0, 5.0) == {"found": False}
     head = "#\n#   VizieR\n\n"
 
@@ -78,11 +78,11 @@ def test_known_variable_stars(tmp_path, monkeypatch):
                 return Reply(head + f"Source\tVarFlag\n \t \n-----\t-----\n{params['Source']}\t{flag}\n")
             return Reply(head + (f"Source\tClass\tClassSc\n \t \t \n-----\t-----\t-----\n{params['Source']}\t{cls}\t 9.5734750e-01\n" if cls else ""))
         return get
-    monkeypatch.setattr(explorer, "_get", gaia("VARIABLE     ", "LPV                       "))
+    monkeypatch.setattr(net, "get", gaia("VARIABLE     ", "LPV                       "))
     assert curious.gaia_variable("Gaia DR3 1648328016354496384") == {"found": True, "variable": True, "class": "LPV", "score": 0.96}
-    monkeypatch.setattr(explorer, "_get", gaia("NOT_AVAILABLE", None))
+    monkeypatch.setattr(net, "get", gaia("NOT_AVAILABLE", None))
     assert curious.gaia_variable("4472832130942575872") == {"found": True, "variable": False, "class": None, "score": None}
-    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply(head))
+    monkeypatch.setattr(net, "get", lambda *a, **kw: Reply(head))
     assert curious.gaia_variable("123456789") == {"found": False}
     assert curious.gaia_variable("not a number") == {"found": False}
 
@@ -98,7 +98,7 @@ def test_star_facts_and_planets(tmp_path, monkeypatch):
 
     def vizier(url, params, **kw):
         return Reply(head + (main if params["-source"] == curious.GAIA_MAIN else flame))
-    monkeypatch.setattr(explorer, "_get", vizier)
+    monkeypatch.setattr(net, "get", vizier)
     s = curious.star_facts("Gaia DR3 4472832130942575872")
     assert s["found"] and abs(s["distance_ly"] - 5.96) < 0.02 and s["distance_from"] == "parallax"       # Barnard's Star
     assert s["rv_kms"] == -110.5 and abs(s["across_kms"] - 90.1) < 0.5 and abs(s["space_kms"] - 142.5) < 1
@@ -106,20 +106,20 @@ def test_star_facts_and_planets(tmp_path, monkeypatch):
     assert not s["double_hint"] and s["binary"] == [] and s["radius_sun"] == 1.2179 and s["age_gyr"] == 12.131
     # a poor single-star fit and Gaia's own binary flags are passed on; no FLAME row is not an error
     double = main.replace("  1.085", "  2.300").replace("\t0\t0\n", "\t3\t0\n")
-    monkeypatch.setattr(explorer, "_get", lambda url, params, **kw: Reply(head + (double if params["-source"] == curious.GAIA_MAIN else "")))
+    monkeypatch.setattr(net, "get", lambda url, params, **kw: Reply(head + (double if params["-source"] == curious.GAIA_MAIN else "")))
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path / "b")
     d = curious.star_facts("4472832130942575872")
     assert d["double_hint"] and d["binary"] == ["astrometric", "spectroscopic"] and d["mass_sun"] is None
     assert curious.star_facts("x") == {"found": False}
     csv = ("pl_name,hostname,pl_orbper,pl_bmasse,pl_rade,disc_year,discoverymethod\n"
            "Barnard's star b,Barnard's star,3.1533,0.37,0.75,2024,Radial Velocity\n")
-    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply(csv))
+    monkeypatch.setattr(net, "get", lambda *a, **kw: Reply(csv))
     p = curious.known_planets(269.4485, 4.7394)
     assert p["host"] == "Barnard's star" and p["planets"] == [{"name": "Barnard's star b", "period_d": 3.1533, "mass_earth": 0.37,
                                                                "radius_earth": 0.75, "year": 2024, "method": "Radial Velocity"}]
-    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply("pl_name,hostname,pl_orbper,pl_bmasse,pl_rade,disc_year,discoverymethod\n"))
+    monkeypatch.setattr(net, "get", lambda *a, **kw: Reply("pl_name,hostname,pl_orbper,pl_bmasse,pl_rade,disc_year,discoverymethod\n"))
     assert curious.known_planets(10.0, 5.0) == {"host": None, "planets": []}
-    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply("<!DOCTYPE html><html>busy</html>"))
+    monkeypatch.setattr(net, "get", lambda *a, **kw: Reply("<!DOCTYPE html><html>busy</html>"))
     import pytest
     with pytest.raises(Exception):
         curious.known_planets(11.0, 5.0)                                     # an error page is "unreachable", not "no planets"
@@ -143,9 +143,9 @@ def test_parse_tsv_and_fast_star_is_looked_up_where_it_was(tmp_path, monkeypatch
     def get(url, params=None, **kw):
         asked.append(params)
         if params["-source"].startswith("II/328"):
-            raise explorer.Upstream("down")
+            raise net.Upstream("down")
         return Reply(TSV)
-    monkeypatch.setattr(explorer, "_get", get)
+    monkeypatch.setattr(net, "get", get)
     mjd_2026 = 51544.5 + 26.5 * 365.25
     now = curious.position_at(269.452066, 4.694608, -801.551, 10362.394, 51544.5 - 0.5 * 365.25, 2026.5)   # from 1999.5 to 2026.5
     out = curious.cross_match(now[0], now[1], -801.551, 10362.394, mjd_2026)
@@ -161,8 +161,8 @@ def test_routes_report_services_that_are_down(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
 
     def down(*a, **kw):
-        raise explorer.Upstream("down")
-    monkeypatch.setattr(explorer, "_get", down)
+        raise net.Upstream("down")
+    monkeypatch.setattr(net, "get", down)
     c = TestClient(app)
     assert c.get("/api/curious/hr", params={"ra": 10, "dec": 5}).json()["reachable"] is False
     assert c.get("/api/curious/motion", params={"gaia_id": "123"}).json()["reachable"] is False
@@ -177,6 +177,6 @@ def test_routes_report_services_that_are_down(tmp_path, monkeypatch):
     assert c.post("/api/curious/period", json={"points": [], "wings": True}).json() == {"ok": False, "reason": "too_few"}
     csv = "source_id,parallax,parallax_over_error,phot_g_mean_mag,bp_rp,pmra,pmdec\n" + ",".join(BARNARD[k] for k in
           ("source_id", "parallax", "parallax_over_error", "phot_g_mean_mag", "bp_rp", "pmra", "pmdec")) + "\n"
-    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply(csv))
+    monkeypatch.setattr(net, "get", lambda *a, **kw: Reply(csv))
     hr = c.get("/api/curious/hr", params={"ra": 269.45, "dec": 4.69, "gaia_id": BARNARD["source_id"]}).json()
     assert hr["reachable"] and hr["stars"] == [[2.834, 11.885]] and hr["star"]["speed_kms"] > 85
