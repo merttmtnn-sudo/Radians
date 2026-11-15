@@ -1,4 +1,4 @@
-"""'Find things' endpoints: pins, search suggestions, name lookup and the fast coverage answer."""
+"""The curated objects (challenge targets and famous sky): the list for the map and suggestions as you type."""
 from __future__ import annotations
 
 import json
@@ -6,11 +6,9 @@ import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
-import requests
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
-from . import settings, sia, sky, stacking
-from .field import iso_date, snap
+from . import sky
 from .http import Http
 
 router = APIRouter(prefix="/api")
@@ -66,39 +64,3 @@ def search(q: str = Query(..., min_length=1, max_length=100), limit: int = Query
         if best is not None:
             scored.append((best, p["name_en"], p))
     return [dict(public(p), match=s) for s, _, p in sorted(scored, key=lambda t: (t[0], t[1]))[:limit]]
-
-
-@router.get("/resolve")
-def resolve(name: str = Query(..., min_length=1, max_length=100)):
-    """Any object name -> position today (proper motion applied). Curated objects answer at once."""
-    want = fold(name)
-    for p in pins():
-        if want in p["keys"]:
-            return dict(public(p), source="pins")
-    try:
-        r = sky.resolve(name, HTTP)
-    except LookupError:
-        raise HTTPException(404, f"No object called “{name}” is known.") from None
-    except sky.ResolverDown:
-        raise HTTPException(503, "The name lookup service can't be reached right now. Try coordinates instead.") from None
-    ra_now, dec_now = sky.position_now(r)
-    return dict(r, ra_now=round(ra_now, 6), dec_now=round(dec_now, 6), source="sesame",
-                moving=abs(r["pmra"]) + abs(r["pmdec"]) > 500)
-
-
-@router.get("/coverage")
-def coverage(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90)):
-    """How SPHEREx covered a spot: exposures, sky passes and bands (archive search only, no pixels)."""
-    ra_s, dec_s = snap(ra, dec)
-    try:
-        exps = sia.exposures(HTTP, ra_s, dec_s, settings.DATA / "sia")
-    except (requests.RequestException, OSError, ValueError):
-        raise HTTPException(503, "The SPHEREx archive can't be reached right now.") from None
-    per_band = {str(b): 0 for b in range(1, 7)}
-    for e in exps:
-        per_band[str(e["det"])] = per_band.get(str(e["det"]), 0) + 1
-    groups = stacking.group_passes([e["mjd"] for e in exps], max_span=0) if exps else []
-    passes = [dict(start=iso_date(exps[g[0]]["mjd"]), end=iso_date(exps[g[-1]]["mjd"]), n=len(g)) for g in groups]
-    return dict(ra=ra_s, dec=dec_s, n_exposures=len(exps), first_date=passes[0]["start"] if passes else None,
-                last_date=passes[-1]["end"] if passes else None, passes=passes, per_band=per_band,
-                deep=any(e["deep"] for e in exps), releases=sorted({e["collection"] for e in exps}))

@@ -634,9 +634,8 @@ def sharp_view(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=
 
 
 # ---------------------------------------------------------------- the fast engine (merged in from Skyshift)
-# /api/views/... (time-lapse views built one band at a time: preview, then full), /api/pins, /api/search,
-# /api/channels and /hips/spherex/{frame}. Included last on purpose: this app's own /api/resolve and
-# /api/coverage above keep answering under those two names.
+# /api/quick (the fast band in the viewer's frame format), /api/views/{id}/lightcurve, /api/pins and
+# /api/search.
 from . import mixtiles, quick  # noqa: E402
 from .engine import main as engine  # noqa: E402
 

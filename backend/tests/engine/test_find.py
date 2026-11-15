@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
 from app.engine import api_find, sky
-from app.engine.main import create_app
+from app.main import app
 
-client = TestClient(create_app())
+client = TestClient(app)
 
 
 def test_pins_have_both_languages_and_today_positions():
@@ -24,11 +24,6 @@ def test_search_matches_names_aliases_and_turkish():
     assert ids("ulker")[0] == "m45"                  # Turkish name typed without the dots
     assert ids("Ülker")[0] == "m45"
     assert ids("zzzz") == []
-
-
-def test_resolve_prefers_pins():
-    r = client.get("/api/resolve", params={"name": "wise 0855"}).json()
-    assert r["source"] == "pins" and r["id"] == "wise-0855"
 
 
 def test_fold():

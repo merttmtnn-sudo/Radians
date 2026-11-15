@@ -51,24 +51,3 @@ def test_saturated_star_switches_to_the_halo(tmp_path):
     assert lc["estimator"] == "halo" and lc["units"] == "MJy/sr"
     by_pass = {p["pass"]: p["median"] for p in lc["passes"]}
     assert 1.6 < by_pass[1] / by_pass[0] < 2.4
-
-
-def test_spectrum_job_and_changes(tmp_path):
-    mgr, st = _manager(tmp_path)
-    sp = mgr.spectrum(st["id"])
-    for _ in range(100):
-        if sp["state"] != "running":
-            break
-        sp = mgr.spectrum(st["id"], wait=1.0)
-    assert sp["state"] == "ready" and len(sp["points"]) == 20
-    waves = [p["wave_um"] for p in sp["points"]]
-    assert waves == sorted(waves) and 4.0 < waves[0] < waves[-1] < 4.35 and all(p["band"] == 5 for p in sp["points"])
-    ch = mgr.changes(st["id"])
-    kinds = [it["kind"] for it in ch["items"]]
-    assert kinds == ["brightened"] and ch["matched"]
-    it = ch["items"][0]
-    n = st["view"]["field"]["n"]
-    assert abs(it["x"] - (n - 1) / 2) < 2 and abs(it["y"] - (n - 1) / 2) < 2
-    # the fake archive has no catalogue services: nothing could be checked, so nothing is called new
-    assert ch["checked"] == [] and len(ch["unchecked"]) == 3 and not it["possibly_new"]
-    assert mgr.changes(st["id"]) == ch                                   # second call comes from the stored file

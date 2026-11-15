@@ -17,7 +17,7 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, Query
 
 from . import config, stack
-from .engine import advanced, api_find, api_views, changes, render, sky, stacking
+from .engine import api_find, api_views, changes, motion, render, sky, stacking
 from .engine.views import SIZE_RANGE, _plain as engine_plain, demo_spec, make_spec
 
 router = APIRouter()
@@ -331,13 +331,13 @@ def quick_motion(id: str = Query(..., min_length=8, max_length=40, pattern=r"^[0
             px, py = (tp[0], n - 1 - tp[1]) if tp else (centre, centre)
         else:
             px, py = x, y
-        got = advanced.centroid(arr[f"S{p['index']}"], px, py)
+        got = motion.centroid(arr[f"S{p['index']}"], px, py)
         if got:
             positions.append({"mjd": p["mjd"], "start": p["start"], "east": -(got[0] - centre) * scale,
                               "north": (got[1] - centre) * scale})
         else:
             blank += 1
-    fit = advanced.motion_fit(positions)
+    fit = motion.motion_fit(positions)
     if not fit.get("ok") and blank and len(positions) < 2:
         fit["reason"] = "saturated"                  # too few passes with an honest centre
     return engine_plain({**fit, "positions": positions, "passes": len(meta["passes"]), "band": meta["band"]["id"]})

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import advanced, catalogs, changes, photometry, render, settings, sia, sky, spectype, stacking, store
+from . import photometry, settings, sia, sky, stacking, store
 from .field import CutoutCache, build_band, cutout_half, fetch_all, snap
 from .fitsread import Reader
 from .http import Http
@@ -62,12 +62,10 @@ class ViewManager:
         # file layouts learnt while reading are kept next to the views; seed_layouts ships known ones
         self.cache = CutoutCache(Reader(self.http, layout_file=self.root.parent / "layouts.json", seed_file=seed_layouts), cutouts)
         self.sia_dir = self.root.parent / "sia"
-        self.gaia_dir = self.root.parent / "gaia"
         self.jobs: dict[str, dict] = {}
         self.changed = threading.Condition()
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="view")
         self._arrays: dict[str, tuple[float, dict]] = {}           # id -> (file time, arrays)
-        self.spectra: dict[str, dict] = {}                         # spectrum jobs, by view and spot
 
     # -- where things are ---------------------------------------------------------------------
     def _dir(self, vid: str) -> Path:
@@ -182,23 +180,10 @@ class ViewManager:
             hit = self._arrays[vid] = (stamp, store.load_arrays(path))
         return meta, hit[1]
 
-    def _levels(self, meta: dict, stretch: str) -> tuple[float, float]:
-        levels = meta["levels"]
-        if not levels:
-            raise KeyError("no image")
-        name = levels["default"] if stretch in (None, "auto") else stretch
-        if name not in ("faint", "bright"):
-            raise KeyError(f"unknown stretch {stretch!r}")
-        return tuple(levels[name])
-
     def _stack(self, meta: dict, arr: dict, p: int) -> np.ndarray:
         if not 0 <= p < len(meta["passes"]):
             raise KeyError(f"no pass {p}")
         return arr[f"S{p}"]
-
-    def frame_png(self, vid: str, p: int, stretch: str = "auto") -> bytes:
-        meta, arr = self._load(vid)
-        return render.frame_png(self._stack(meta, arr, p), *self._levels(meta, stretch))
 
     def diff(self, vid: str, a: int, b: int) -> tuple[np.ndarray, dict]:
         """Pass b minus pass a at matching wavelengths, and how it was made."""
@@ -225,49 +210,6 @@ class ViewManager:
         how.update(a=a, b=b, sigma=sigma if np.isfinite(sigma) and sigma > 0 else 1e-3,
                    start_a=meta["passes"][a]["start"], start_b=meta["passes"][b]["start"])
         return stack_a, stack_b, d, _plain(how)
-
-    def diff_png(self, vid: str, a: int, b: int) -> bytes:
-        d, how = self.diff(vid, a, b)
-        return render.diff_png(d, 10 * how["sigma"])
-
-    def timecolor_png(self, vid: str, stretch: str = "auto") -> bytes:
-        meta, arr = self._load(vid)
-        n = len(meta["passes"])
-        if n < 2:
-            raise KeyError("colour-by-time needs at least two passes")
-        first, last = arr["S0"], arr[f"S{n - 1}"]
-        middle = arr[f"S{n // 2}"] if n > 2 else np.nanmean([first, last], axis=0)
-        return render.timecolor_png(first, middle, last, *self._levels(meta, stretch))
-
-    def blink_gif(self, vid: str, stretch: str = "auto") -> bytes:
-        meta, arr = self._load(vid)
-        lo, hi = self._levels(meta, stretch)
-        frames = [render.stretch(render.fill_holes(arr[f"S{p['index']}"]), lo, hi) for p in meta["passes"]]
-        if not frames:
-            raise KeyError("no image")
-        return render.gif(frames, [f"{p['start']}  band {meta['band']['id']}" for p in meta["passes"]])
-
-    def catalog(self, vid: str, p: int) -> list[dict]:
-        """Gaia DR3 stars in the field, at their positions on the date of pass p, in picture pixels."""
-        meta = self._stored(vid)
-        if meta is None or not 0 <= p < len(meta["passes"]):
-            raise KeyError(vid)
-        f = meta["field"]
-        radius = f["size_arcmin"] / 60 * 0.75                     # reaches the corners
-        stars = catalogs.at_date(catalogs.gaia_cone(self.http, f["ra"], f["dec"], round(radius, 4), self.gaia_dir),
-                                 meta["passes"][p]["mjd"])
-        grid = stacking.grid_wcs(f["ra"], f["dec"], f["n"], f["scale_arcsec"])
-        if not stars:
-            return []
-        x, y = grid.all_world2pix([s["ra"] for s in stars], [s["dec"] for s in stars], 0)
-        out = []
-        for s, xi, yi in zip(stars, x, y):
-            px, py = float(xi), f["n"] - 1 - float(yi)
-            if -2 <= px <= f["n"] + 1 and -2 <= py <= f["n"] + 1:
-                out.append(dict(id=s["id"], x=round(px, 2), y=round(py, 2), g=round(s["g"], 2),
-                                pm=round((s["pmra"] ** 2 + s["pmdec"] ** 2) ** 0.5, 1)))
-        return out
-
 
     # -- measurements -------------------------------------------------------------------------
     def _spot(self, meta: dict, x: float | None, y: float | None):
@@ -314,283 +256,13 @@ class ViewManager:
             self._keep(meta, "lightcurve", out)
         return out
 
-    # The target's slow results are kept next to the view, so they travel with the demo data.
+    # The target's light curve is kept next to the view, so it travels with the demo data.
     def _saved(self, meta: dict, name: str):
         got = store.read_json(self._dir(meta["id"]) / f"{name}.json")
         return got["data"] if got and got.get("built") == meta["built"] else None
 
     def _keep(self, meta: dict, name: str, data) -> None:
         store.write_json(self._dir(meta["id"]) / f"{name}.json", dict(built=meta["built"], data=data))
-
-    def _spectrum_key(self, vid: str, meta: dict, x, y) -> str:
-        _, spot = self._spot(meta, x, y)
-        return f"{vid}:{'centre' if 'x' not in spot else f'{x:.0f},{y:.0f}'}"
-
-    def spectrum(self, vid: str, x: float | None = None, y: float | None = None, wait: float = 0.0) -> dict:
-        """Spectrum at a spot from every exposure in all six bands. The other bands' pictures are
-        fetched in the background; the answer carries the progress until it is ready."""
-        meta = self._stored(vid)
-        if meta is None:
-            raise KeyError(vid)
-        key = self._spectrum_key(vid, meta, x, y)
-        with self.changed:
-            job = self.spectra.get(key)
-            if job is None and key.endswith(":centre"):
-                saved = self._saved(meta, "spectrum")
-                if saved:
-                    job = self.spectra[key] = dict(saved)
-                    classified = self._saved(meta, "classify")
-                    if classified:
-                        job["classified"] = classified
-            if job is None or job["state"] == "error":
-                job = self.spectra[key] = dict(state="running", progress=dict(done=0, total=0), result=None, error=None)
-                self.pool.submit(self._run_spectrum, key, meta, x, y)
-            deadline = time.time() + wait
-            seen = json.dumps(job["progress"])
-            while wait > 0 and job["state"] == "running" and json.dumps(job["progress"]) == seen:
-                left = deadline - time.time()
-                if left <= 0:
-                    break
-                self.changed.wait(left)
-            return dict(state=job["state"], progress=job["progress"], error=job["error"], **(job["result"] or {}))
-
-    def _run_spectrum(self, key: str, meta: dict, x, y):
-        job = self.spectra[key]
-        try:
-            where, spot = self._spot(meta, x, y)
-            f = meta["field"]
-            exps = sia.exposures(self.http, f["ra"], f["dec"], self.sia_dir)
-            first = meta["band"]["id"]
-            order = [first] + [b for b in stacking.BANDS_UM if b != first]
-            done_before, cuts = 0, []
-            for band in order:
-                n_band = sum(1 for e in exps if e["det"] == band)
-
-                def progress(done, total, base=done_before):
-                    with self.changed:
-                        job["progress"] = dict(done=base + done, total=len(exps))
-                        self.changed.notify_all()
-                cuts += self._cuts(meta, band, progress)
-                done_before += n_band
-            result = photometry.spectrum(cuts, where, self._pass_of(meta))
-            result.update(spot=spot, dates=[dict(index=p["index"], start=p["start"]) for p in meta["passes"]])
-            with self.changed:
-                job.update(state="ready", result=_plain(result), progress=dict(done=len(exps), total=len(exps)))
-                self.changed.notify_all()
-            if key.endswith(":centre"):
-                self._keep(meta, "spectrum", dict(state="ready", progress=job["progress"], result=job["result"], error=None))
-        except Exception as err:  # noqa: BLE001
-            with self.changed:
-                job.update(state="error", error=f"{type(err).__name__}: {err}"[:300])
-                self.changed.notify_all()
-
-    def classify(self, vid: str, x: float | None = None, y: float | None = None, wait: float = 0.0) -> dict:
-        """Spectral type of a spot, three ways: the catalogues, our fit to the SPHEREx spectrum,
-        and the molecular fingerprints. Needs the six-band spectrum, so it reports progress first."""
-        sp = self.spectrum(vid, x, y, wait)
-        if sp["state"] != "ready":
-            return dict(state=sp["state"], progress=sp["progress"], error=sp["error"])
-        meta = self._stored(vid)
-        spot = sp["spot"]
-        key = self._spectrum_key(vid, meta, x, y)
-        job = self.spectra[key]
-        if "classified" not in job:
-            result = spectype.fit(sp["points"])
-            prints = spectype.fingerprints(sp["points"])
-            f = meta["field"]
-            radius = round(f["size_arcmin"] * 0.75 / 60 + 2 / 60, 4)
-            mjd = meta["passes"][-1]["mjd"] if meta["passes"] else sky.now_mjd()
-            where, _ = self._spot(meta, x, y)
-            ra, dec = where(mjd)
-            catalog = dict(simbad=None, gaia=None, checked=[])
-            simbad = catalogs.simbad_cone(self.http, f["ra"], f["dec"], radius, self.root.parent / "simbad")
-            if simbad:
-                catalog["checked"].append("SIMBAD")
-                hits = catalogs.matches(simbad, ra, dec, mjd, 6.0)
-                # several entries can sit on one spot (a star and its components): take one with a type
-                typed = [h for h in hits if h[0].get("sp_type") and h[1] <= hits[0][1] + 2.0]
-                hit = (typed or hits or [None])[0]
-                if hit:
-                    catalog["simbad"] = dict(id=hit[0]["id"], sp_type=hit[0].get("sp_type"), otype=hit[0].get("otype"), sep_arcsec=round(hit[1], 2))
-            try:
-                gaia = catalogs.gaia_cone(self.http, f["ra"], f["dec"], radius, self.gaia_dir)
-            except Exception:  # noqa: BLE001  (catalogue not reachable)
-                gaia = None
-            if gaia:
-                catalog["checked"].append("Gaia DR3")
-                hit = catalogs.nearest(gaia, ra, dec, mjd, 4.0)
-                if hit:
-                    params = catalogs.gaia_parameters(self.http, hit[0]["id"], self.gaia_dir) or {}
-                    catalog["gaia"] = dict(id=hit[0]["id"], g=hit[0]["g"], sep_arcsec=round(hit[1], 2), **params)
-            cat_type = (catalog["simbad"] or {}).get("sp_type")
-            cat_teff = (catalog["gaia"] or {}).get("teff_gspphot")
-            job["classified"] = _plain(dict(fit=result, fingerprints=prints, catalog=catalog,
-                                            agreement=spectype.agreement(cat_type, cat_teff, result)))
-            if key.endswith(":centre") and (catalog["simbad"] or catalog["gaia"]):
-                self._keep(meta, "classify", job["classified"])     # not kept when the catalogues were down
-        return dict(state="ready", spot=spot, **job["classified"])
-
-    # -- advanced drawer -----------------------------------------------------------------------
-    def flags_png(self, vid: str, p: int) -> bytes:
-        """Red where a pixel was saturated or blank in at least 30% of the pass's pictures."""
-        meta, arr = self._load(vid)
-        if f"Q{p}" not in arr:
-            raise KeyError("no flag map")
-        return render.mask_png(arr[f"Q{p}"] >= 0.3)
-
-    def stack_fits(self, vid: str, p: int) -> bytes:
-        """One pass's stacked image as a FITS file with its sky coordinates."""
-        import io
-
-        from astropy.io import fits
-        meta, arr = self._load(vid)
-        f = meta["field"]
-        header = stacking.grid_wcs(f["ra"], f["dec"], f["n"], f["scale_arcsec"]).to_header()
-        info = meta["passes"][p] if 0 <= p < len(meta["passes"]) else None
-        if info is None:
-            raise KeyError("no such pass")
-        header["BUNIT"] = "MJy/sr"
-        header["DATE-BEG"], header["DATE-END"] = info["start"], info["end"]
-        header["NFRAMES"] = (info["n_used"], "exposures in this median stack")
-        header["BAND"] = (meta["band"]["id"], "SPHEREx detector band")
-        header["COMMENT"] = "Skyshift: sky-subtracted median stack of SPHEREx level-2 exposures (IRSA)."
-        buf = io.BytesIO()
-        fits.PrimaryHDU(arr[f"S{p}"].astype("f4"), header).writeto(buf)
-        return buf.getvalue()
-
-    def _gaia_at(self, meta: dict, x, y) -> dict | None:
-        f = meta["field"]
-        radius = round(f["size_arcmin"] * 0.75 / 60 + 2 / 60, 4)
-        mjd = meta["passes"][-1]["mjd"] if meta["passes"] else sky.now_mjd()
-        ra, dec = self._spot(meta, x, y)[0](mjd)
-        try:
-            hit = catalogs.nearest(catalogs.gaia_cone(self.http, f["ra"], f["dec"], radius, self.gaia_dir), ra, dec, mjd, 4.0)
-        except Exception:  # noqa: BLE001
-            return None
-        if not hit:
-            return None
-        return dict(hit[0], **(catalogs.gaia_parameters(self.http, hit[0]["id"], self.gaia_dir) or {}))
-
-    def period(self, vid: str, x: float | None = None, y: float | None = None) -> dict:
-        lc = self.lightcurve(vid, x, y)
-        return _plain(dict(advanced.period_search(lc["points"], lc["mode"]), units=lc["units"], mode=lc["mode"]))
-
-    def motion(self, vid: str, x: float | None = None, y: float | None = None) -> dict:
-        """Proper motion from the star's position in each pass, next to the catalogue's value."""
-        meta, arr = self._load(vid)
-        f = meta["field"]
-        n, scale = f["n"], f["scale_arcsec"]
-        centre = (n - 1) / 2
-        positions = []
-        for p in meta["passes"]:
-            px = p.get("target_px") if (x is None or y is None) else [x, y]
-            px = px or [centre, centre]
-            got = advanced.centroid(arr[f"S{p['index']}"], px[0], n - 1 - px[1])
-            if got:
-                positions.append(dict(mjd=p["mjd"], start=p["start"], east=-(got[0] - centre) * scale, north=(got[1] - centre) * scale))
-        fit = advanced.motion_fit(positions)
-        gaia = self._gaia_at(meta, x, y)
-        catalog = None
-        if gaia:
-            rate = math.hypot(gaia["pmra"], gaia["pmdec"]) / 1000
-            catalog = dict(id=gaia["id"], rate=rate, direction=changes.compass(math.degrees(math.atan2(gaia["pmra"], gaia["pmdec"])) % 360),
-                           parallax=gaia.get("parallax") or gaia.get("plx"),
-                           speed_kms=advanced.tangential_speed(rate, gaia.get("parallax") or gaia.get("plx")))
-            if fit.get("ok"):
-                fit["speed_kms"] = advanced.tangential_speed(fit["rate"], catalog["parallax"])
-        return _plain(dict(fit, positions=positions, catalog=catalog))
-
-    def hr(self, vid: str, x: float | None = None, y: float | None = None) -> dict:
-        """Gaia stars around the field for the H-R and reduced proper-motion diagrams, and the measured star among them."""
-        meta = self._stored(vid)
-        if meta is None:
-            raise KeyError(vid)
-        stars = advanced.hr_field(self.http, round(meta["field"]["ra"], 3), round(meta["field"]["dec"], 3), 0.5, self.gaia_dir)
-        gaia = self._gaia_at(meta, x, y)
-        star = advanced.hr_point(dict(source_id=gaia["id"], parallax=gaia.get("parallax"), phot_g_mean_mag=gaia.get("phot_g_mean_mag"),
-                                      bp_rp=gaia.get("bp_rp"), pmra=gaia["pmra"], pmdec=gaia["pmdec"])) if gaia else None
-        return _plain(dict(stars=stars, star=star, reachable=stars is not None))
-
-    def star(self, vid: str, x: float | None = None, y: float | None = None) -> dict:
-        """The measured star in other catalogues: Gaia DR3, 2MASS, AllWISE."""
-        meta = self._stored(vid)
-        if meta is None:
-            raise KeyError(vid)
-        gaia = self._gaia_at(meta, x, y)
-        mjd = meta["passes"][-1]["mjd"] if meta["passes"] else sky.now_mjd()
-        if gaia:
-            where = gaia
-        else:
-            ra, dec = self._spot(meta, x, y)[0](mjd)
-            where = dict(ra=ra, dec=dec, pmra=0.0, pmdec=0.0, epoch=sky.jyear(mjd))
-        ra, dec = sky.position_at(where, mjd, parallax=False)
-        return _plain(dict(ra=ra, dec=dec, gaia=gaia, surveys=advanced.cross_match(self.http, where, cache_dir=self.root.parent / "xmatch")))
-
-    def changes(self, vid: str, a: int | None = None, b: int | None = None) -> dict:
-        """What changed between two passes (default: first and last), checked against catalogues."""
-        meta = self._stored(vid)
-        if meta is None or len(meta["passes"]) < 2:
-            raise KeyError(vid)
-        n_pass = len(meta["passes"])
-        a, b = (0 if a is None else a), (n_pass - 1 if b is None else b)
-        if not (0 <= a < n_pass and 0 <= b < n_pass) or a == b:
-            raise KeyError("no such pair of passes")
-        a, b = min(a, b), max(a, b)
-        path = self._dir(vid) / f"changes_{a}_{b}.json"
-        cached = store.read_json(path)
-        if cached and cached.get("built") == meta["built"] and cached.get("version") == changes.__name__ + str(VERSION):
-            return cached
-        stack_a, stack_b, d, how = self._diff(vid, a, b)
-        f, pa, pb = meta["field"], meta["passes"][a], meta["passes"][b]
-        years = (pb["mjd"] - pa["mjd"]) / 365.25
-        found, notes = changes.find_changes(stack_a, stack_b, d, f["scale_arcsec"], years, (how["n_a"], how["n_b"]))
-        radius = round(f["size_arcmin"] * 0.75 / 60 + 2 / 60, 4)
-        def gaia():
-            try:
-                return catalogs.gaia_cone(self.http, f["ra"], f["dec"], radius, self.gaia_dir)
-            except Exception:  # noqa: BLE001  (not reachable: this catalogue could not be checked)
-                return None
-        lookups = {"Gaia DR3": gaia,
-                   "CatWISE2020": lambda: catalogs.catwise_cone(self.http, f["ra"], f["dec"], radius, self.root.parent / "catwise"),
-                   "SIMBAD": lambda: catalogs.simbad_cone(self.http, f["ra"], f["dec"], radius, self.root.parent / "simbad")}
-        # the three services answer slowly (tens of seconds each, once per field): ask them together
-        with ThreadPoolExecutor(max_workers=3) as asks:
-            waiting = {name: asks.submit(fn) for name, fn in lookups.items()}
-            cats = {name: job.result() for name, job in waiting.items()}
-        # an empty list is a hole in the catalogue (e.g. CatWISE near very bright stars), not a check
-        checked = [name for name, rows in cats.items() if rows]
-        n = f["n"]
-        items = []
-        for it in found:
-            ends = [(it["x1"], it["y1"], pa["mjd"]), (it["x2"], it["y2"], pb["mjd"])] if it["kind"] == "mover" else \
-                [(it["x"], it["y"], pa["mjd"] if it["kind"] in ("vanished", "faded") else pb["mjd"])]
-            spots = [(*_where(meta, gx, n - 1 - gy), mjd) for gx, gy, mjd in ends]
-            reach = 6.0 if it.get("saturated") else 4.0
-            known = {}
-            for name in checked:
-                hits = [h for h in (catalogs.nearest(cats[name], ra, dec, mjd, reach) for ra, dec, mjd in spots) if h]
-                if hits:
-                    star, sep = min(hits, key=lambda h: h[1])
-                    known[name] = dict(id=star["id"], sep_arcsec=round(sep, 2), otype=star.get("otype"),
-                                       pm_arcsec_yr=round(math.hypot(star["pmra"], star["pmdec"]) / 1000, 3))
-            out = {k: v for k, v in it.items() if k not in ("x", "y", "x1", "y1", "x2", "y2")}
-            if it["kind"] == "mover":
-                out.update(x1=it["x1"], y1=n - 1 - it["y1"], x2=it["x2"], y2=n - 1 - it["y2"], x=it["x2"], y=n - 1 - it["y2"])
-            else:
-                out.update(x=it["x"], y=n - 1 - it["y"])
-            out.update(ra=spots[-1][0], dec=spots[-1][1], known=known,
-                       possibly_new=not known and len(checked) == len(cats))
-            target = [p.get("target_px") for p in (pa, pb) if p.get("target_px")]
-            out["is_target"] = any(math.hypot(t[0] - out["x"], t[1] - out["y"]) * f["scale_arcsec"] <= 8 for t in target)
-            items.append(out)
-        result = _plain(dict(version=changes.__name__ + str(VERSION), built=meta["built"], a=a, b=b, start_a=pa["start"],
-                             start_b=pb["start"], years=years, matched=how["matched"], n_a=how["n_a"], n_b=how["n_b"],
-                             items=items, notes=notes, checked=checked,
-                             unchecked=[name for name in cats if name not in checked]))
-        if self._dir(vid) == self.root / vid:
-            store.write_json(path, result)
-        return result
-
 
 
 def _where(meta: dict, x: float, y: float) -> tuple[float, float]:

@@ -1,8 +1,7 @@
 """Pre-build the five challenge targets into skyshift/demo/ so they open instantly (and work on a
 small server that has never fetched them). Run from skyshift/backend:  python -m scripts.build_demo
 
-Builds each target's time-lapse view in its own band, then works out the slow results the page asks
-for first (light curve, six-band spectrum, spectral type, what changed) and copies the lot."""
+Builds each target's time-lapse view in its own band and its light curve, and copies both."""
 from __future__ import annotations
 
 import shutil
@@ -44,12 +43,6 @@ def main(only: list[str]) -> None:
         meta = manager._stored(vid)
         manager.lightcurve(vid)
         print("  light curve kept", flush=True)
-        wait_for(lambda: manager.spectrum(vid, wait=20), "spectrum")
-        cls = manager.classify(vid)
-        print(f"  type: {cls.get('fit', {}).get('best', cls.get('state'))}", flush=True)
-        if len(meta["passes"]) >= 2:
-            ch = manager.changes(vid)
-            print(f"  changes: {len(ch.get('items', []))} items", flush=True)
         if manager._dir(vid) != settings.DEMO / "views" / vid:
             shutil.copytree(manager.root / vid, settings.DEMO / "views" / vid, dirs_exist_ok=True)
         index[f"{pid};{pin['band']};{SIZE:g}"] = spec

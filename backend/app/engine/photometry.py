@@ -197,22 +197,3 @@ def light_curve(rows: list[dict], info: dict, pass_of) -> dict:
         info = dict(info, message="Not enough usable measurements here for a light curve.")
     return dict(info, mode=mode, snr=snr if snr is None or math.isfinite(snr) else None, scatter=scatter,
                 points=points, passes=summary)
-
-
-def spectrum(cuts: list[dict], position_at, pass_of) -> dict:
-    """Every exposure's box flux at its own wavelength. Saturated points are kept and marked:
-    their flux is a lower limit at best."""
-    points, blank, unknown = [], 0, 0
-    for c in cuts:
-        m = measure(c, *position_at(c["mjd"]))
-        if m is None:
-            continue
-        if not np.isfinite(m["flux_mJy"]):
-            blank += 1
-            continue
-        unknown += 0 if m["flags_known"] else 1
-        points.append(dict(wave_um=round(m["wave_um"], 4), width_um=round(m["width_um"], 4), flux_mJy=m["flux_mJy"],
-                           err_mJy=m["err_mJy"], saturated=bool(m["saturated"] or m["n_sat"] > 0), band=c["det"],
-                           mjd=round(m["mjd"], 5), **{"pass": pass_of(m["mjd"])}))
-    points.sort(key=lambda p: p["wave_um"])
-    return dict(points=points, n_blank=blank, n_unflagged=unknown)

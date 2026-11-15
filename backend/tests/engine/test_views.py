@@ -1,7 +1,4 @@
-import io
-
 import numpy as np
-from PIL import Image
 
 from app.engine import sia
 from app.engine.http import Http
@@ -33,7 +30,7 @@ def _ready(mgr, spec):
     return st
 
 
-def test_view_builds_in_two_steps_and_serves_pictures(tmp_path):
+def test_view_builds_in_two_steps_and_its_difference_shows_the_mover(tmp_path):
     fake = _archive()
     mgr = ViewManager(Http(session=fake, sleep=lambda s: None), tmp_path / "views", tmp_path / "cut")
     target = dict(ra=150.0, dec=10.0, pmra=24000.0 * np.cos(np.radians(10)) / np.cos(np.radians(10)), pmdec=0.0,
@@ -47,21 +44,15 @@ def test_view_builds_in_two_steps_and_serves_pictures(tmp_path):
     # the predicted marker moves west->east (smaller x) by about the proper motion
     dx = (v["passes"][0]["target_px"][0] - v["passes"][1]["target_px"][0]) * v["field"]["scale_arcsec"]
     assert 8 < dx < 16
-    im = Image.open(io.BytesIO(mgr.frame_png(st["id"], 0)))
-    assert im.size == (n, n) and im.mode == "L"
-    d = Image.open(io.BytesIO(mgr.diff_png(st["id"], 0, 1)))
-    assert d.mode == "LA"
-    grey = np.asarray(d)[..., 0].astype(int)
-    assert grey.max() > 200 and grey.min() < 55                          # a bright and a dark half: something moved
-    ys, xs = np.nonzero(grey >= 250)                                      # the bright half = where it is now
-    assert abs(xs.mean() - v["passes"][1]["target_px"][0]) < 2 and abs(ys.mean() - v["passes"][1]["target_px"][1]) < 2
-    ys, xs = np.nonzero(grey <= 5)                                        # the dark half = where it was
-    assert abs(xs.mean() - v["passes"][0]["target_px"][0]) < 2 and abs(ys.mean() - v["passes"][0]["target_px"][1]) < 2
-    how = mgr.diff(st["id"], 0, 1)[1]
+    _, arr = mgr._load(st["id"])
+    assert arr["S0"].shape == (n, n)
+    d, how = mgr.diff(st["id"], 0, 1)
     assert how["matched"] and how["n_a"] == how["n_b"] == 12
-    assert Image.open(io.BytesIO(mgr.timecolor_png(st["id"]))).mode == "RGB"
-    g = Image.open(io.BytesIO(mgr.blink_gif(st["id"])))
-    assert g.format == "GIF" and g.n_frames == 2
+    d = np.nan_to_num(d)[::-1]                                            # picture orientation: north up, y down
+    ys, xs = np.nonzero(d >= 0.8 * d.max())                               # the bright half = where it is now
+    assert abs(xs.mean() - v["passes"][1]["target_px"][0]) < 2 and abs(ys.mean() - v["passes"][1]["target_px"][1]) < 2
+    ys, xs = np.nonzero(d <= 0.8 * d.min())                               # the dark half = where it was
+    assert abs(xs.mean() - v["passes"][0]["target_px"][0]) < 2 and abs(ys.mean() - v["passes"][0]["target_px"][1]) < 2
     # a second manager finds the finished view on disk and fetches nothing
     calls = len(fake.calls)
     again = ViewManager(Http(session=fake, sleep=lambda s: None), tmp_path / "views", tmp_path / "cut").submit(spec)
@@ -80,7 +71,7 @@ def test_empty_band_and_bad_requests(tmp_path):
     mgr = ViewManager(Http(session=_archive(n_per_pass=3), sleep=lambda s: None), tmp_path / "views", tmp_path / "cut")
     st = _ready(mgr, make_spec(150.0, 10.0, 2, 2.0))                      # no exposures in band 2
     assert st["view"]["passes"] == [] and st["view"]["warnings"]
-    for call in (lambda: mgr.frame_png(st["id"], 0), lambda: mgr.status("nope"), lambda: mgr.timecolor_png(st["id"])):
+    for call in (lambda: mgr.diff(st["id"], 0, 1), lambda: mgr.status("nope"), lambda: mgr.diff(st["id"], 0, 0)):
         try:
             call()
             raise AssertionError("expected KeyError")

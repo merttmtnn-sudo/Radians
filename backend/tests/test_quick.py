@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import config, quick
-from app.engine import api_views
+from app.engine import api_views, views
 from app.engine.http import Http
 from app.engine.views import ViewManager
 from app.main import app
@@ -95,7 +95,7 @@ def test_a_band_without_pictures_is_reported_not_raised(client):
 def test_a_challenge_target_gets_its_prebuilt_view():
     spec, pin = quick.quick_spec(331.044147, -56.782844, 240, None, 3981.977, -2466.832, 2000.0)
     assert pin["id"] == "eps-indi-b" and spec["band"] == 5
-    assert api_views.demo_spec("eps-indi-b", 5, 4.0) == spec             # so it opens at once, whatever today's date
+    assert views.demo_spec("eps-indi-b", 5, 4.0) == spec             # so it opens at once, whatever today's date
     spec, pin = quick.quick_spec(10.0, 10.0, 240, None, None, None, 2000.0)
     assert pin is None and spec["band"] == quick.DEFAULT_BAND and spec["target"] is None
 
