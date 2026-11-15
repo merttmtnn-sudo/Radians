@@ -1,2 +1,1 @@
-"""Skyshift backend: a map-first SPHEREx explorer (NASA Space Apps 2026)."""
-__version__ = "0.1.0"
+"""The fast engine: one detector band of a sky position, stacked per SPHEREx sky pass (from Skyshift)."""
