@@ -1,16 +1,17 @@
 // "Map": the whole sky as SPHEREx sees it (the DR1 all-sky cube from NASA/IPAC IRSA) in Aladin Lite.
-// One wavelength is shown in black and white: a 0.75-5 µm slider picks it and a button confirms it (the
-// map loads a new plane only then). Colour is kept for blends of several wavelengths (Infrared RGB,
-// mixes, science views), where it means something. The challenge and Explore targets are marked and
+// Four themes (core/palette.js). Regular and inverted show one wavelength in black and white: a 0.75-5 µm
+// slider picks it and a button confirms it (the map loads a new plane only then). Colour shows the whole
+// range squeezed onto visible colours; scientific shows one feature against the light beside it. The challenge and Explore targets are marked and
 // listed, and a click anywhere blinks that spot.
-import { pickTints, rgbToHex, scaleRgb, hexToRgb } from './colour.js';
-import { BLANK_FRAMES, FRAME_GAIN, PRESETS as SCI_PRESETS, REGIONS, NOTES } from './colourdata.js';
+import { rainbowTint, rgbToHex, scaleRgb, hexToRgb } from './colour.js';
+import { FRAME_GAIN, PRESETS as SCI_PRESETS, NOTES } from './colourdata.js';
 import { loadConstellations, linePaths, labels as constLabels, constellationAt } from './constellations.js';
 import { t, getLang } from '../core/i18n.js';
 import { CUBE_URL, CUBE_WL, BLANK, bandOf, nearestSlice } from '../core/cube.js';
 import { TARGETS, EXPLORE } from '../content/facts.js';
 import { decodeB64, percentiles, stretchValue } from '../blink/sky.js';
 
+import { THEMES, getPalette, setPalette } from '../core/palette.js';
 import { loadAladin, QUIET } from '../core/aladin.js';
 const $ = (id) => document.getElementById(id);
 const root = document.documentElement;
@@ -580,14 +581,16 @@ buildPresets();
 buildChips();
 if (new URLSearchParams(location.search).get('map') === '1') openMap(false);
 // ================================================================ merged in from Skyshift
-// Famous-object pins with one-line stories, constellation lines and "You're looking at", colour
-// mixes of two or three wavelengths and science views.
+// Famous-object pins with one-line stories, constellation lines and "You're looking at", and the
+// colour and scientific themes.
 const extra = {
   pins: [], catalog: null,
   cons: { on: false, lines: null, names: null, ready: false },
   layer: null,
-  mix: { mode: 'off', picks: [1.254, 2.089, 3.570].map(nearestSlice), mapping: 'stretch', preset: SCI_PRESETS[0].id },
+  mix: { preset: SCI_PRESETS[0].id },
 };
+const theme = () => (THEMES.includes(getPalette()) ? getPalette() : 'gray');
+const THEME_KEYS = { gray: 'themeGray', invert: 'themeInvert', rgb: 'themeRgb', science: 'themeScience' };
 // Three ready-made three-colour views (the team's "Science views"): red, green and blue are three planes of
 // the cube, each stretched on its own sky level by the server (mixtiles.py, /hips/spherex-mix/R-G-B).
 const RGB_VIEWS = [
@@ -595,19 +598,16 @@ const RGB_VIEWS = [
   { id: 'rgb-gas', key: 'mixGas', um: [4.05, 2.166, 1.875] },
   { id: 'rgb-dust', key: 'mixDust', um: [3.29, 2.2, 1.10] },
 ];
-const rgbView = () => (extra.mix.mode === 'science' ? RGB_VIEWS.find(x => x.id === extra.mix.preset) || null : null);
+const rgbView = () => (theme() === 'science' ? RGB_VIEWS.find(x => x.id === extra.mix.preset) || null : null);
 const um = (w) => `${w.toFixed(w < 1 ? 3 : 2)} µm`;
-const blank = new Set(BLANK_FRAMES);
 
 function initExtras() {
-  buildMix();
+  applyTheme();
   loadPins();
   try { if (localStorage.getItem('radians-mapconst') === '1') setConstellations(true); } catch { /* private mode */ }
   loadConstellations().then(() => { extra.cons.ready = true; looking(); }).catch(() => {});
   map.aladin.on('positionChanged', looking);
   map.aladin.on('zoomChanged', looking);
-  const m = P.get('mix');                                  // ?mix=<spec>: open on a shared colour mix
-  if (m && /^[a-z0-9_-]+$/.test(m)) setTop(new URL(`/hips/spherex-mix/${m}`, location.href).href, `mix ${m}`);
 }
 
 // ---------------------------------------------------------------- one colour picture on top of the SPHEREx layers
@@ -630,26 +630,17 @@ const layerSpec = (frame, rgb, gain) =>
   `f${frame}c${rgbToHex(rgb).slice(1)}g${String(Math.round(Math.min(8, Math.max(0.1, gain)) * 100)).padStart(2, '0')}`;
 const FEATURE_RGB = hexToRgb('#ff9f43'), CONTINUUM_RGB = hexToRgb('#4ea8ff');
 
-/** The layers of a tinted mix: [{frame, rgb}], bottom first; null in the other views. */
+/** The two tinted layers of a feature view: [{frame, rgb}], bottom first; null in the other themes. */
 function mixLayers() {
-  const m = extra.mix;
-  if (m.mode === 'mix') {
-    const frames = [...new Set(m.picks.filter(i => !blank.has(i)))].slice(0, 3);
-    if (frames.length < 2) return null;
-    const tints = pickTints(frames.map(i => CUBE_WL[i]), m.mapping);
-    return frames.map((frame, i) => ({ frame, rgb: tints[i] }));
-  }
-  if (m.mode === 'science') {
-    const p = SCI_PRESETS.find(x => x.id === m.preset) || SCI_PRESETS[0];
-    const feature = p.feature_um.map(nearestSlice), continuum = p.continuum_um.map(nearestSlice);
-    // feature in orange, the light beside it in blue: equal = white, absorbed = blue, glowing = orange
-    return [...continuum.map(frame => ({ frame, rgb: scaleRgb(CONTINUUM_RGB, 1 / continuum.length), role: 'continuum' })),
-      ...feature.map(frame => ({ frame, rgb: scaleRgb(FEATURE_RGB, 1 / feature.length), role: 'feature' }))];
-  }
-  return null;
+  if (theme() !== 'science') return null;
+  const p = SCI_PRESETS.find(x => x.id === extra.mix.preset) || SCI_PRESETS[0];
+  const feature = p.feature_um.map(nearestSlice), continuum = p.continuum_um.map(nearestSlice);
+  // feature in orange, the light beside it in blue: equal = white, absorbed = blue, glowing = orange
+  return [...continuum.map(frame => ({ frame, rgb: scaleRgb(CONTINUUM_RGB, 1 / continuum.length), role: 'continuum' })),
+    ...feature.map(frame => ({ frame, rgb: scaleRgb(FEATURE_RGB, 1 / feature.length), role: 'feature' }))];
 }
 function applyMix() {
-  if (extra.mix.mode === 'rgb') {                           // the whole range blended: blue, green and red thirds
+  if (theme() === 'rgb') {                                  // the whole range squeezed onto blue, green and red
     setTop(new URL('/hips/spherex-color', location.href).href, 'SPHEREx infrared RGB');
     return;
   }
@@ -659,31 +650,35 @@ function applyMix() {
     return;
   }
   const layers = mixLayers();
-  if (!layers) { setTop(null); return; }                    // one wavelength: black and white
+  if (!layers) { setTop(null); return; }                    // one wavelength: regular or inverted
   // FRAME_GAIN is the measured white balance of each plane: an ordinary star comes out white
   const spec = layers.map(l => layerSpec(l.frame, l.rgb, FRAME_GAIN[l.frame] ?? 1)).join('_');
   setTop(new URL(`/hips/spherex-mix/${spec}`, location.href).href, 'SPHEREx false colour');
 }
-const regionOf = (w) => REGIONS.find(r => w >= r.lo && w < r.hi) || REGIONS[REGIONS.length - 1];
+
+/** The theme just changed (here or in the blink viewer): colours of the map, then its controls. */
+function applyTheme() {
+  $('mapWrap').dataset.pal = theme() === 'invert' ? 'invert' : 'gray';
+  buildMix();
+  applyMix();
+}
+document.addEventListener('radians:palette', applyTheme);
 
 function buildMix() {
-  const m = extra.mix, l = L();
-  const chip = (mode, key) => {
-    const b = document.createElement('button');
+  const m = extra.mix, l = L(), th = theme();
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  $('mixModes').replaceChildren(...THEMES.map((name) => {
+    const b = el('button', 'mapchip' + (th === name ? ' on' : ''), t(THEME_KEYS[name]));
     b.type = 'button';
-    b.className = 'mapchip' + (m.mode === mode ? ' on' : '');
-    b.setAttribute('aria-pressed', String(m.mode === mode));
-    b.textContent = t(key);
-    b.onclick = () => { m.mode = mode; buildMix(); applyMix(); };
+    b.setAttribute('aria-pressed', String(th === name));
+    b.onclick = () => setPalette(name);                    // announces 'radians:palette': applyTheme() follows
     return b;
-  };
-  $('mixModes').replaceChildren(chip('off', 'mixOff'), chip('rgb', 'mixRgb'), chip('mix', 'mixMix'), chip('science', 'mixScience'));
-  $('mapOne').hidden = m.mode !== 'off';                    // the wavelength slider belongs to the one-wavelength view
-  $('mixFalse').hidden = m.mode === 'off';
+  }));
+  $('mapOne').hidden = th !== 'gray' && th !== 'invert';   // the wavelength slider belongs to one wavelength
+  $('mixFalse').hidden = !$('mapOne').hidden;
   const body = $('mixBody');
   body.replaceChildren();
-  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-  if (m.mode === 'rgb') {
+  if (th === 'rgb') {
     const legend = el('div', 'mixlegend');
     for (const [col, key] of [['#5aa2ff', 'mixRgbBlue'], ['#5fe07a', 'mixRgbGreen'], ['#ff5a4f', 'mixRgbRed']]) {
       const sp = el('span'), dot = el('i');
@@ -692,63 +687,24 @@ function buildMix() {
       legend.append(sp);
     }
     body.append(el('p', 'mixtext', t('mixRgbHelp')), legend, el('p', 'small dim', t('mixUsesServer')));
-  } else if (m.mode === 'mix') {
-    body.append(el('p', 'mixtext', t('mixHelp')));
-    const layers = mixLayers() || [];
-    m.picks.forEach((frame, i) => {
-      const row = el('div', 'mixrow');
-      const sw = el('i', 'sw');
-      const tint = layers.find(x => x.frame === frame);
-      sw.style.background = tint ? rgbToHex(tint.rgb) : 'transparent';
-      const range = document.createElement('input');
-      range.type = 'range'; range.min = 0; range.max = 101; range.step = 1; range.value = frame;
-      range.setAttribute('aria-label', 'Wavelength');
-      const wl = el('span', 'wl', um(CUBE_WL[frame]));
-      range.oninput = () => { wl.textContent = um(CUBE_WL[Number(range.value)]); };
-      range.onchange = () => { let v = Number(range.value); if (blank.has(v)) v = 52; m.picks[i] = v; buildMix(); applyMix(); };
-      row.append(sw, wl, range);
-      if (m.picks.length > 2) {
-        const rm = el('button', 'btn sm ghost', t('mixRemove'));
-        rm.type = 'button';
-        rm.onclick = () => { m.picks.splice(i, 1); buildMix(); applyMix(); };
-        row.append(rm);
-      }
-      row.append(el('span', 'what', regionOf(CUBE_WL[frame])[l]));
-      body.append(row);
-    });
-    const tools = el('div', 'mixrow');
-    if (m.picks.length < 3) {
-      const add = el('button', 'btn sm', t('mixAdd'));
-      add.type = 'button';
-      add.onclick = () => {                               // between the two picks, on a log scale
-        const [a, b] = m.picks.map(i => CUBE_WL[i]).sort((x, y) => x - y);
-        m.picks.splice(1, 0, nearestSlice(Math.sqrt(a * b)));
-        buildMix(); applyMix();
-      };
-      tools.append(add);
-    }
-    const sel = document.createElement('select');
-    sel.className = 'input sm';
-    sel.setAttribute('aria-label', t('mixMapping'));
-    for (const [v, k] of [['stretch', 'mixStretch'], ['fixed', 'mixFixed']]) sel.add(new Option(t(k), v, false, m.mapping === v));
-    sel.onchange = () => { m.mapping = sel.value; buildMix(); applyMix(); };
-    tools.append(sel);
-    body.append(tools, el('p', 'small dim', t('mixUsesServer')));
-  } else if (m.mode === 'science') {
+  } else if (th === 'science') {
+    // one chip per feature: a dot in the colour its wavelength gets in the colour theme, its name, its wavelength
     const row = el('div', 'chips');
-    for (const p of SCI_PRESETS) {
-      const b = el('button', 'mapchip' + (p.id === m.preset ? ' on' : ''), `${p[`name_${l}`]} · ${um(p.um)}`);
+    const chip = (id, name, dotCss, wave, tip) => {
+      const b = el('button', 'mapchip' + (id === m.preset ? ' on' : ''));
       b.type = 'button';
-      b.onclick = () => { m.preset = p.id; buildMix(); applyMix(); };
-      row.append(b);
-    }
-    for (const v of RGB_VIEWS) {
-      const b = el('button', 'mapchip' + (v.id === m.preset ? ' on' : ''), t(v.key));
-      b.type = 'button';
-      b.title = t('mixThree');
-      b.onclick = () => { m.preset = v.id; buildMix(); applyMix(); };
-      row.append(b);
-    }
+      if (tip) b.title = tip;
+      const dot = el('i');
+      dot.style.background = dotCss;
+      b.append(dot, name);
+      if (wave) b.append(el('span', 'mono', wave));
+      b.onclick = () => { m.preset = id; buildMix(); applyMix(); };
+      return b;
+    };
+    for (const p of SCI_PRESETS) row.append(chip(p.id, p[`name_${l}`], rgbToHex(rainbowTint(p.um)), um(p.um)));
+    for (const v of RGB_VIEWS) row.append(chip(v.id, t(v.key), 'conic-gradient(#ff5a4f 0 33%, #5fe07a 0 66%, #5aa2ff 0)', '', t('mixThree')));
+    const head = el('div', 'maprow');
+    head.append(el('span', 'maplabel mono', t('mixFeatures')), row);
     const rv = rgbView();
     if (rv) {                                             // red, green and blue: one wavelength each
       const three = el('div', 'mixlegend');
@@ -758,14 +714,14 @@ function buildMix() {
         sp.append(dot, um(CUBE_WL[nearestSlice(rv.um[k])]));
         three.append(sp);
       });
-      body.append(row, el('p', 'mixtext', t(rv.key + 'Tip')), three, el('p', 'small dim', t('mixThree')), el('p', 'small dim', t('mixUsesServer')));
+      body.append(head, el('p', 'mixtext', t(rv.key + 'Tip')), three, el('p', 'small dim', t('mixThree')), el('p', 'small dim', t('mixUsesServer')));
       return;
     }
     const p = SCI_PRESETS.find(x => x.id === m.preset) || SCI_PRESETS[0];
     const legend = el('div', 'mixlegend');
     const item = (rgb, key, waves) => { const s = el('span'); const i = el('i'); i.style.background = rgbToHex(rgb); s.append(i, `${t(key)} (${waves.map(um).join(', ')})`); return s; };
     legend.append(item(FEATURE_RGB, 'mixFeature', p.feature_um), item(CONTINUUM_RGB, 'mixContinuum', p.continuum_um));
-    body.append(row, el('p', 'mixtext', p[`blurb_${l}`]), legend, el('p', 'small dim', NOTES[`science_${l}`]));
+    body.append(head, el('p', 'mixtext', p[`blurb_${l}`]), legend, el('p', 'small dim', NOTES[`science_${l}`]));
     const pin = extra.pins.find(x => x.id === p.pin) || null;
     if (pin) {
       const go = el('button', 'btn sm', `${t('mixGoodSpot')}: ${pin[`name_${l}`]}`);
@@ -792,7 +748,7 @@ async function loadPins() {
   }
   syncFamous();
   buildFamous();
-  if (extra.mix.mode === 'science') buildMix();           // the "good example" button needs the pins
+  if (theme() === 'science') buildMix();                  // the "good example" button needs the pins
 }
 function buildFamous() {
   const l = L();

@@ -68,7 +68,7 @@ Its optional ideas, and where Radians stands:
 | Overlay Gaia or WISE | Yes. Gaia DR3 drawn on the image at each frame's date; every candidate is checked against Gaia DR3, SIMBAD and CatWISE2020 (a catalogue that cannot be reached is named as "could not check"); the same star's brightness in the 2MASS and AllWISE catalogues next to ours; Aladin Lite with the SPHEREx all-sky map and Gaia / CatWISE2020 markers. |
 | Coordinates in the URL, embeddable | Yes. Every view is a link (`?ra=&dec=&fov=&band=&view=…`); `embed=1` hides the page chrome. |
 | Contamination flags | Yes. Per-pixel SPHEREx flags shown on demand, summarised per frame, and used to mark doubtful measurements; saturated pixels are marked in the fast band. |
-| Use the 102 bands creatively | Yes. Any one of the 102 planes of the all-sky cube in black and white (pick it on a slider, then confirm), the whole range blended into "Infrared RGB", "mix 2–3 wavelengths" into false colour, five science views (water ice, CO₂ ice, methane, Paschen-α, Brackett-γ: the feature against the light beside it) and three three-colour views (ices, hydrogen gas, warm dust). |
+| Use the 102 bands creatively | Yes. Any one of the 102 planes of the all-sky cube in black and white (pick it on a slider, then confirm), the whole range squeezed into colour, five science views (water ice, CO₂ ice, methane, Paschen-α, Brackett-γ: the feature against the light beside it) and three three-colour views (ices, hydrogen gas, warm dust). |
 | Public tools (Astropy, Aladin) | Astropy and PyVO throughout; Aladin Lite (CDS) for the Map and the wider view. |
 
 Beyond the list: known asteroids from IMCCE SkyBoT, two candidate finders with injection tests (and a third look in all-detector difference
@@ -330,14 +330,17 @@ been measured.
 
 ## Using the Map
 
-Four views of the SPHEREx all-sky cube. **One wavelength** is shown in black and white: one
-wavelength alone has no colour to show. A slider picks it and a button confirms it; the map loads a
-new plane only then (the picked plane's tiles are fetched in the background meanwhile). Colour is
-kept for blends of several wavelengths, where it means something: **Infrared RGB** (the whole range:
-0.75–1.6 µm blue, 1.6–3.8 µm green, 3.8–5 µm red), **colour mixes** of two or three wavelengths of
-your choice, and eight **science views** (five with the feature's wavelength in
-orange and the light beside it in blue; three with three wavelengths as red, green and blue: ices,
-hydrogen gas, warm dust). Also: brightness and contrast, constellations, the challenge targets, Explore stars and 28 famous objects
+Four themes, the same choice in the whole app. **Regular** (black sky) and **Inverted** (white sky)
+show one wavelength of the SPHEREx all-sky cube in black and white: one wavelength alone has no
+colour to show. A slider picks the wavelength and a button confirms it; the map loads a new plane
+only then (the picked plane's tiles are fetched in the background meanwhile). **Colour** squeezes
+the infrared range (0.75–5 µm) onto the colours the eye sees, in three steps: 0.75–1.6 µm blue,
+1.6–3.8 µm green, 3.8–5 µm red. **Scientific** shows one feature at a time, picked from a row of
+chips: five with the feature's wavelength in
+orange and the light beside it in blue (water ice, CO₂ ice, methane, Paschen-α, Brackett-γ), three with three wavelengths as red, green and blue (ices,
+hydrogen gas, warm dust). In the Blink viewer the same Regular / Inverted / Colour choice is under
+Advanced; Colour needs all detectors there, because one band alone has no colour either.
+Also: brightness and contrast, constellations, the challenge targets, Explore stars and 28 famous objects
 as markers with a card that blinks the spot (the famous ones can be switched off in the legend).
 Below 0.7° the **super-resolution** button reads the real
 exposures of the spot in the band of the chosen wavelength and drizzles them onto 3″ pixels
