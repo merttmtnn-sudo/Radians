@@ -40,6 +40,14 @@ test('our column: a star, a brown dwarf, saturated, too faint', () => {
   const bd = oursLines({ note: null, standards: null, model: { teff: 500, type: 'T9', chi2_red: 9.2, at_edge: false } });
   assert.deepEqual(bd.map(l => l[0]), ['tyModel', 'tyModelRough']);
   assert.deepEqual(oursLines({ note: 'saturated' }), [['tySaturated', {}]]);
+  // no star at the spot: no type, whatever the fit says
+  const fit = { note: null, standards: { type: 'G0III', range: ['G0', 'G8'], teff: 5920, n_bins: 51, chi2_red: 0.96 } };
+  assert.deepEqual(oursLines(fit, { state: 'empty', snr: 1.5 }), [['tySpotEmpty', {}]]);
+  assert.deepEqual(oursLines(fit, { state: 'wing', snr: 5.5 }), [['tySpotWing', {}]]);
+  assert.equal(oursLines(fit, { state: 'star', snr: 40 })[0][0], 'tyBest');
+  const none = typeLines({ fit, spot: { state: 'empty' }, agreement: 'agree', fingerprints: [{ id: 'h2o', verdict: 'absent', depth: 0 }], catalogue: null });
+  assert.equal(none.verdict, null);
+  assert.deepEqual(none.prints, []);
   assert.deepEqual(oursLines({ note: 'too_faint' }), [['tyTooFaint', {}]]);
 });
 

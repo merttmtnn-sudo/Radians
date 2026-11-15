@@ -375,7 +375,7 @@ async function runDeep(target, opts, ctl, background) {
 /** The all-detector data arrived while the fast band is on screen: fill what needs every band
  * (the target's 0.75-5 µm spectrum and light curve) and leave the picture alone. */
 function adoptDeep(data) {
-  setPhot(data.exposures || [], null);
+  setPhot(data.exposures || [], null, data.spot);
   rebuildCands();
 }
 
@@ -1406,16 +1406,17 @@ function onLoaded() {
   const cur = state.target ? curated(state.target.ra, state.target.dec) : null;
   $('lookNote').hidden = cur?.look !== 'brightness';
   if (cur?.look === 'brightness') ex.tab = 'lightcurve';
-  setPhot((state.deepData || state.data).exposures || [], null);
+  setPhot((state.deepData || state.data).exposures || [], null, (state.deepData || state.data).spot);
   loadCatalogues();
   loadNeossat();
   if (e4.ctx.open) updateAladin();
 }
 
 // ------------------------------------------------------------------ photometry
-function setPhot(points, click) {
+function setPhot(points, click, spot = null) {
   ex.phot = points;
   ex.click = click;
+  ex.spot = spot || null;                 // is a star there? ({state: 'star' | 'empty' | 'wing'}, from the server)
   const sat = points.filter(p => p.saturated).length;
   e4.photMode.value = sat > points.length / 2 && points.some(p => Number.isFinite(p.wing_ujy)) ? 'wings' : 'aperture';
   renderAnalysis();
@@ -1456,7 +1457,9 @@ function curiousCtx() {
   }
   return { ra: spot.ra, dec: spot.dec, mjd, pmra: pm[0], pmdec: pm[1], gaiaId: g ? String(g.id) : null, fitAt,
     cand: mover ? { ...mover, dir: COMPASS[Math.round((((mover.pa_deg % 360) + 360) % 360) / 45) % 8] } : null,
-    points: ex.phot.map(p => ({ mjd: p.mjd, wavelength: p.wavelength, value: valueOf(p) })) };
+    spot: ex.spot, wings: e4.photMode.value === 'wings',
+    points: ex.phot.map(p => ({ mjd: p.mjd, wavelength: p.wavelength, value: valueOf(p),
+      err: e4.photMode.value === 'wings' ? null : p.err_ujy, flagged: !!p.flagged, saturated: !!p.saturated })) };
 }
 const curious = createCurious($('curiousBox'), { t, ctx: curiousCtx });
 
@@ -1507,18 +1510,20 @@ async function loadType() {
   try {
     const r = await ask({});                               // our own fit first: it does not wait for the catalogues
     if (!live()) return;
-    typeState.res = { ...r, pending: true };
+    typeState.res = { ...r, spot: ex.spot, pending: true };
     renderAnalysis();                                      // the box, and the matched curve on the spectrum
   } catch { return; }
   await gaiaReady();
   if (!live()) return;
   try {
     const r = await ask({ catalogues: true, gaia_id: gaiaIdAt(spot) });
-    if (live()) { typeState.res = r; renderAnalysis(); }
+    if (live()) { typeState.res = { ...r, spot: ex.spot }; renderAnalysis(); }
   } catch {
     if (live()) { typeState.res = { ...typeState.res, pending: false, catFail: true }; drawType(); }
   }
 }
+
+const SNAP_TO_STAR_PX = 3;      // all-detector pixels (18"): a click this close to a brighter star goes to it
 
 async function photAt(x, y) {
   // snap to the brightest pixel within 1.5 px of the click in the deep stack
@@ -1549,8 +1554,14 @@ async function photAt(x, y) {
   e4.analysis.hidden = false;
   e4.photSource.textContent = t('photLoading');
   try {
-    const r = await api('api/photometry', { ...gridParams(), x: px, y: py }, ctl.signal);
-    setPhot(r.points, { x: bx, y: by, ra: r.ra, dec: r.dec });
+    let r = await api('api/photometry', { ...gridParams(), x: px, y: py }, ctl.signal);
+    // a click on the slope of a star a few pixels away was meant for that star: measure it instead
+    const off = r.spot?.state === 'wing' ? r.spot.offset : null;
+    if (off && Math.hypot(off[0], off[1]) <= SNAP_TO_STAR_PX) {
+      r = await api('api/photometry', { ...gridParams(), x: px + off[0], y: py + off[1] }, ctl.signal);
+      [bx, by] = skyToPix(r.ra, r.dec, state.data.grid).map(Math.round);
+    }
+    setPhot(r.points, { x: bx, y: by, ra: r.ra, dec: r.dec }, r.spot);
     drawOverlay();
   } catch (err) {
     if (err.name !== 'AbortError') { toast(err.message, true); renderAnalysis(); }
@@ -1641,7 +1652,7 @@ function drawEngineLc() {
 
 function typeCurves() {
   const fit = typeState.res?.fit;
-  if (!fit) return [];
+  if (!fit || ['empty', 'wing'].includes(typeState.res.spot?.state)) return [];      // no star there: nothing to match
   const pts = (c) => c.wave.map((w, i) => ({ x: w, y: c.flux[i] }));
   const out = [];
   if (fit.standards?.curve) out.push({ name: t('tyCurveStd', { type: fit.standards.type }), color: '#FFB347', points: pts(fit.standards.curve) });

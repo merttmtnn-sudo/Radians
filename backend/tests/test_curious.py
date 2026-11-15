@@ -2,7 +2,7 @@
 import numpy as np
 from fastapi.testclient import TestClient
 
-from app import config, curious, explorer
+from app import config, curious, explorer, pulse
 from app.main import app
 
 
@@ -44,15 +44,47 @@ def test_relative_brightness_removes_the_spectrum():
     assert t.size > 300 and abs(np.median(y) - 1) < 0.01 and np.std(y) < 0.2   # raw fluxes span a factor of 40
 
 
-def test_period_is_found_and_noise_is_not_convincing():
+def test_period_is_found_and_noise_is_not_convincing(monkeypatch):
+    monkeypatch.setattr(pulse, "N_SCRAMBLES", 120)
     r = curious.period_search(lightcurve(period=120))
     assert r["ok"] and abs(r["period_d"] - 120) < 3 * max(r["err_d"], 2) and r["convincing"]
     assert len(r["folded"]) == r["n"] and len(r["periodogram"]) <= 400
     flat = curious.period_search(lightcurve())
     assert flat["ok"] and not flat["convincing"]
-    assert curious.period_search(lightcurve(n=20)) == {"ok": False, "reason": "too_few"}
-    assert curious.period_search(lightcurve(span=30)) == {"ok": False, "reason": "too_few"}
-    assert curious.period_search([]) == {"ok": False, "reason": "too_few"}
+    for too_little in (lightcurve(n=20), lightcurve(span=30), []):
+        got = curious.period_search(too_little)
+        assert got["ok"] is False and got["reason"] == "too_few"
+
+
+VSX = ("#\n#   VizieR\n\nName\tRAJ2000\tDEJ2000\tType\tPeriod\tmax\tmin\n \tdeg\tdeg\t \td\tmag\tmag\n"
+       "-----\t-----\t-----\t---\t---\t---\t---\n"
+       "R Dra                         \t248.16762\t 66.75497\tM                             \t   246.120000000000\t  6.700\t 13.200\n")
+NO_ROWS = "#\n#   VizieR\n\n"
+
+
+def test_known_variable_stars(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply(VSX))
+    v = curious.vsx_star(248.1675, 66.7550)
+    assert v == {"found": True, "name": "R Dra", "type": "M", "period_d": 246.12, "max": 6.7, "min": 13.2, "sep_arcsec": v["sep_arcsec"]}
+    assert v["sep_arcsec"] < 1
+    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply(NO_ROWS))
+    assert curious.vsx_star(10.0, 5.0) == {"found": False}
+    head = "#\n#   VizieR\n\n"
+
+    def gaia(flag, cls):
+        def get(url, params, **kw):
+            if params["-source"] == curious.GAIA_MAIN:
+                return Reply(head + f"Source\tVarFlag\n \t \n-----\t-----\n{params['Source']}\t{flag}\n")
+            return Reply(head + (f"Source\tClass\tClassSc\n \t \t \n-----\t-----\t-----\n{params['Source']}\t{cls}\t 9.5734750e-01\n" if cls else ""))
+        return get
+    monkeypatch.setattr(explorer, "_get", gaia("VARIABLE     ", "LPV                       "))
+    assert curious.gaia_variable("Gaia DR3 1648328016354496384") == {"found": True, "variable": True, "class": "LPV", "score": 0.96}
+    monkeypatch.setattr(explorer, "_get", gaia("NOT_AVAILABLE", None))
+    assert curious.gaia_variable("4472832130942575872") == {"found": True, "variable": False, "class": None, "score": None}
+    monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply(head))
+    assert curious.gaia_variable("123456789") == {"found": False}
+    assert curious.gaia_variable("not a number") == {"found": False}
 
 
 TSV = ("#\n#   VizieR\n\n2MASS\tRAJ2000\tDEJ2000\tJmag\tHmag\tKmag\n \tdeg\tdeg\tmag\tmag\tmag\n"
@@ -92,7 +124,12 @@ def test_routes_report_services_that_are_down(tmp_path, monkeypatch):
     assert c.get("/api/curious/hr", params={"ra": 10, "dec": 5}).json()["reachable"] is False
     assert c.get("/api/curious/motion", params={"gaia_id": "123"}).json()["reachable"] is False
     assert [s["state"] for s in c.get("/api/curious/xmatch", params={"ra": 10, "dec": 5}).json()["surveys"]] == ["unreachable"] * 2
+    known = c.get("/api/curious/variable", params={"ra": 10, "dec": 5, "gaia_id": "123"}).json()
+    assert known["vsx"]["reachable"] is False and known["gaia"]["reachable"] is False
+    assert c.get("/api/curious/variable", params={"ra": 10, "dec": 5}).json()["gaia"] == {"reachable": True, "found": False}
+    monkeypatch.setattr(pulse, "N_SCRAMBLES", 120)
     assert c.post("/api/curious/period", json={"points": lightcurve(period=120)}).json()["convincing"]
+    assert c.post("/api/curious/period", json={"points": [], "wings": True}).json() == {"ok": False, "reason": "too_few"}
     csv = "source_id,parallax,parallax_over_error,phot_g_mean_mag,bp_rp,pmra,pmdec\n" + ",".join(BARNARD[k] for k in
           ("source_id", "parallax", "parallax_over_error", "phot_g_mean_mag", "bp_rp", "pmra", "pmdec")) + "\n"
     monkeypatch.setattr(explorer, "_get", lambda *a, **kw: Reply(csv))

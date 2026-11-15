@@ -29,7 +29,8 @@ _hits_lock = threading.Lock()
 LIMITS = {"/api/frames": config.RATE_FRAMES, "/api/photometry": config.RATE_PHOT}
 # endpoints that ask SIMBAD / Gaia / VizieR / IRSA for a visitor or fit on the server: one budget each
 LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr",
-                                              "/api/curious/motion", "/api/curious/period", "/api/curious/xmatch", "/api/object")})
+                                              "/api/curious/motion", "/api/curious/period", "/api/curious/variable", "/api/curious/xmatch",
+                                              "/api/object")})
 LIMITS["/api/sharp"] = config.RATE_FRAMES
 # the fast band's own lookups (its pictures, /api/quick, are long-polled and limited by the engine's build queue)
 LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/quick/changes", "/api/quick/diffs", "/api/quick/motion")})
@@ -330,6 +331,8 @@ def frames(
         "query": {"ra": ra, "dec": dec, "pmra": pmra, "pmdec": pmdec, "ref_epoch": ref_epoch, "mode": mode},
         "flag_bits": {str(bit): name for bit, name in config.FLAG_BITS.items()}, "bad_mask": config.BAD_MASK,
         "frames": out_frames, "exposures": phot, "n_exposures_read": len(frs),
+        # is there a star where the target should be? (followed across the grid if it moves)
+        "spot": stack.spot_check(frs, [(f.phot.get("x", (n - 1) / 2), f.phot.get("y", (n - 1) / 2)) for f in frs]),
         "candidates": cands, "detectors": config.DETECTORS, "wl_range": wl_range, "wl_window": window,
     }
 
@@ -380,7 +383,7 @@ def photometry(
         raise HTTPException(404, "no SPHEREx data here")
     if not (0 <= x < b["n"] and 0 <= y < b["n"]):
         raise HTTPException(400, "pixel outside the view")
-    return stack.photometry_at(b["frs"], b["w"], x, y)
+    return {**stack.photometry_at(b["frs"], b["w"], x, y), "spot": stack.spot_check(b["frs"], [(x, y)] * len(b["frs"]))}
 
 
 from pydantic import BaseModel, Field  # noqa: E402
@@ -545,16 +548,30 @@ class PeriodPoint(BaseModel):
     mjd: float | None = None
     wavelength: float | None = None
     value: float | None = None
+    err: float | None = None
+    flagged: bool = False
+    saturated: bool = False
 
 
 class PeriodRequest(BaseModel):
     points: list[PeriodPoint] = Field(..., max_length=5000)
+    wings: bool = False            # the values are wing fluxes of a saturated star: saturated points are kept
 
 
 @app.post("/api/curious/period")
 def curious_period(req: PeriodRequest):
-    """Does the light curve have a rhythm? Lomb-Scargle on brightness relative to the usual at each wavelength."""
-    return curious.period_search([p.model_dump() for p in req.points])
+    """Did the brightness change between visits, and does it have a rhythm? Brightness relative to the
+    usual at each wavelength; a rhythm is judged against date-scrambled copies (app/pulse.py)."""
+    return curious.period_search([p.model_dump() for p in req.points], req.wings)
+
+
+@app.get("/api/curious/variable")
+def curious_variable(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+                     gaia_id: str | None = Query(None, max_length=40)):
+    """Is this a known variable star? The AAVSO index (VSX, through VizieR) and Gaia DR3's variability
+    classifier, each {"reachable": false} when its service is down."""
+    return {"vsx": _try(curious.vsx_star, ra, dec),
+            "gaia": _try(curious.gaia_variable, gaia_id) if gaia_id else {"reachable": True, "found": False}}
 
 
 @app.get("/api/curious/xmatch")

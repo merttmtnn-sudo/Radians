@@ -152,3 +152,72 @@ Reading it:
 
 The tracker's own table above was run again on the merged code (15 Nov 2026) and came out the same,
 cell for cell.
+
+## "Does it pulse?": the brightness check
+
+The tool under the spectrum used to run one period search on everything and always came back with
+a "best guess". On the five challenge fields those guesses were 20 to 50 days for every star, and
+the same measurements with their brightness values shuffled gave 24 to 31 days too: the answer came
+from the observing dates and the noise. At a spot with no star (signal 0.4 times the noise) the
+"usual brightness" it divided by was close to zero, which produced points 80 and 3967 times brighter
+than usual. It now works like this (`backend/app/pulse.py`):
+
+1. **Is a star there?** The median of all exposures is looked at in a small box around the spot
+   (`stack.spot_check`). No peak above 5 times the picture's noise: "no star stands out", and
+   neither a type nor a rhythm is given. A peak that is not at the spot, next to a neighbour at
+   least twice as bright: the light is that neighbour's edge. If it is within 3 pixels the page
+   measures the neighbour instead.
+2. **Clean points.** Flagged and saturated points are left out (or, for a saturated star, the page's
+   "PSF wings" measurement is used). Each point is divided by the usual brightness of its six
+   nearest neighbours in wavelength inside the same detector band; a group whose usual brightness is
+   not itself measured to 3 sigma is dropped. A point more than 5 sigma from the others taken within
+   three days is a stray (a cosmic ray, an asteroid). Fewer than 30 points left, or single points
+   below a signal-to-noise of 3: it says so and stops.
+3. **Between visits.** Each visit with at least five points gets a level (the median) with an error
+   from the scatter inside the visit and a 2% calibration floor. The pair of visits that differ most
+   is reported; it counts as a change from 5 sigma and 5%.
+4. **A rhythm.** Each visit's own level is taken out, so a plain change between visits cannot pass
+   for a period. A weighted Lomb-Scargle search covers 1 day to twice the longest visit (a rhythm
+   longer than that was never seen for a whole cycle). The best peak is compared with 300 copies of
+   the same measurements whose dates are shuffled inside each visit. It counts when fewer than 1 in
+   100 copies do as well and the visits cover at least two cycles; otherwise the page says
+   "no rhythm found between 1 and N days".
+5. **What the catalogues know.** The AAVSO index (VSX) and Gaia DR3's variability flag and class are
+   shown next to our answer, also when we cannot test the star ourselves, and a catalogue period is
+   compared with ours.
+
+`python backend/scripts/pulse_validate.py 3 2 20` (about 12 minutes, no network: it uses the
+pre-built all-detector fields in `backend/demo/built.pkl.gz`). It takes field stars that are not
+saturated (5 qualified: signal-to-noise of single measurements 20 to 121, median 30, about 290 usable
+measurements each), turns each into a steady star with its real dates, wavelengths, spectrum and
+noise (the real scatter of its points, shuffled), and injects:
+
+| Pulsation injected | period 1.7 d | period 3 d | period 6 d | period 11 d |
+|---|---|---|---|---|
+| ±5% | 20% (2/10) | 40% (4/10) | 30% (3/10) | 30% (3/10) |
+| ±10% | 90% (9/10) | 80% (8/10) | 90% (9/10) | 80% (8/10) |
+| ±20% | 100% (10/10) | 100% (10/10) | 100% (10/10) | 80% (8/10) |
+| ±40% | 100% (10/10) | 100% (10/10) | 100% (10/10) | 80% (8/10) |
+
+| One visit brighter by | Found as a change between visits |
+|---|---|
+| 10% | 0% (0/10) |
+| 20% | 70% (7/10) |
+| 40% | 100% (10/10) |
+
+Nothing injected (100 runs): a rhythm reported in 0, a change between visits in 0.
+
+Reading it:
+- A pulsation counts as found when it is reported as convincing with a period within 10% of the
+  true one. From ±10% it is found in 8 or 9 of 10 runs; ±5% is at the level of the scatter of single
+  points (6 to 12% for these stars) and is found in about a third.
+- An 11-day period is missed more often in fields whose visits last under a week: fewer than two
+  cycles are seen, and the tool then refuses by design.
+- A step between visits is reported from about 15% (5 sigma of two 2% floors plus the scatter):
+  10% is never reported, 40% always.
+- Only five stars qualified, so the percentages are rough. All five are ordinary field stars of
+  signal-to-noise 20 or more; fainter stars will do worse, and the tool refuses below 3.
+- Not tested: real variable stars with a known period (the one in the challenge list, R Dra, is
+  saturated in every exposure and even its wings are usable in only 50 of 400, so the tool says it
+  cannot follow it and shows the catalogue period of 246 days instead), periods under one day, and
+  stars that flicker without a period.

@@ -266,7 +266,7 @@ been measured.
 | `POST /api/spectype` | spectral type, best-match curves and molecular fingerprints of a spectrum; optionally the catalogue side and the verdict |
 | `GET /api/sharp?ra=&dec=&fov=&det=&factor=` | super-resolution: one detector band of a spot drizzled onto 3″ pixels (SPHEREx's are 6.15″) from its dithered exposures, plus the ordinary 6.15″ stack for a before / after comparison (map and planetarium deep zoom; cached a week) |
 | `GET /api/object?ra=&dec=&id=&lang=&kind=` | planetarium details panel: SIMBAD facts (type, magnitudes, distance, spectral type, other names) and a Wikipedia summary in the page language, found through Wikidata catalogue codes |
-| `GET /api/curious/hr`, `/motion`, `/xmatch`, `POST /api/curious/period` | H-R diagram data, Gaia motion and speed, 2MASS / AllWISE, period search |
+| `GET /api/curious/hr`, `/motion`, `/xmatch`, `/variable`, `POST /api/curious/period` | H-R diagram data, Gaia motion and speed, 2MASS / AllWISE, known variable stars (VSX, Gaia DR3), and the brightness check (change between visits, rhythm inside visits) |
 | `GET /api/gaia`, `/api/crossmatch`, `/api/sso`, `/api/neossat` | Gaia DR3; SIMBAD and CatWISE2020; SkyBoT; NEOSSat |
 | `GET /api/sx/…` | the planetarium and its own time-lapse / spectra tool |
 | `GET /hips/spherex-color/…` | infrared colour sky as a HiPS (B = D1+D2, G = D3+D4, R = D5+D6) |
@@ -300,7 +300,13 @@ ported to Python (`backend/app/explorer.py`); HiPS tiles come straight from IRSA
   stars and ghosts.
 - Under the spectrum: the **Type** box (catalogues next to our own fit, with the best-match curve
   drawn over the points) and **For the curious** (H-R diagram, how it moves, does it pulse, other
-  catalogues).
+  catalogues). Both first check that a star is at the spot: on empty sky, or on the edge of a
+  brighter neighbour, they say so instead of fitting noise (a click within 18″ of a star measures
+  that star). "Does it pulse?" answers two things: whether the brightness changed between visits,
+  and whether there is a rhythm inside the visits that date-shuffled copies of the data almost
+  never match. When it cannot tell (too faint, saturated, too few points) it says why; it never
+  gives a best guess. Next to it: what VSX and Gaia DR3 know about the star's variability.
+  How often injected pulsations are found is in [`docs/VALIDATION.md`](docs/VALIDATION.md).
 - Every view is a URL; add `&embed=1` for a chrome-free player to put in an `<iframe>`. GIF, PNG,
   CSV and FITS downloads (FITS: the visit or stack on screen, with its sky coordinates).
 

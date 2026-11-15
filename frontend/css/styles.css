@@ -301,6 +301,8 @@ details summary { cursor: pointer; color: var(--fg-2); }
 .cuout:empty { display: none; }
 .culines p { margin: 0 0 4px; color: var(--fg-2); line-height: 1.45; }
 .culines p.first { color: var(--fg); font-weight: 600; }
+.cuknown { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line-2); }
+.cuknown h5 { margin: 0 0 4px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--fg-3); }
 .cutwo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
 .cuchart { min-width: 0; }
 .cuout > .muted { margin: 8px 0 0; }

@@ -201,6 +201,74 @@ def photometry_at(frames: list["Frame"], wout, x, y):
     return {"x": float(x), "y": float(y), "ra": ra, "dec": dec, "points": sorted(pts, key=lambda p: p["mjd"])}
 
 
+# ---------------------------------------------------------------- is a star there at all?
+SPOT_HALF = 9               # px: the box around the spot that is looked at
+SPOT_PEAK_R = 1.5           # px: a star at the spot peaks this close to it
+SPOT_MIN_SNR = 5.0          # the peak must stand this far above the noise of the picture
+SPOT_WING_RATIO = 2.0       # a neighbour this many times brighter owns the light on its slope
+
+
+def spot_check(frames: list["Frame"], positions) -> dict:
+    """Is there a point of light at a spot? Photometry gives a number anywhere, also on empty sky and
+    on the slope of a brighter star, and a spectral type or a period fitted to that says nothing.
+
+    Looks at the median of all exposures in a small box around the spot (positions: the spot's grid
+    pixel in each frame, so a moving target is followed). Returns {"state", "snr", "neighbour", "n"}:
+    state "star" (a peak at the spot), "empty" (nothing stands out) or "wing" (the light there is
+    the slope of a brighter neighbour); snr: height of the peak over the picture's noise;
+    neighbour: brightest pixel within 6 px, in units of the spot's own peak. A wing also says where
+    that neighbour is ("offset": [dx, dy] in grid pixels), so the page can measure it instead."""
+    h = SPOT_HALF
+    boxes = []
+    for f, (x, y) in zip(frames, positions):
+        ix, iy = int(round(x)), int(round(y))
+        n = f.image.shape[0]
+        y0, y1, x0, x1 = max(0, iy - h), min(n, iy + h + 1), max(0, ix - h), min(n, ix + h + 1)
+        if y1 <= y0 or x1 <= x0:
+            continue
+        box = np.full((2 * h + 1, 2 * h + 1), np.nan, "f4")
+        box[y0 - (iy - h):y1 - (iy - h), x0 - (ix - h):x1 - (ix - h)] = f.image[y0:y1, x0:x1]
+        boxes.append(box)
+    out = {"state": "star", "snr": None, "neighbour": None, "n": len(boxes)}
+    if len(boxes) < 3:
+        return out                                        # too little to judge: do not get in the way
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")                   # pixels blank in every exposure
+        deep = np.nanmedian(np.stack(boxes), axis=0)
+    yy, xx = np.mgrid[-h:h + 1, -h:h + 1]
+    r = np.hypot(xx, yy)
+    fin = np.isfinite(deep)
+    core = fin & (r <= SPOT_PEAK_R)
+    sky = fin & (r >= R_BG_IN) & (r <= R_BG_OUT)
+    if not core.any() or sky.sum() < 8:
+        return out                                        # a blanked (saturated) core is a very bright star
+    bg = float(np.median(deep[sky]))
+    rest = deep[fin & (r > 3)]
+    noise = 1.4826 * float(np.median(np.abs(rest - np.median(rest))))
+    if not noise > 0:
+        return out
+    where = np.flatnonzero(core.ravel())
+    k = int(where[np.argmax(deep.ravel()[where])])
+    py, px = divmod(k, 2 * h + 1)
+    peak = float(deep[py, px]) - bg
+    around = deep[max(0, py - 1):py + 2, max(0, px - 1):px + 2]
+    is_peak = bool(deep[py, px] >= np.nanmax(around))
+    near = fin & (r > SPOT_PEAK_R) & (r <= 6)
+    neighbour, offset = 0.0, None
+    if near.any():
+        where = np.flatnonzero(near.ravel())
+        k = int(where[np.argmax(deep.ravel()[where])])
+        neighbour = (float(deep.ravel()[k]) - bg) / max(peak, noise)
+        offset = [int(k % (2 * h + 1)) - h, int(k // (2 * h + 1)) - h]
+    snr = peak / noise
+    out.update(snr=round(snr, 1), neighbour=round(neighbour, 1))
+    if snr < SPOT_MIN_SNR:
+        out["state"] = "empty"
+    elif not is_peak and neighbour >= SPOT_WING_RATIO:
+        out.update(state="wing", offset=offset)
+    return out
+
+
 def build_frame(exp: Exposure, ra, dec, n, wout, target) -> Frame | None:
     half = int(math.ceil(n / 2 * math.sqrt(2))) + 2
     cut = _cutout_cached(exp, ra, dec, half)

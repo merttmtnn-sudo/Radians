@@ -43,11 +43,48 @@ export function motionLines(cand, gaia, fit = null) {
   return out;
 }
 
-/** "Does it pulse?": [[key, vars], ...] for a /api/curious/period answer. */
+const days = (v) => (v < 20 ? v.toFixed(1) : String(Math.round(v)));
+const month = (mjd) => new Date((mjd - 40587) * 86400000).toISOString().slice(0, 7);
+const NO_ANSWER = { too_faint: 'cuPeriodFaint', saturated: 'cuPeriodSat', empty: 'cuPeriodEmpty', wing: 'cuPeriodWing' };
+
+/** "Does it pulse?": [[key, vars], ...] for a /api/curious/period answer. It answers two things: is
+ * there a rhythm inside the visits, and did the brightness change from one visit to another. When
+ * the spot cannot be tested (too faint, saturated, no star there) it says why and guesses nothing. */
 export function periodLines(d) {
-  if (!d || !d.ok) return [['cuPeriodNone', {}]];
-  const vars = { p: Math.round(d.period_d), err: Math.max(1, Math.round(d.err_d)) };
-  return [[d.convincing ? 'cuPeriod' : 'cuPeriodWeak', vars], ['cuPeriodCycles', { c: d.cycles.toFixed(1) }]];
+  if (!d || !d.ok) return [[d && d.reason === 'saturated' && d.wings ? 'cuPeriodSatWings' : NO_ANSWER[d && d.reason] || 'cuPeriodNone', {}]];
+  const out = [];
+  if (d.convincing) {
+    const short = d.period_d < 20;                        // the error is written as finely as the period
+    out.push(['cuPeriod', { p: days(d.period_d), err: short ? Math.max(d.err_d, 0.1).toFixed(1) : String(Math.max(1, Math.round(d.err_d))) }]);
+    out.push(['cuPeriodDetail', { amp: Math.max(1, Math.round(d.amplitude_pct)), c: Math.round(d.cycles) }]);
+    if (d.aliased) out.push(['cuPeriodAlias', {}]);
+  } else if (d.search) out.push(['cuPeriodNoRhythm', { lo: days(d.search.lo_d), hi: days(d.search.hi_d) }]);
+  else out.push(['cuPeriodNoSearch', {}]);
+  const ch = d.change;
+  if (!ch) out.push(['cuChangeOne', {}]);
+  else if (ch.significant) {
+    out.push([ch.brighter ? 'cuChangeBrighter' : 'cuChangeFainter',
+      { pct: Math.round(ch.pct), sigma: Math.round(ch.sigma), a: month(ch.from_mjd), b: month(ch.to_mjd) }]);
+  } else out.push(['cuChangeSteady', { pct: Math.max(1, Math.round(Math.max(ch.pct, 3 * ch.err_pct))) }]);
+  const left = Object.values(d.dropped || {}).reduce((s, v) => s + v, 0);
+  out.push(['cuPeriodUsed', { n: d.n, left }]);
+  return out;
+}
+
+/** Is it a known variable star? [[key, vars], ...] for a /api/curious/variable answer (or null), next
+ * to our own answer d: a catalogue period is compared with ours when we found one. */
+export function knownLines(k, d) {
+  if (!k) return [];
+  const out = [], v = k.vsx || {}, g = k.gaia || {};
+  if (v.reachable === false) out.push(['cuKnownDown', { cat: 'VSX' }]);
+  else if (v.found) out.push([v.period_d ? 'cuKnownVsxPeriod' : 'cuKnownVsx', { name: v.name, type: v.type || '?', p: v.period_d ? days(v.period_d) : '' }]);
+  if (g.reachable === false) out.push(['cuKnownDown', { cat: 'Gaia DR3' }]);
+  else if (g.found && g.variable) out.push([g.class ? 'cuKnownGaiaClass' : 'cuKnownGaia', { cls: g.class || '' }]);
+  if (!out.length) out.push(['cuKnownNone', {}]);
+  if (d && d.ok && d.convincing && v.found && v.period_d) {
+    out.push([Math.abs(d.period_d / v.period_d - 1) < 0.1 ? 'cuKnownAgree' : 'cuKnownDiffer', {}]);
+  }
+  return out;
 }
 
 /** "Other catalogues": rows [name, id or null, magnitudes text, stateKey or null]. */
@@ -73,7 +110,9 @@ function el(tag, cls, text) {
 
 /**
  * host: an empty element. ctx(): what is being measured right now, or null:
- *   { ra, dec, mjd, pmra, pmdec, gaiaId, cand, points: [{mjd, wavelength, value}] }.
+ *   { ra, dec, mjd, pmra, pmdec, gaiaId, cand, spot, wings,
+ *     points: [{mjd, wavelength, value, err, flagged, saturated}] }.
+ *   spot: the "is a star there" check of the photometry ({state: 'star' | 'empty' | 'wing'}) or null.
  * Returns { reset() } to call whenever another spot is measured, and { redraw() } on a language change.
  */
 export function createCurious(host, { t, ctx }) {
@@ -94,10 +133,13 @@ export function createCurious(host, { t, ctx }) {
       return { gaia: g, fit };
     }
     if (tool === 'period') {
+      // what the catalogues know is worth showing even where we cannot test the star ourselves
+      const known = get('api/curious/variable', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), gaia_id: c.gaiaId }).catch(() => null);
+      if (c.spot && (c.spot.state === 'empty' || c.spot.state === 'wing')) return { ok: false, reason: c.spot.state, known: await known };
       const r = await fetch(new URL('api/curious/period', location.href), { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ points: c.points }) });
+        body: JSON.stringify({ points: c.points, wings: !!c.wings }) });
       if (!r.ok) throw new Error(String(r.status));
-      return r.json();
+      return { ...(await r.json()), known: await known };
     }
     const [g, x] = await Promise.all([gaia(), get('api/curious/xmatch', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), pmra: c.pmra, pmdec: c.pmdec, mjd: c.mjd.toFixed(1) })]);
     return { gaia: g, surveys: x.surveys };
@@ -140,14 +182,33 @@ export function createCurious(host, { t, ctx }) {
 
   function drawPeriod(out, d) {
     lines(out, periodLines(d));
+    const known = knownLines(d.known, d);
+    if (known.length) {
+      const box = el('div', 'culines cuknown');
+      box.append(el('h5', '', t('cuKnownTitle')), ...known.map(([key, vars]) => el('p', '', t(key, vars))));
+      out.append(box);
+    }
     if (!d.ok) return;
-    const two = el('div', 'cutwo'), gram = el('div', 'cuchart'), fold = el('div', 'cuchart');
-    two.append(gram, fold);
+    const two = el('div', 'cutwo'), curve = el('div', 'cuchart'), second = el('div', 'cuchart');
+    two.append(curve, second);
     out.append(two, el('p', 'muted small', t('cuPeriodNote')));
-    scatterChart(gram, { series: [{ name: 'LS', color: '#8a8f99', points: d.periodogram.map(([x, y]) => ({ x, y })) }],
-      xLabel: t('cuPeriodDays'), yLabel: t('cuPower'), xFmt: v => v.toFixed(0), yFmt: v => v.toFixed(2), height: 240 });
-    scatterChart(fold, { series: [{ name: 'fold', color: '#FFB347', points: d.folded.flatMap(([ph, v]) => [{ x: ph, y: v }, { x: ph + 1, y: v }]) }],
-      xLabel: t('cuPhase'), yLabel: t('cuRatio'), xFmt: v => v.toFixed(1), yFmt: v => v.toFixed(2), height: 240 });
+    // the light curve itself: every usable point, and the level of each visit with its error
+    const t0 = d.points.length ? d.points[0][0] : 0;
+    scatterChart(curve, {
+      series: [{ name: t('cuPoints'), color: '#8a8f99', points: d.points.map(([x, y]) => ({ x: x - t0, y })) },
+        { name: t('cuVisits'), color: '#FFB347', points: d.visits.map(v => ({ x: v.mjd - t0, y: v.level, err: v.err,
+          tip: [month(v.mjd), `${v.level.toFixed(3)} ± ${v.err.toFixed(3)} · ${v.n}`] })) }],
+      xLabel: t('cuDaysSince', { d: month(t0) }), yLabel: t('cuRatio'), xFmt: v => v.toFixed(0), yFmt: v => v.toFixed(2), height: 240 });
+    if (d.convincing) {
+      scatterChart(second, { series: [{ name: 'fold', color: '#FFB347', points: d.folded.flatMap(([ph, v]) => [{ x: ph, y: v }, { x: ph + 1, y: v }]) }],
+        xLabel: t('cuPhase'), yLabel: t('cuRatio'), xFmt: v => v.toFixed(1), yFmt: v => v.toFixed(2), height: 240 });
+    } else if (d.search) {
+      // how well each trial period fits, against the height that scrambled data reach one time in a hundred
+      const xs = d.periodogram.map(([x]) => x);
+      scatterChart(second, { series: [{ name: t('cuPower'), color: '#8a8f99', points: d.periodogram.map(([x, y]) => ({ x, y })) }],
+        lines: [{ name: t('cuChanceLine'), color: '#FFB347', dash: '5 4', points: [{ x: Math.min(...xs), y: d.threshold }, { x: Math.max(...xs), y: d.threshold }] }],
+        xLabel: t('cuPeriodDays'), yLabel: t('cuPower'), xFmt: v => v.toFixed(0), yFmt: v => v.toFixed(2), height: 240 });
+    }
   }
 
   function drawStar(out, d) {

@@ -7,12 +7,11 @@ import math
 
 import numpy as np
 
-from . import explorer, spectype
+from . import explorer, pulse
 from .external import GAIA_TAP
 
 TTL = 30 * 86400
 TIMEOUT = (6, 25)
-PERIOD_RANGE_DAYS = (20.0, 1000.0)
 VIZIER = "https://vizier.cfa.harvard.edu/viz-bin/asu-tsv"      # the Harvard mirror answers when CDS does not
 SURVEYS = [
     # name, VizieR table, id column, magnitude columns, year its positions are for
@@ -90,62 +89,85 @@ def hr_field(ra: float, dec: float, radius: float = 0.5) -> list:
 def relative_brightness(points: list[dict]):
     """SPHEREx sees a different wavelength in every exposure, so a light curve of raw fluxes mostly shows
     the spectrum. Each point is divided by the usual brightness at its own wavelength (the median of
-    its resolution-sized bin): 1 = usual. Returns arrays (mjd, ratio)."""
-    edges = spectype.bin_edges()
-    ok = [p for p in points if all(isinstance(p.get(k), (int, float)) and math.isfinite(p[k]) for k in ("mjd", "wavelength", "value"))]
-    if not ok:
-        return np.array([]), np.array([])
-    t = np.array([p["mjd"] for p in ok])
-    w = np.array([p["wavelength"] for p in ok])
-    v = np.array([p["value"] for p in ok])
-    which = np.searchsorted(edges, w, side="right") - 1
-    keep, ratio = np.zeros(t.size, bool), np.zeros(t.size)
-    for k in np.unique(which):
-        mine = which == k
-        med = float(np.median(v[mine]))
-        if mine.sum() >= 4 and med > 0:
-            keep |= mine
-            ratio[mine] = v[mine] / med
-    return t[keep], ratio[keep]
+    its resolution-sized bin): 1 = usual. Returns arrays (mjd, ratio) of the usable points (pulse.clean)."""
+    c = pulse.clean(points)
+    return c["t"], c["r"]
 
 
-def period_search(points: list[dict]) -> dict:
-    """Lomb-Scargle period of the relative light curve. {"ok": false, "reason"} if there is too little to go on."""
-    from astropy.timeseries import LombScargle
-    t, y = relative_brightness(points)
-    if t.size < 30 or np.ptp(t) < 60:
-        return {"ok": False, "reason": "too_few"}
-    span = float(np.ptp(t))
-    longest = min(PERIOD_RANGE_DAYS[1], 2 * span)
-    ls = LombScargle(t, y - np.median(y))
-    freq, power = ls.autopower(minimum_frequency=1 / longest, maximum_frequency=1 / PERIOD_RANGE_DAYS[0], samples_per_peak=12)
-    best = int(np.argmax(power))
-    period = float(1 / freq[best])
-    # half-width of the peak at half its height: a rough error on the period
-    above = power >= power[best] / 2
-    lo = hi = best
-    while lo > 0 and above[lo - 1]:
-        lo -= 1
-    while hi < len(power) - 1 and above[hi + 1]:
-        hi += 1
-    err = float(abs(1 / freq[lo] - 1 / freq[hi]) / 2)
-    fap = float(ls.false_alarm_probability(power[best]))
-    cycles = span / period
-    step = max(1, len(freq) // 250)
-    return {"ok": True, "period_d": round(period, 1), "err_d": round(err, 1), "power": round(float(power[best]), 4),
-            "false_alarm": fap, "cycles": round(cycles, 2), "convincing": bool(fap < 0.001 and cycles >= 1.5), "n": int(t.size),
-            "periodogram": [[round(float(1 / f), 2), round(float(p), 4)] for f, p in zip(freq[::step], power[::step])],
-            "folded": [[round(float(((ti - t.min()) / period) % 1), 4), round(float(yi), 4)] for ti, yi in zip(t, y)]}
+def period_search(points: list[dict], wings: bool = False) -> dict:
+    """Did the brightness change between visits, and is there a rhythm? See app/pulse.py."""
+    return pulse.analyse(points, wings)
+
+
+# ---------------------------------------------------------------- is it a known variable star?
+VSX_TABLE = "B/vsx/vsx"                 # AAVSO International Variable Star Index, as mirrored by VizieR
+VSX_RADIUS_ARCSEC = 10.0
+
+
+def vsx_star(ra: float, dec: float) -> dict:
+    """The nearest VSX entry within 10 arcsec: {"found", "name", "type", "period_d", "max", "min", "sep_arcsec"}."""
+    key = f"{VSX_TABLE}:{ra:.5f}:{dec:+.5f}"
+
+    def run():
+        r = explorer._get(VIZIER, {"-source": VSX_TABLE, "-c": f"{ra:.6f} {dec:+.6f}", "-c.rs": f"{VSX_RADIUS_ARCSEC:.0f}",
+                                   "-out": "Name,RAJ2000,DEJ2000,Type,Period,max,min", "-out.max": "5"},
+                          timeout=TIMEOUT, tries=1)
+        if not r.ok or "#" not in r.text[:200]:
+            raise explorer.Upstream("VizieR unavailable")
+        return parse_tsv(r.text)
+    rows = explorer._cached_json("cuvsx", key, TTL, run)
+    cosd = math.cos(math.radians(dec))
+
+    def apart(row):
+        return math.hypot(((explorer._num(row.get("RAJ2000")) or 0) - ra) * cosd, (explorer._num(row.get("DEJ2000")) or 0) - dec) * 3600
+    best = min(rows, key=apart, default=None)
+    if best is None:
+        return {"found": False}
+    period = explorer._num(best.get("Period"))
+    return {"found": True, "name": (best.get("Name") or "").strip(), "type": (best.get("Type") or "").strip() or None,
+            "period_d": round(period, 3) if period and period > 0 else None,
+            "max": explorer._num(best.get("max")), "min": explorer._num(best.get("min")), "sep_arcsec": round(apart(best), 1)}
+
+
+GAIA_MAIN, GAIA_CLASSES = "I/355/gaiadr3", "I/358/vclassre"      # Gaia DR3 at VizieR: main table, variability classifier
+
+
+def gaia_variable(source_id) -> dict:
+    """Gaia DR3's own verdict on one source: {"found", "variable", "class", "score"}. `class` is the
+    best class of Gaia's variability classifier (e.g. RR, DSCT|GDOR|SXPHE, LPV, ECL), if it has one.
+    Asked from VizieR's copy of Gaia DR3, the same service as VSX, so the answer does not depend on
+    the Gaia archive being up."""
+    sid = str(source_id or "").replace("Gaia DR3", "").strip()
+    if not sid.isdigit():
+        return {"found": False}
+
+    def table(source, cols):
+        def run():
+            r = explorer._get(VIZIER, {"-source": source, "Source": sid, "-out": cols, "-out.max": "1"}, timeout=TIMEOUT, tries=1)
+            if not r.ok or "#" not in r.text[:200]:
+                raise explorer.Upstream("VizieR unavailable")
+            return parse_tsv(r.text)
+        return explorer._cached_json("cugvar", f"{source}:{sid}", TTL, run)
+    main = table(GAIA_MAIN, "Source,VarFlag")
+    if not main:
+        return {"found": False}
+    classes = table(GAIA_CLASSES, "Source,Class,ClassSc")
+    cls = (classes[0].get("Class") or "").strip() or None if classes else None
+    score = explorer._num(classes[0].get("ClassSc")) if classes else None
+    return {"found": True, "variable": (main[0].get("VarFlag") or "").strip().upper() == "VARIABLE" or cls is not None,
+            "class": cls, "score": round(score, 2) if score is not None else None}
 
 
 # ---------------------------------------------------------------- other catalogues
 def parse_tsv(text: str) -> list[dict]:
     """Rows of a VizieR tab-separated answer (comment lines, then names, units, dashes, data)."""
-    lines = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
-    if len(lines) < 3 or not lines[2].startswith("-"):
+    lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
+    # the names are two lines above the dashes; the units line between is blank when no column has a unit
+    dash = next((i for i, ln in enumerate(lines) if ln.startswith("-")), None)
+    if dash is None or dash < 2:
         return []
-    names = [n.strip() for n in lines[0].split("\t")]
-    return [dict(zip(names, (v.strip() for v in ln.split("\t")))) for ln in lines[3:]]
+    names = [n.strip() for n in lines[dash - 2].split("\t")]
+    return [dict(zip(names, (v.strip() for v in ln.split("\t")))) for ln in lines[dash + 1:] if ln.strip()]
 
 
 def position_at(ra, dec, pmra, pmdec, mjd_from, year_to):
