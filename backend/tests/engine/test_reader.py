@@ -74,6 +74,14 @@ def test_whole_file_answer_is_refused():
     assert len(parts) == 101 and all(len(p) == 4 for p in parts)
 
 
+def test_connections_can_be_opened_ahead():
+    fake = FakeIrsa({f"u{i}": make_file(seed=i) for i in range(3)})
+    http = Http(session=fake, sleep=lambda s: None)
+    assert http.open_connections([f"u{i}" for i in range(3)] + ["missing"], n=12) == 3      # a failure is not counted
+    assert sorted(h["Range"] for _, h in fake.calls) == ["bytes=0-79"] * 4
+    assert http.open_connections([]) == 0 and http.open_connections(["u0"], n=0) == 0
+
+
 def test_retries_after_429():
     data = make_file()
     rd, fake = make_reader({URL_RICE: data}, fail_429=2)

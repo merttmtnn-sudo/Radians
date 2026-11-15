@@ -161,32 +161,39 @@ def quick(
 
 # ---------------------------------------------------------------- a head start while the visitor is still choosing
 _warming: set[str] = set()
+_warmed: dict[str, float] = {}          # spot -> when its head start last ran
 _warm_lock = threading.Lock()
+WARM_AGAIN_S = 25.0                     # connections opened ahead of time stay usable about this long
 
 
 def warm(mgr, spec: dict) -> bool:
-    """Ask the archive, in the background, which exposures cover the spot of an engine view (one
-    request, cached for days), and let the reader learn the file layout if it does not know it.
-    The build that follows a click then starts with the list in hand and an open connection.
-    False if the list is already here or being fetched."""
+    """A head start for the build of an engine view, in the background: ask the archive which
+    exposures cover the spot (one request, cached for days), let the reader learn the file layout
+    if it does not know it, and open the connections the build will use (no pixels are read).
+    False if that is running, or ran for this spot in the last WARM_AGAIN_S seconds."""
+    import time
+
     from .engine import sia
-    key = sia.cache_key(spec["ra"], spec["dec"])
-    if sia.is_fresh(spec["ra"], spec["dec"], mgr.sia_dir):
-        return False
+    key = f"{sia.cache_key(spec['ra'], spec['dec'])}:{spec['band']}"
     with _warm_lock:
-        if key in _warming or len(_warming) >= 4:
+        if key in _warming or len(_warming) >= 4 or time.time() - _warmed.get(key, 0.0) < WARM_AGAIN_S:
             return False
         _warming.add(key)
 
     def run():
         try:
             exps = sia.exposures(mgr.http, spec["ra"], spec["dec"], mgr.sia_dir)
-            mgr.cache.fast([e for e in exps if e["det"] == spec["band"]][:3])
+            band = [e for e in exps if e["det"] == spec["band"]]
+            mgr.cache.fast(band[:3])
+            mgr.http.open_connections(e["url"] for e in band)
         except Exception:  # noqa: BLE001  (a head start only: the real request reports problems)
             pass
         finally:
             with _warm_lock:
                 _warming.discard(key)
+                _warmed[key] = time.time()
+                for old in [k for k, at in _warmed.items() if time.time() - at > 600]:
+                    del _warmed[old]
     threading.Thread(target=run, daemon=True, name="warm").start()
     return True
 

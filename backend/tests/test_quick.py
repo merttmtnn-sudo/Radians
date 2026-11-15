@@ -189,10 +189,12 @@ def test_a_head_start_asks_the_archive_once_and_reads_no_pixels(client, tmp_path
     lists = [u for u, _ in fake.calls if u.endswith("/SIA")]
     assert len(lists) == 1 and (mgr.sia_dir).exists()
     assert not any(h.get("Range", "").count(",") > 5 for _, h in fake.calls)       # headers at most: no image rows
+    opened = [h for u, h in fake.calls if h.get("Range") == "bytes=0-79"]
+    assert 1 <= len(opened) <= 12                                                    # connections opened ahead of the build
     before = len(fake.calls)
     last, _ = _follow(client, fov=120, band=5, ra=150.0, dec=10.0)
     assert last["quick"]["state"] == "ready"
     assert not [u for u, _ in fake.calls[before:] if u.endswith("/SIA")]            # the list was already there
-    # nothing to warm once the list is here; and a band that does not exist is refused
+    # not again for the same spot within seconds; and a band that does not exist is refused
     assert client.get("/api/quick/warm", params={"ra": 150.0, "dec": 10.0, "band": 5}).json() == {"started": False}
     assert client.get("/api/quick/warm", params={"ra": 150.0, "dec": 10.0, "band": 9}).status_code == 422

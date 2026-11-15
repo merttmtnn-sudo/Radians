@@ -162,7 +162,7 @@ class CutoutCache:
                 if "flags" in rest:
                     record.update(flags=rest["flags"], flag_names=json.dumps(rest["flag_names"]), flag_rows=rest["flag_rows"])
                 store.save_arrays(p, **record)
-                return _unpack(store.load_arrays(p), e)
+                return _unpack(record, e)                   # what was just written: no need to read it back
             except (LayoutMismatch, OSError, ValueError, KeyError):
                 pass                                        # read it again the classic way
         c, pending = None, None
@@ -171,6 +171,7 @@ class CutoutCache:
                 c = self.reader.read_fast(url, ra, dec, half, e["region"])
             except (LayoutMismatch, OSError, ValueError):
                 c = None
+        det_wcs = c.pop("wcs", None) if c is not None else None
         if c is not None and not c["off"]:
             pending = c.pop("pending")
             if level >= 1:
@@ -179,7 +180,7 @@ class CutoutCache:
                     c.update(self.reader.finish(url, c["x0"], c["y0"], w, h, c["yc"], pending, flags))
                     pending = None
                 except LayoutMismatch:
-                    c = None
+                    c, det_wcs = None, None
         if c is None:
             head = e.get("head")
             if head is None and self.path(e, ra, dec, "head.npz").exists():
@@ -192,7 +193,7 @@ class CutoutCache:
             store.save_arrays(p, **record)
             return None
         h, w = c["img"].shape
-        pm = stacking.fit_pixel_map(WCS(fits.Header.fromstring(c["hdr"])), c["x0"], c["y0"], c["x0"] + w, c["y0"] + h)
+        pm = stacking.fit_pixel_map(det_wcs or WCS(fits.Header.fromstring(c["hdr"])), c["x0"], c["y0"], c["x0"] + w, c["y0"] + h)
         record.update(img=c["img"], x0=c["x0"], y0=c["y0"], pm_center=pm["center"], pm_cx=pm["cx"], pm_cy=pm["cy"])
         if "var" in c:
             record["var"] = c["var"]
@@ -202,7 +203,9 @@ class CutoutCache:
             record.update(yc=c["yc"], pend_key=json.dumps(pending["key"]), pend_var_hdu=pending["var_hdu"],
                           pend_tiles=pending["tiles"], pend_y0=pending["tiles_y0"])
         store.save_arrays(p, **record)
-        return _unpack(store.load_arrays(p), e)
+        if "flag_names" in record:
+            record["flag_rows"] = np.asarray(record["flag_rows"])
+        return _unpack(record, e)                           # what was just written: no need to read it back
 
     def fast(self, exps: list[dict]) -> bool:
         """Can these exposures be read in one request each? They need their sky footprints, and the

@@ -331,11 +331,12 @@ class Reader:
         return head
 
     @staticmethod
-    def box(hdr, ra: float, dec: float, half: int):
+    def box(hdr, ra: float, dec: float, half: int, wcs=None):
         """(x0, y0, x1, y1, xc, yc): pixel box around (ra, dec), clipped to the detector, or None
-        if the position is off the detector or too close to its edge."""
+        if the position is off the detector or too close to its edge. wcs: WCS(hdr) if the caller
+        already built it (it costs about 25 ms)."""
         try:
-            px = WCS(hdr).all_world2pix(ra, dec, 0, quiet=True)
+            px = (wcs or WCS(hdr)).all_world2pix(ra, dec, 0, quiet=True)
         except Exception:  # noqa: BLE001  (a failed SIP inversion means "not on this detector")
             return None
         xc, yc = float(px[0]), float(px[1])
@@ -532,8 +533,14 @@ class Reader:
         wave = find_wave_table(got[1])
         if wave is None:
             return None
-        meta = dict(hdr=h1.tostring(), mjd=float(h1.get("MJD-AVG", h1.get("MJD-OBS", np.nan))), wave=wave, total=total)
-        b = self.box(h1, ra, dec, half)
+        # the header text as it is in the file, and its WCS built once (the caller fits the pixel map with it)
+        meta = dict(hdr=got[0][n0:n0 + n1].decode("latin-1"), mjd=float(h1.get("MJD-AVG", h1.get("MJD-OBS", np.nan))),
+                    wave=wave, total=total)
+        try:
+            det_wcs = WCS(h1)
+        except Exception:  # noqa: BLE001
+            return None
+        b = self.box(h1, ra, dec, half, det_wcs)
         if b is None:
             return dict(meta, off=True)
         bx0, by0, bx1, by1, xc, yc = b
@@ -542,7 +549,7 @@ class Reader:
         padded = big.image(got[2:2 + big.h], ">f4")
         tiles = np.frombuffer(desc, ">i4" if rb == 8 else ">i8").reshape(-1, 2).astype("i8")
         var_hdu = flags_data + pad(rb * card_value(first_block, "NAXIS2") + card_value(first_block, "PCOUNT"))
-        return dict(meta, off=False, x0=bx0, y0=by0, xc=xc, yc=yc,
+        return dict(meta, off=False, x0=bx0, y0=by0, xc=xc, yc=yc, wcs=det_wcs,
                     img=np.ascontiguousarray(padded[by0 - y0:by1 - y0, bx0 - x0:bx1 - x0]),
                     pending=dict(key=list(key), var_hdu=int(var_hdu), tiles=tiles, tiles_y0=int(y0)))
 
