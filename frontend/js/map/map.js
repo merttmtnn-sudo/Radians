@@ -33,6 +33,34 @@ const PRESETS = [
     tipEn: 'The absorption band of frozen carbon dioxide.', tipTr: 'Donmuş karbondioksitin soğurma bandı.' },
 ];
 
+
+// Famous sights for anyone who just wants to look around: fixed J2000 positions, one line each.
+const FAMOUS = [
+  { q: 'M42', ra: 83.822, dec: -5.391, en: ['Orion Nebula', 'A star nursery 1,300 light-years away; in the infrared you see through its dust.'], tr: ['Orion Bulutsusu', '1.300 ışık yılı ötede bir yıldız doğumevi; kızılötesinde tozunun içini görürsünüz.'] },
+  { q: 'Betelgeuse', ra: 88.793, dec: 7.407, en: ['Betelgeuse', 'A red supergiant so large it would swallow Jupiter’s orbit; it will one day explode.'], tr: ['Betelgeuse', 'Jüpiter’in yörüngesini yutacak kadar büyük bir kızıl süperdev; bir gün patlayacak.'] },
+  { q: 'Rigel', ra: 78.634, dec: -8.202, en: ['Rigel', 'A blue supergiant tens of thousands of times brighter than the Sun.'], tr: ['Rigel', 'Güneş’ten on binlerce kat parlak mavi bir süperdev.'] },
+  { q: 'Sirius', ra: 101.287, dec: -16.716, en: ['Sirius', 'The brightest star in the night sky, 8.6 light-years away, with a white-dwarf companion.'], tr: ['Sirius', 'Gece gökyüzünün en parlak yıldızı, 8,6 ışık yılı ötede, beyaz cüce bir eşi var.'] },
+  { q: 'Vega', ra: 279.235, dec: 38.784, en: ['Vega', 'The star that once defined magnitude zero; a dusty disc circles it.'], tr: ['Vega', 'Bir zamanlar sıfır kadiri tanımlayan yıldız; çevresinde tozlu bir disk var.'] },
+  { q: 'Polaris', ra: 37.955, dec: 89.264, en: ['Polaris', 'The North Star: the sky turns around this point.'], tr: ['Kutup Yıldızı', 'Gökyüzü bu noktanın çevresinde döner.'] },
+  { q: 'M45', ra: 56.75, dec: 24.117, en: ['Pleiades', 'The Seven Sisters: a young cluster drifting through a dust cloud.'], tr: ['Ülker', 'Yedi Kız Kardeş: bir toz bulutunun içinden geçen genç bir küme.'] },
+  { q: 'M31', ra: 10.685, dec: 41.269, en: ['Andromeda Galaxy', 'Our big neighbour, 2.5 million light-years away; it will merge with the Milky Way.'], tr: ['Andromeda Gökadası', '2,5 milyon ışık yılı ötedeki büyük komşumuz; Samanyolu ile birleşecek.'] },
+  { q: 'M1', ra: 83.633, dec: 22.015, en: ['Crab Nebula', 'What is left of a star that exploded in 1054, seen by astronomers in China.'], tr: ['Yengeç Bulutsusu', '1054’te patlayan, Çinli gökbilimcilerin gördüğü bir yıldızın kalıntısı.'] },
+  { q: 'eta Car', ra: 161.265, dec: -59.685, en: ['Eta Carinae', 'A giant star that brightened hugely in the 1840s and hides in its own dust.'], tr: ['Eta Carinae', '1840’larda çok parlayan ve kendi tozunun içine gizlenen dev bir yıldız.'] },
+  { q: 'Sgr A*', ra: 266.417, dec: -29.008, en: ['Galactic centre', 'A black hole of four million Suns sits here, behind dust that infrared light gets through.'], tr: ['Gökada merkezi', 'Burada dört milyon Güneş kütleli bir kara delik var; kızılötesi ışık önündeki tozu aşar.'] },
+  { q: 'LMC', ra: 80.894, dec: -69.756, en: ['Large Magellanic Cloud', 'A small galaxy circling ours, 160,000 light-years away.'], tr: ['Büyük Macellan Bulutu', 'Gökadamızın çevresinde dönen küçük bir gökada, 160.000 ışık yılı ötede.'] },
+  { q: 'SMC', ra: 13.187, dec: -72.829, en: ['Small Magellanic Cloud', 'The Large Cloud’s little sibling, stretched by its pull.'], tr: ['Küçük Macellan Bulutu', 'Büyük Bulut’un küçük kardeşi, onun çekimiyle uzamış.'] },
+  { q: 'M57', ra: 283.396, dec: 33.029, en: ['Ring Nebula', 'A dying Sun-like star blowing off its outer layers.'], tr: ['Halka Bulutsusu', 'Dış katmanlarını savuran, ölmekte olan Güneş benzeri bir yıldız.'] },
+  { q: 'M16', ra: 274.7, dec: -13.807, en: ['Eagle Nebula', 'Home of the Pillars of Creation, columns of gas where stars form.'], tr: ['Kartal Bulutsusu', 'Yıldızların doğduğu gaz sütunları, Yaratılış Sütunları burada.'] },
+  { q: 'M8', ra: 270.904, dec: -24.387, en: ['Lagoon Nebula', 'A glowing cloud of hydrogen lit by hot young stars.'], tr: ['Lagün Bulutsusu', 'Sıcak genç yıldızların aydınlattığı parlak bir hidrojen bulutu.'] },
+  { q: 'Antares', ra: 247.352, dec: -26.432, en: ['Antares', 'The red heart of the Scorpion, a supergiant in a dusty neighbourhood.'], tr: ['Antares', 'Akrep’in kızıl kalbi; tozlu bir mahallede bir süperdev.'] },
+  { q: 'Aldebaran', ra: 68.98, dec: 16.509, en: ['Aldebaran', 'The orange eye of the Bull, a giant star 65 light-years away.'], tr: ['Aldebaran', 'Boğa’nın turuncu gözü, 65 ışık yılı ötede dev bir yıldız.'] },
+  { q: 'Proxima Cen', ra: 217.429, dec: -62.68, en: ['Proxima Centauri', 'The nearest star to the Sun, 4.2 light-years away, with a planet.'], tr: ['Proxima Centauri', 'Güneş’e en yakın yıldız, 4,2 ışık yılı ötede; bir gezegeni var.'] },
+  { q: 'rho Oph', ra: 246.396, dec: -23.447, en: ['Rho Ophiuchi cloud', 'One of the nearest star-forming clouds, full of baby stars only infrared shows.'], tr: ['Rho Ophiuchi bulutu', 'En yakın yıldız doğum bulutlarından; yalnızca kızılötesinin gösterdiği bebek yıldızlarla dolu.'] },
+  { q: 'Horsehead Nebula', ra: 85.245, dec: -2.458, en: ['Horsehead Nebula', 'A dark cloud shaped like a horse’s head against glowing gas.'], tr: ['Atbaşı Bulutsusu', 'Parlayan gazın önünde at başı biçiminde karanlık bir bulut.'] },
+  { q: 'M51', ra: 202.47, dec: 47.195, en: ['Whirlpool Galaxy', 'A spiral galaxy pulling on a smaller companion.'], tr: ['Girdap Gökadası', 'Küçük bir eşini çeken sarmal bir gökada.'] },
+];
+const famousOn = () => { try { return localStorage.getItem('radians-famous') !== '0'; } catch { return true; } };
+
 const L = () => (getLang() === 'tr' ? 'tr' : 'en');
 // the names the landing page's cards use
 const NAMES = { 'eps Indi B': 'ε Indi B', 'WISE J085510.83-071442.5': 'WISE 0855−0714', 'RW Aur': 'RW Aurigae', 'R Dra': 'R Draconis' };
@@ -85,6 +113,7 @@ async function initMap() {
       showLayersControl: false, showFullscreenControl: true, showCooGridControl: true, showSimbadPointerControl: false,
       showProjectionControl: false, showFrame: true, showZoomControl: true,
       pixelateCanvas: false,                          // smooth magnified pixels instead of hard blocks
+      survey: TWOMASS_URL,                            // placeholder until the SPHEREx layer is up: IRSA, not CDS (whose DSS answered 404)
     });
     // ?c=ra,dec&z=fov&wl=µm open the map on a given view (shareable)
     const c = (P.get('c') || '').split(',').map(Number);
@@ -269,6 +298,11 @@ function addMarkers() {
     c.addSources(list.map(x => A.source(x.ra, x.dec, { q: x.q })));
     map.aladin.addCatalog(c);
   };
+  map.famous = A.catalog({ name: 'Famous', color: '#8cc8ff', sourceSize: 12, shape: 'circle' });
+  map.famous.addSources(FAMOUS.map(x => A.source(x.ra, x.dec, { q: x.q })));
+  map.aladin.addCatalog(map.famous);
+  if (!famousOn()) map.famous.hide();
+  syncFamous();
   mk('Challenge', '#ffb347', 16, TARGETS);
   // Explore stars: positions come from the resolver, cached by the server
   Promise.all(EXPLORE.map(x => fetch(new URL(`api/resolve?q=${encodeURIComponent(x.q)}`, location.href)).then(r => (r.ok ? r.json() : null)).catch(() => null)))
@@ -285,6 +319,18 @@ function addMarkers() {
     showPop(obj.ra, obj.dec, obj.data.q);
   });
 }
+
+function syncFamous() {
+  const on = famousOn();
+  $('mapFamousT').setAttribute('aria-pressed', String(on));
+}
+$('mapFamousT').onclick = () => {
+  const on = !famousOn();
+  try { localStorage.setItem('radians-famous', on ? '1' : '0'); } catch { /* private window */ }
+  try { on ? map.famous?.show() : map.famous?.hide(); } catch { /* older Aladin */ }
+  if (!on && $('mapPop').dataset.kind === 'f') hidePop();
+  syncFamous();
+};
 
 function buildChips() {
   const l = L();
@@ -333,10 +379,11 @@ function showPop(ra, dec, q, at) {
   const l = L();
   const tg = q && TARGETS.find(x => x.q === q);
   const ex = q && EXPLORE.find(x => x.q === q);
-  pop.dataset.kind = tg ? 'c' : ex ? 'e' : 'p';
-  $('mapPopKind').textContent = t(tg ? 'mapKindChallenge' : ex ? 'mapKindExplore' : 'mapKindPoint');
-  $('mapPopTitle').textContent = tg ? nice(q) : ex ? ex[l].split(':')[0] : t('mapHere');
-  const sub = tg ? tg[l].kind : ex ? cap(ex[l].split(':').slice(1).join(':').trim()) : '';
+  const fm = !tg && !ex && q && FAMOUS.find(x => x.q === q);
+  pop.dataset.kind = tg ? 'c' : ex ? 'e' : fm ? 'f' : 'p';
+  $('mapPopKind').textContent = t(tg ? 'mapKindChallenge' : ex ? 'mapKindExplore' : fm ? 'mapKindFamous' : 'mapKindPoint');
+  $('mapPopTitle').textContent = tg ? nice(q) : ex ? ex[l].split(':')[0] : fm ? fm[l][0] : t('mapHere');
+  const sub = tg ? tg[l].kind : ex ? cap(ex[l].split(':').slice(1).join(':').trim()) : fm ? fm[l][1] : '';
   $('mapPopSub').textContent = sub;
   $('mapPopSub').hidden = !sub;
   const d = +dec;

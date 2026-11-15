@@ -573,6 +573,11 @@ body.embed .stage { max-height: calc(100vh - 70px); }
 i.ring { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; display: inline-block; flex: none; }
 i.ring.c { border-color: #ffb347; }
 i.ring.e { border-color: #fff; }
+i.ring.f { border-color: #8cc8ff; }
+.mapfamt { display: inline-flex; align-items: center; gap: 7px; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; padding: 0; }
+.mapfamt[aria-pressed="false"] { opacity: .45; }
+.mapfamt[aria-pressed="false"] i.ring { border-style: dashed; }
+.mappop[data-kind="f"] .mappopkind { color: #8cc8ff; }
 .mapcard i.ring.e { border-color: var(--fg-2); }
 
 /* the card that opens on a click */
