@@ -6,7 +6,7 @@ from astropy.io import fits
 
 from astropy.wcs import WCS
 
-from app.engine.fitsread import GUESS_PAD, Reader, guess_pixel, wavelength_at
+from app.engine.fitsread import GUESS_PAD, Reader, guess_pixel, shape_key, wavelength_at
 from app.engine.http import Http, RangeNotHonoured
 from tests.engine.fakes import FakeIrsa, make_file, region_of
 
@@ -144,6 +144,31 @@ def test_fast_read_steps_aside_when_it_cannot_be_sure():
     assert rd.read_fast(URL_A, edge, 10.0, 10, region_of(a))["off"] is True    # the header says: too close to the edge
     assert rd.read_fast(URL_B, 150.9, 10.0, 10, good) is None              # far outside the footprint: nothing is read
     assert rd.prime(URL_PLAIN) is False and rd.read_fast(URL_PLAIN, 150.0, 10.0, 10, good) is None    # older, uncompressed files
+
+
+def test_each_detector_band_has_its_own_header_length():
+    """In the real v27 files the IMAGE header of bands 1-2 is a block longer than that of bands 3-6,
+    and longer than the nine blocks a first look reads. Each band is learnt and read on its own."""
+    short = "https://irsa.example/ibe/data/spherex/qr3/level2/w/l2b-v27-2026-222/5/level2_w_0001_1D5_spx_l2b-v27-2026-222.fits"
+    long_ = "https://irsa.example/ibe/data/spherex/qr3/level2/w/l2b-v27-2026-222/1/level2_w_0001_1D1_spx_l2b-v27-2026-222.fits"
+    long2 = long_.replace("0001", "0002")
+    a = make_file(stars=[(150.0, 10.0, 50.0)], seed=1)
+    b = make_file(stars=[(150.0, 10.0, 50.0)], seed=2, extra_cards=330)
+    c = make_file(ra0=150.01, rot_deg=15, stars=[(150.0, 10.0, 50.0)], seed=3, extra_cards=330)
+    rd, fake = make_reader({short: a, long_: b, long2: c})
+    assert shape_key(short) == "27/D5" and shape_key(long_) == "27/D1"
+    assert rd.prime(short) and not rd.knows(long_)                      # band 5 says nothing about band 1
+    assert rd.read_fast(long_, 150.0, 10.0, 10, region_of(b)) is None and rd.prime(long_)
+    assert rd.shapes["27/D1"]["n1"] > rd.shapes["27/D5"]["n1"] and rd.shapes["27/D1"]["n1"] > 9 * 2880
+    before = len(fake.calls)
+    got = rd.read_fast(long2, 150.0, 10.0, 10, region_of(c))
+    assert len(fake.calls) == before + 1
+    img, _, var = truth(c)
+    h, w = got["img"].shape
+    assert np.array_equal(got["img"], img[got["y0"]:got["y0"] + h, got["x0"]:got["x0"] + w])
+    rest = rd.finish(long2, got["x0"], got["y0"], w, h, got["yc"], got["pending"])
+    assert np.array_equal(rest["var"], var[got["y0"]:got["y0"] + h, got["x0"]:got["x0"] + w])
+    assert rd.read_fast(short, 150.0, 10.0, 10, region_of(a))["img"].shape == (21, 21)      # band 5 still reads its own way
 
 
 def test_layouts_are_kept_between_runs(tmp_path):

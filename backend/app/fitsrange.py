@@ -188,7 +188,9 @@ def pipeline_version(url: str) -> str:
 
 
 def _template(url):
-    key = pipeline_version(url)
+    # per pipeline version and detector band: in v27 the IMAGE header of bands 1-2 is one block longer
+    band = re.search(r"D(\d)_spx", url) or re.search(r"/(\d)/[^/]+$", url)
+    key = pipeline_version(url) + (f"_D{band.group(1)}" if band else "")
     with _tlock:
         if key in _templates:
             return _templates[key]

@@ -27,7 +27,7 @@ from astropy.time import Time
 from astropy.wcs import WCS
 
 from . import settings, stacking, store
-from .fitsread import LayoutMismatch, Reader, pipeline_version, wavelength_at
+from .fitsread import LayoutMismatch, Reader, shape_key, wavelength_at
 
 NATIVE_PIX_ARCSEC = 6.15
 DEFAULT_SCALE_ARCSEC = 2.0
@@ -207,12 +207,12 @@ class CutoutCache:
     def fast(self, exps: list[dict]) -> bool:
         """Can these exposures be read in one request each? They need their sky footprints, and the
         layout of their files must be known; it is learnt here from one file per pipeline version
-        (three requests, once: the answer is kept on disk)."""
+        and detector band (three requests, once: the answer is kept on disk)."""
         if not exps or not all(e.get("region") for e in exps):
             return False
         first = {}
         for e in exps:
-            first.setdefault(pipeline_version(e["url"]), e["url"])
+            first.setdefault(shape_key(e["url"]), e["url"])
         try:
             return all(self.reader.prime(url) for url in first.values())
         except (OSError, ValueError):

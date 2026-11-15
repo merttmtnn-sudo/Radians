@@ -90,6 +90,18 @@ def pipeline_version(url: str) -> str:
     return m.group(1) if m else "?"
 
 
+def detector_of(url: str) -> int:
+    """The detector band in a level-2 file name (".../3/level2_..._1D3_spx_..."), 0 if it has none."""
+    m = re.search(r"D(\d)_spx", url) or re.search(r"D(\d)\.fits$", url) or re.search(r"/(\d)/[^/]+$", url)
+    return int(m.group(1)) if m else 0
+
+
+def shape_key(url: str) -> str:
+    """Files that share header lengths: one pipeline version and one detector band. (In v27 the
+    IMAGE header of bands 1-2 is one block longer than that of bands 3-6.)"""
+    return f"{pipeline_version(url)}/D{detector_of(url)}"
+
+
 def read_table_row(hdr, data: bytes) -> dict[str, np.ndarray]:
     """Columns of the first row of a binary table (fixed-size columns only), shaped by TDIMn."""
     out, pos = {}, 0
@@ -205,7 +217,7 @@ class Reader:
         seed_file: layouts shipped with the app, read first, so a new server knows them at once."""
         self.http = http
         self.layouts: dict[tuple, dict] = {}
-        self.shapes: dict[str, dict] = {}            # pipeline version -> header lengths and detector size
+        self.shapes: dict[str, dict] = {}            # shape_key(url) -> header lengths and detector size
         self.lock = threading.Lock()
         self.learning: dict[tuple, threading.Lock] = {}
         self.layout_file = layout_file
@@ -245,11 +257,11 @@ class Reader:
             pass                                      # only a speed-up: never worth failing a read
 
     def _note_shape(self, url: str, n0: int, n1: int, hdr) -> None:
-        ver = pipeline_version(url)
+        key = shape_key(url)
         shape = dict(n0=int(n0), n1=int(n1), nx=int(hdr["NAXIS1"]), ny=int(hdr["NAXIS2"]))
-        if self.shapes.get(ver) != shape:
+        if self.shapes.get(key) != shape:
             with self.lock:
-                self.shapes[ver] = shape
+                self.shapes[key] = shape
             self._save_layouts()
 
     def _layout(self, url: str, head: dict, key: tuple) -> dict:
@@ -268,15 +280,15 @@ class Reader:
         return lay
 
     def knows(self, url: str) -> bool:
-        """True if files of this pipeline version can be read the fast way (read_fast)."""
-        shape = self.shapes.get(pipeline_version(url))
+        """True if files of this pipeline version and detector band can be read the fast way (read_fast)."""
+        shape = self.shapes.get(shape_key(url))
         if not shape:
             return False
         lay = self.layouts.get((pipeline_version(url), shape["n0"], shape["n1"], shape["nx"], shape["ny"]))
         return bool(lay) and lay["form"] == "rice"
 
     def prime(self, url: str) -> bool:
-        """Learn the layout of this file's pipeline version (three requests, once per version)."""
+        """Learn the layout of this file's pipeline version and detector band (three requests, once)."""
         if self.knows(url):
             return True
         head = self.head(url)
@@ -487,7 +499,7 @@ class Reader:
         and flags with one more request. Returns None whenever the fast way cannot be trusted (an
         unknown file layout, no footprint, a guess that missed): the caller then uses read()."""
         ver = pipeline_version(url)
-        shape = self.shapes.get(ver)
+        shape = self.shapes.get(shape_key(url))
         if not shape or not region:
             return None
         nx, ny = shape["nx"], shape["ny"]
@@ -507,7 +519,8 @@ class Reader:
         flags_data = flags_hdu + lay["flags_hlen"]
         rb = int(lay["row_bytes"])
         big = _Box(x0, y0, x1, y1, nx)
-        got, total = self.http.fetch_ranges(url, [(0, HEAD_BLOCKS * BLOCK - 1), (-TAIL_BYTES, None)] + big.rows(img_off)
+        # the headers' exact length is known for this kind of file (bands 1-2 of v27 need more than HEAD_BLOCKS)
+        got, total = self.http.fetch_ranges(url, [(0, img_off - 1), (-TAIL_BYTES, None)] + big.rows(img_off)
                                             + [(flags_data + y0 * rb, flags_data + y1 * rb - 1), (flags_hdu, flags_hdu + BLOCK - 1)])
         h0, n0 = parse_header(got[0], 0)
         h1, n1 = parse_header(got[0], n0) if h0 is not None else (None, None)

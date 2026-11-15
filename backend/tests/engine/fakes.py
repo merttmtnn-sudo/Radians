@@ -14,7 +14,7 @@ FLAG_BITS = {"TRANSIENT": 0, "OVERFLOW": 1, "SUR_ERROR": 2, "NONFUNC": 6, "HOT":
 
 
 def make_file(ra0=150.0, dec0=10.0, mjd=60900.0, wave0=3.9, compressed=True, stars=(), rot_deg=0.0,
-              seed=0, sky=5.0, noise=0.05, saturate_above=None, flag_above=None, wing=0.0) -> bytes:
+              seed=0, sky=5.0, noise=0.05, saturate_above=None, flag_above=None, wing=0.0, extra_cards=0) -> bytes:
     """A level-2-like MEF. stars: [(ra, dec, peak MJy/sr)], drawn as Gaussians (FWHM 1.5 px).
     The wavelength rises linearly along x from wave0 to wave0 + 0.5 um.
     saturate_above: brighter pixels become NaN with OVERFLOW+SUR_ERROR (a blank core);
@@ -31,6 +31,8 @@ def make_file(ra0=150.0, dec0=10.0, mjd=60900.0, wave0=3.9, compressed=True, sta
     h["CD2_1"], h["CD2_2"] = PIX_DEG * s, PIX_DEG * c
     h["MJD-AVG"] = mjd
     h["BUNIT"] = "MJy / sr"
+    for i in range(extra_cards):                   # a longer header, as detector bands 1-2 have
+        h[f"PAD{i:04d}"] = i
     from astropy.wcs import WCS
     w = WCS(h)
     yy, xx = np.mgrid[0:NY, 0:NX]
