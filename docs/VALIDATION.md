@@ -82,16 +82,73 @@ discovery position. During SPHEREx (2025–26) it is ~125″ west and ~10″ nor
 field. Radians handles this by propagating proper motion to each exposure date and by its 240″ default
 field.
 
+## A second look at every tracker candidate: all-detector difference pictures
 
-## Two independent finders and an injection test
-
-Every candidate is looked for twice. The **star tracker** links sources visit to visit and fits a straight
+Every tracker candidate is looked for a second time in the same all-detector data. The **star tracker** links sources visit to visit and fits a straight
 line (moving), compares a star with itself at the same detector (variable), or finds a source absent from
 every other visit (one epoch only). The **difference pictures** subtract from each visit the median of the
-other visits: static stars cancel, a mover leaves an orange "is here now" / blue "was here" pair. A candidate
-both methods see is marked "found two ways" in the viewer.
+other visits: static stars cancel, a mover leaves an orange "is here now" / blue "was here" pair. A tracker
+candidate these pictures also show carries `found_by: ["track", "difference"]` and is marked
+"found two ways" in the viewer. This check does not add candidates of its own; the finder on the
+fast band's difference picture (next section) does.
 
 **Injection test** (`backend/tests/test_core.py::test_injected_faint_mover_recovered_two_ways`, runs in CI):
 a faint star (peak 6σ per pixel per visit) moving 1.5 px per visit across four visits, in Gaussian noise and
 a field of three static stars of 15–40σ, is recovered as the one moving candidate, by both finders; none of
 the static stars leaves a difference-picture detection.
+
+## The second finder: the difference picture
+
+The candidate list itself comes from two finders. The tracker above follows sources across every
+visit in all detectors. The second one comes from the map-first engine and works on one detector
+band: it stacks the first and the last sky pass from exposure pairs that saw the same wavelength,
+subtracts them, and looks for what is left (a blue/orange pair is a mover; a lone spot is something
+that appeared, vanished, brightened or faded). A card on the page says which finder saw it, and
+"found two ways" when both did.
+
+`python backend/scripts/engine/inject_validate.py 8` (about two minutes, no network: it uses the
+pre-built views of the five challenge fields in `backend/demo/engine`):
+
+1. Take the real exposures of the view's band, already on the view's 2″ grid.
+2. Pick a random position on empty sky: matched-filter S/N below 3 in both passes, more than two
+   point-spread widths from anything brighter than S/N 8, away from the target and the edges.
+3. Add a Gaussian of 9″ FWHM (the SPHEREx point-spread width) to every exposure:
+   - **mover**: 9″/yr in a random direction, placed at each exposure's own date;
+   - **brightened**: a steady source that is twice as bright in the last pass;
+   - **appeared**: present in the last pass only.
+   S/N is per sky pass as a matched filter sees it: the source's peak in one pass's stack, smoothed
+   with the point-spread function, over the robust noise of that smoothed stack.
+4. Stack the two passes at matching wavelengths and run the finder, as the site does; count a
+   recovery when a find of the right kind lies within 7″ of the injected position.
+5. 8 injections per field, kind and S/N in the four fields where the finder runs: 32 per cell.
+
+| Injected | S/N 5 | S/N 8 | S/N 12 | S/N 20 | S/N 40 |
+|---|---|---|---|---|---|
+| Mover, 9″/yr | 50% (16/32) | 100% (32/32) | 100% (32/32) | 91% (29/32) | 100% (32/32) |
+| Brightened (×2 in the last pass) | 22% (7/32) | 34% (11/32) | 53% (17/32) | 100% (32/32) | 100% (32/32) |
+| Appeared (last pass only) | 53% (17/32) | 100% (32/32) | 100% (32/32) | 100% (32/32) | 100% (32/32) |
+
+| Field (nothing injected) | Band | Passes | Finds besides the target | Finder's own note |
+|---|---|---|---|---|
+| Epsilon Indi B | 5 | 4 | 0 | – |
+| WISE 0855−0714 | 5 | 3 | 0 | too few pictures at matching wavelengths (3 per pass): it does not search |
+| Barnard's Star | 5 | 3 | 0 | – |
+| RW Aurigae | 6 | 3 | 0 | – |
+| R Draconis | 6 | 4 | 0 | – |
+
+Reading it:
+
+- Movers and new sources are complete from S/N 8 per pass. The three movers missed at S/N 20 were
+  in the two fields with a saturated star (RW Aurigae, R Draconis), whose halo raises the bar nearby.
+- A source that only doubles is harder: the finder asks for a change of at least 20% of the
+  source's light well above the noise, so doubling is found reliably from S/N 20.
+- With nothing injected it reports nothing besides the target in any field.
+- WISE 0855 has three matching exposures per pass in band 5. The finder says so and does not
+  search, instead of reporting something it cannot stand behind; the tracker (D5+D6) finds it.
+- The two tests use different S/N definitions (aperture flux over noise per visit for the tracker,
+  matched-filter peak per pass here), so their columns are not directly comparable.
+- Not tested here either: sources on top of other sources, asteroids that move within a pass, and
+  the saturated-star branch of the finder (covered by unit tests with synthetic stars).
+
+The tracker's own table above was run again on the merged code (15 Nov 2026) and came out the same,
+cell for cell.

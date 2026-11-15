@@ -44,3 +44,26 @@ test('other catalogues table', () => {
   assert.deepEqual(rows[2], ['AllWISE', null, '', 'cuUnreachable']);
   assert.deepEqual(starRows(null, [{ survey: '2MASS', state: 'none' }]), [['Gaia DR3', null, '', 'cuNotListed'], ['2MASS', null, '', 'cuNotListed']]);
 });
+
+test('how it moves: a line through the positions of the fast band', async () => {
+  const { motionLines } = await import('../js/blink/curious.js');
+  const gaia = { reachable: true, found: true, rate: 4.68, direction: 'south_east', parallax_ok: true, parallax_mas: 270.7, speed_kms: 82 };
+  const fit = { ok: true, significant: true, rate: 4.684, err: 0.34, direction_deg: 122, n: 4, band: 5 };
+  // no mover from the finders: the fit speaks for SPHEREx, with its error and the speed it implies
+  const a = motionLines(null, gaia, fit);
+  assert.deepEqual(a[0], ['cuMotionFit', { rate: '4.68', err: '0.34', dir: 'south_east', n: 4, b: 5 }]);
+  assert.deepEqual(a[1], ['cuSpeed', { v: 82 }]);
+  assert.ok(!a.some(([k]) => k === 'cuMotionStill'));
+  // a mover the finders saw: their rate first, the fit after it, the speed only once
+  const cand = { rate_arcsec_yr: 4.65, dir: 'south_east', points: [1, 2, 3, 4] };
+  const b = motionLines(cand, gaia, fit).map(([k]) => k);
+  assert.deepEqual(b.slice(0, 3), ['cuMotionOurs', 'cuSpeed', 'cuMotionFit']);
+  assert.equal(b.filter(k => k === 'cuSpeed').length, 1);
+  // too small to be sure: said so, and "no clear motion" stays
+  const weak = motionLines(null, gaia, { ...fit, significant: false, rate: 0.3 }).map(([k]) => k);
+  assert.deepEqual(weak.slice(0, 2), ['cuMotionStill', 'cuMotionFitWeak']);
+  // saturated core: no number is made up
+  assert.ok(motionLines(null, gaia, { ok: false, reason: 'saturated' }).some(([k]) => k === 'cuMotionFitSat'));
+  // without a fit the answer is what it was before
+  assert.deepEqual(motionLines(null, gaia), motionLines(null, gaia, null));
+});

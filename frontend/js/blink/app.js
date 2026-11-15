@@ -1,6 +1,7 @@
 import {
-  decodeB64, percentiles, stretchValue, stretchSigned, lut, lutDiverging, pixToSky, formatRA, formatDec, timeColour, fitsBytes, parseCoords,
+  decodeB64, percentiles, stretchValue, stretchSigned, lut, lutDiverging, pixToSky, formatRA, formatDec, fitsBytes,
   flagNames, parseState, computeView, isDiffView, skyToPix, stackImage, rgbChannels,
+  timeColorChannels, lutBeforeNow, matchedDiffValue,
 } from './sky.js';
 import { t, setLang, getLang } from '../core/i18n.js';
 import { scatterChart, chartTable, SERIES, wlColor } from '../core/charts.js';
@@ -10,8 +11,9 @@ import { createCurious } from './curious.js';
 import { CUBE_URL, nearestSlice } from '../core/cube.js';
 import { depthStart, depthLive, depthLoad, depthHide } from './depth.js';
 import { getPalette, setPalette, viewerCmap } from '../core/palette.js';
+import { loadAladin, QUIET } from '../core/aladin.js';
 import { curated, TARGETS } from '../content/facts.js';
-import { headline, clarity, catalogueStatus, nearestAt, tooFast, cleanId, CAT_NAMES } from './finds.js';
+import { headline, clarity, catalogueStatus, nearestAt, tooFast, cleanId, CAT_NAMES, mergeFinds } from './finds.js';
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
@@ -19,6 +21,7 @@ const els = Object.fromEntries([
   'play', 'prev', 'next', 'scrub', 'fps', 'fpsVal', 'timeline', 'frameInfo', 'cursor', 'stretch', 'cmap', 'lo', 'hi',
   'wlWin', 'wlBox', 'wlC', 'wlW', 'wlLab', 'rgbNote',
   'cross', 'flagView', 'link', 'copy', 'toast', 'hudDate', 'hudIdx', 'hudScale', 'view', 'viewHelp', 'detchips',
+  'srcBar', 'srcSeg', 'bandChips', 'srcStatus', 'deepStatus',
   'preset', 'loadingBar', 'wlMatch', 'zoom', 'gif', 'cands', 'candCount', 'candRange', 'showCands', 'flagSummary', 'expDetails', 'expSummary', 'expList', 'examples', 'compare', 'listen',
 ].map(id => [id, $(id)]));
 
@@ -31,7 +34,17 @@ const state = {
   dets: new Set(ALL_DETS), selected: null,
   compare: false, split: 0.5, splitDrag: false, splitMoved: false,
   params: null, rgb: null,                // last /api/frames query; colour channels built from it
+  // Two data sets per target. 'quick': one detector band from the fast engine (a preview within
+  // seconds, then the whole band). 'deep': all detectors co-added (/api/frames), read afterwards.
+  // state.data is whichever of the two is on screen.
+  src: 'quick', band: null, quick: null, deepData: null, qabort: null,
+  md: null,                               // wavelength-matched differences of the fast band (see matchedDiffs)
+  qc: null,                               // finds on the fast band's difference picture (see loadQuickChanges)
+  cands: [],                              // the cards: both finders' finds, merged, on the grid on screen
+  deepBusy: false,
+  tcLevels: [0, 1],                       // shared brightness levels of the colour-by-time picture
 };
+const NATIVE_PX = 6.15;                   // arcsec per SPHEREx detector pixel (the all-detector grid)
 
 // ------------------------------------------------------------------ helpers
 async function api(path, params, signal) {
@@ -85,7 +98,10 @@ function info(dl, rows) {
 }
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-const isStack = () => els.view.value === 'stack' || els.view.value === 'time';
+const isTimeColor = () => els.view.value === 'timecolor';
+/** One combined picture instead of one per visit (the stack, or colour by time). */
+const isStack = () => els.view.value === 'stack' || isTimeColor();
+const isMatched = () => els.view.value === 'diff_matched';
 
 // ------------------------------------------------------------------ detectors
 function buildDetChips() {
@@ -100,45 +116,13 @@ function buildDetChips() {
       if (state.dets.has(d) && state.dets.size === 1) return;          // keep at least one
       state.dets.has(d) ? state.dets.delete(d) : state.dets.add(d);
       syncDetUi();
-      requery();
+      requeryDeep();
     };
     return b;
   }));
 }
 
-// Fast band first: a new spot reads one detector band (seconds instead of minutes); D1–D6 chips load another
-// band, "All detectors" all six. The choice is remembered. The prepared challenge targets open in full.
-const FAST_DEFAULT = 3;                                             // 1.63–2.42 µm: the map's default plane
-const band = { fast: (() => { try { return localStorage.getItem('radians-fastband') !== '0'; } catch { return true; } })(),
-  det: (() => { try { return Number(localStorage.getItem('radians-fastdet')) || FAST_DEFAULT; } catch { return FAST_DEFAULT; } })() };
-function saveBand() { try { localStorage.setItem('radians-fastband', band.fast ? '1' : '0'); localStorage.setItem('radians-fastdet', String(band.det)); } catch { /* private window */ } }
-function newSpotDets() { return band.fast ? [band.det] : ALL_DETS; }
-function buildBandBar() {
-  $('bandChips').replaceChildren(...ALL_DETS.map(d => {
-    const b = el('button', '', `D${d}`);
-    b.type = 'button'; b.dataset.det = d;
-    b.onclick = () => { band.fast = true; band.det = d; saveBand(); setDets([d]); requery(); };
-    return b;
-  }));
-  for (const b of $('bandSeg').querySelectorAll('button')) b.onclick = () => {
-    band.fast = b.dataset.band === 'fast'; saveBand();
-    setDets(band.fast ? [band.det] : ALL_DETS);
-    requery();
-  };
-}
-function syncBandUi() {
-  const one = state.dets.size === 1 ? [...state.dets][0] : null;
-  for (const b of $('bandSeg').querySelectorAll('button')) {
-    const on = b.dataset.band === 'fast' ? one !== null : state.dets.size === ALL_DETS.length;
-    b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
-    b.title = t(b.dataset.band === 'fast' ? 'bandFastTip' : 'bandAllTip');
-  }
-  $('bandChips').hidden = one === null && state.dets.size === ALL_DETS.length;
-  for (const b of $('bandChips').children) b.setAttribute('aria-pressed', String(state.dets.has(Number(b.dataset.det)) && state.dets.size === 1));
-}
-
 function syncDetUi() {
-  syncBandUi();
   for (const b of els.detchips.children) b.setAttribute('aria-pressed', String(state.dets.has(Number(b.dataset.det))));
   const key = [...state.dets].sort().join(',');
   const match = [...els.preset.options].find(o => o.value === key);
@@ -154,55 +138,182 @@ function setDets(list) {
 els.preset.onchange = () => {
   if (els.preset.value === 'custom') return;
   setDets(els.preset.value.split(',').map(Number));
-  requery();
+  requeryDeep();
 };
 
-function requery() {
-  if (state.target) run({ q: els.q.value.trim(), ...state.target, fov: els.fov.value, mode: els.mode.value });
+function requery(extra = {}) {
+  if (state.target) run({ q: els.q.value.trim(), ...state.target, fov: els.fov.value, mode: els.mode.value,
+    src: state.src, band: state.band, ...extra });
+}
+/** Detector chips, frame modes and the wavelength tools work on the all-detector data. */
+const requeryDeep = () => requery({ src: 'deep' });
+
+// ------------------------------------------------------------------ fast band / all detectors
+function buildBandChips() {
+  const ranges = { 1: [0.75, 1.09], 2: [1.10, 1.62], 3: [1.63, 2.42], 4: [2.42, 3.82], 5: [3.83, 4.41], 6: [4.42, 5.00] };
+  els.bandChips.replaceChildren(...ALL_DETS.map(d => {
+    const b = el('button', 'detchip', `D${d}`);
+    b.type = 'button';
+    b.dataset.band = d;
+    b.dataset.lo = ranges[d][0].toFixed(2);
+    b.dataset.hi = ranges[d][1].toFixed(2);
+    b.setAttribute('aria-pressed', 'false');
+    b.onclick = () => setBand(d);
+    return b;
+  }));
+  syncSrcUi();
 }
 
-// ------------------------------------------------------------------ load
-async function run(opts) {
-  document.dispatchEvent(new CustomEvent('radians:run'));       // ui.js: switch from the landing page to the viewer
-  if (state.abort) state.abort.abort();
-  const ctl = new AbortController();
-  state.abort = ctl;
+function syncSrcUi() {
+  els.srcBar.hidden = !state.target;
+  for (const b of els.srcSeg.children) b.setAttribute('aria-pressed', String(b.dataset.src === state.src));
+  const band = state.src === 'quick' ? (state.quick?.quick.band ?? state.band) : null;
+  for (const b of els.bandChips.children) {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.band) === band));
+    b.title = t('bandTitle', { b: b.dataset.band, lo: b.dataset.lo, hi: b.dataset.hi });
+  }
+}
+
+/** Put a data set that is already in memory on screen (switching between the two). */
+function showSet(d) {
+  const was = state.playing;
   stop();
-  els.empty.hidden = true;
+  load(d, 0);
+  if (was) play();
+  syncUrl(true);
+}
+
+// The choice (fast band or all detectors, and which band) is remembered for the next new spot.
+const saved = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const save = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private window */ } };
+
+function setSrc(src) {
+  if (!state.target || src === state.src) return;
+  state.src = src;
+  save('radians-src', src);
+  syncSrcUi();
+  if (src === 'deep') {
+    if (state.deepData?.frames?.length) showSet(state.deepData);
+    else toast(t('needDeep'));                      // being read: it goes on screen when it arrives
+  } else if (state.quick?.frames?.length) showSet(state.quick);
+  else startQuick();
+}
+els.srcSeg.onclick = (e) => { const b = e.target.closest('button[data-src]'); if (b) setSrc(b.dataset.src); };
+
+function setBand(b) {
+  if (!state.target) return;
+  state.band = b;
+  state.src = 'quick';
+  save('radians-src', 'quick');
+  save('radians-band', String(b));
+  syncSrcUi();
+  startQuick();
+}
+
+/** (Re)load only the fast band, e.g. after picking another band; the all-detector data stays. */
+async function startQuick() {
+  if (state.qabort) state.qabort.abort();
+  const ctl = new AbortController();
+  state.qabort = ctl;
+  try {
+    const shown = await runQuick(state.target, { autoplay: state.playing }, ctl.signal, false);
+    if (!shown) toast(t('quickNone'), true);
+  } catch (e) {
+    if (e.name !== 'AbortError') toast(e.message, true);
+  }
+}
+
+function quickStatus(q, shown, blocking) {
+  const p = q.progress, b = q.band;
+  let msg;
+  if (q.state === 'ready') {
+    const um = q.band_um || [];
+    msg = t('quickFull', { b, lo: um[0], hi: um[1], n: q.n_band, p: (q.passes || []).length });
+  } else if (shown) msg = p && p.total ? t('quickPreview', { b, done: p.done, total: p.total }) : t('quickPreviewWait', { b });
+  else msg = p && p.total ? t('quickReading', { b, done: p.done, total: p.total }) : t('quickLooking');
+  if (!shown && blocking) {
+    els.loadingSub.textContent = msg;
+    if (p && p.total) { els.loadingBar.hidden = false; els.loadingBar.value = p.done / p.total; }
+  } else els.srcStatus.textContent = msg;
+}
+
+/** The fast band: follow the engine's build (/api/quick) and show each revision as it is ready:
+ * first a preview, then the whole band. Returns true once something is on screen. */
+async function runQuick(target, opts, signal, blocking) {
+  // prefer: the band picked last time; the server uses it only for a spot that has no band of its own
+  const base = { ra: target.ra.toFixed(6), dec: target.dec.toFixed(6), fov: els.fov.value, band: state.band,
+    prefer: state.band ? null : (Number(saved('radians-band')) || null), pmra: target.pmra, pmdec: target.pmdec };
+  let have = -1, shown = false;
+  if (blocking) setLoading(true, t('reading'), t('quickLooking'));
+  else els.srcStatus.textContent = t('quickLooking');
+  for (;;) {
+    let d;
+    try {
+      d = await api('api/quick', { ...base, have, wait: 12 }, signal);
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      if (shown) els.srcStatus.textContent = t('quickBroke');
+      return shown;
+    }
+    const q = d.quick;
+    if (q.state === 'error') {
+      if (shown) els.srcStatus.textContent = t('quickBroke');
+      return shown;
+    }
+    if (d.frames) {                                  // a newer revision: preview, then the whole band
+      have = q.rev;
+      if (!d.frames.length) return shown;
+      state.quick = d;
+      if (state.src === 'quick') {
+        const was = state.playing;
+        stop();
+        load(d, shown ? state.idx : (opts.frame ?? 0));
+        if (shown ? was : opts.autoplay !== false) play();
+        if (!shown && blocking) document.dispatchEvent(new CustomEvent('radians:loaded', { detail: d }));
+        syncUrl(shown);
+      }
+      if (blocking && !shown) { setLoading(false); els.loadingBar.hidden = true; }
+      shown = true;
+      syncSrcUi();
+    }
+    quickStatus(q, shown, blocking);
+    if (q.state === 'ready') { loadQuickChanges(); renderAnalysis(); return shown; }
+  }
+}
+
+/** All detectors (/api/frames). With background = true the fast band is already on screen: nothing
+ * is covered, progress goes to the status line, and the result fills the panels that need every band. */
+async function runDeep(target, opts, ctl, background) {
   const t0 = performance.now();
-  let poll = null, showProgress = false;
-  els.loadingBar.hidden = true;
-  const tick = setInterval(() => {
+  let showProgress = false;
+  const say = (msg, sub = '') => (background ? (els.deepStatus.textContent = sub || msg) : setLoading(true, msg, sub));
+  const tick = background ? null : setInterval(() => {
     const s = Math.round((performance.now() - t0) / 1000);
     if (!showProgress) els.loadingSub.textContent = s < 8 ? '' : t('slow', { s });
   }, 1000);
-  try {
-    let target;
-    if (opts.ra !== null && opts.ra !== undefined && opts.dec !== null && opts.dec !== undefined) {
-      target = { name: opts.name ?? opts.q ?? null, ra: opts.ra, dec: opts.dec, pmra: opts.pmra, pmdec: opts.pmdec };
-    } else {
-      setLoading(true, t('finding', { q: opts.q }));
-      target = await api('api/resolve', { q: opts.q }, ctl.signal);
-    }
-    state.target = target;
-    setLoading(true, t('reading'));
-    depthStart();
-    const job = Math.random().toString(36).slice(2, 12);
-    poll = setInterval(async () => {
-      try {
-        const p = await api('api/progress', { job }, ctl.signal);
-        if (p.stage === 'read' && p.total) {
-          showProgress = true;
+  say(t('reading'), background ? t('deepStart') : '');
+  state.deepBusy = true;
+  depthStart();
+  const job = Math.random().toString(36).slice(2, 12);
+  const poll = setInterval(async () => {
+    try {
+      const p = await api('api/progress', { job }, ctl.signal);
+      if (p.stage === 'read' && p.total) {
+        showProgress = true;
+        if (background) els.deepStatus.textContent = t('deepReading', { done: p.done, total: p.total });
+        else {
           els.loadingSub.textContent = t('readingN', { done: p.done, total: p.total, pct: Math.round(100 * p.done / p.total) });
           els.loadingBar.hidden = false;
           els.loadingBar.value = p.done / p.total;
         }
-        if (p.preview) depthLive(p.preview); else if (p.stage === 'process') {
-          els.loadingSub.textContent = t('processing');
-          els.loadingBar.value = 1;
-        }
-      } catch { /* progress is cosmetic */ }
-    }, 1000);
+      }
+      if (p.preview) depthLive(p.preview); else if (p.stage === 'process') {
+        if (background) els.deepStatus.textContent = t('processing');
+        else { els.loadingSub.textContent = t('processing'); els.loadingBar.value = 1; }
+      }
+    } catch { /* progress is cosmetic */ }
+  }, 1000);
+  try {
     const params = {
       ra: target.ra.toFixed(6), dec: target.dec.toFixed(6), fov: opts.fov, mode: opts.mode,
       pmra: target.pmra, pmdec: target.pmdec, detectors: [...state.dets].sort().join(','),
@@ -218,27 +329,135 @@ async function run(opts) {
       } catch (e) {
         if (e.code !== 'unavailable' || attempt >= 4) throw e;
         for (let s = 20; s > 0; s--) {
-          setLoading(true, t('irsaRetry'), t('irsaRetryIn', { s, n: attempt, max: 3 }));
+          say(t('irsaRetry'), t('irsaRetryIn', { s, n: attempt, max: 3 }));
           await sleep(1000, ctl.signal);
         }
-        setLoading(true, t('reading'));
+        say(t('reading'), background ? t('deepStart') : '');
       }
     }
     state.params = params;
+    state.deepData = data;
     if (!data.frames || !data.frames.length) {
+      const w = data.wl_window;
+      const why = w ? t('wlNone', { lo: w[0].toFixed(2), hi: w[1].toFixed(2) }) : t('noData');
+      depthHide();
+      if (background) { els.deepStatus.textContent = why; return; }
       state.data = null;
       els.empty.hidden = false;
-      const w = data.wl_window;
-      els.empty.innerHTML = `<p>${w ? t('wlNone', { lo: w[0].toFixed(2), hi: w[1].toFixed(2) }) : t('noData')}</p>`;
+      els.empty.innerHTML = `<p>${why}</p>`;
       renderCandidates();
-      depthHide();
       return;
     }
-    load(data, opts.frame ?? 0);
-    document.dispatchEvent(new CustomEvent('radians:loaded', { detail: data }));
+    if (state.src === 'deep') {
+      const was = state.playing;
+      stop();
+      load(data, background ? 0 : (opts.frame ?? 0));
+      if (!background) document.dispatchEvent(new CustomEvent('radians:loaded', { detail: data }));
+      syncUrl(background);
+      if (background ? was : opts.autoplay !== false) play();
+    } else adoptDeep(data);
     depthLoad(gridParams(), api);
-    syncUrl();
-    if (opts.autoplay !== false) play();
+    els.deepStatus.textContent = background ? t('deepReady') : '';
+  } catch (e) {
+    if (e.name === 'AbortError' || !background) throw e;
+    depthHide();
+    els.deepStatus.textContent = t('deepFailed', { msg: e.message });
+  } finally {
+    clearInterval(tick);
+    clearInterval(poll);
+    if (state.abort === ctl) { state.deepBusy = false; renderCandidates(); }
+  }
+}
+
+/** The all-detector data arrived while the fast band is on screen: fill what needs every band
+ * (the target's 0.75-5 µm spectrum and light curve) and leave the picture alone. */
+function adoptDeep(data) {
+  setPhot(data.exposures || [], null);
+  rebuildCands();
+}
+
+// ------------------------------------------------------------------ one candidate list from two finders
+/** Finds on the fast band's difference picture (first visit against the last), once per build. */
+function loadQuickChanges() {
+  const q = state.quick?.quick;
+  if (!q || q.state !== 'ready') return;
+  const key = `${q.id}:${q.rev}`;
+  if (state.qc && state.qc.key === key) return;
+  const qc = state.qc = { key, data: null };
+  api('api/quick/changes', { id: q.id })
+    .then((d) => { qc.data = d; })
+    .catch(() => { qc.data = { candidates: [], notes: ['failed'] }; })
+    .finally(() => { if (state.qc === qc) rebuildCands(); });
+}
+
+/** A find moved onto the grid on screen (its own grid may be the other data set's), with the visits
+ * it talks about expressed as epochs of the frames on screen. */
+function onGrid(c, active) {
+  const frames = state.data.frames;
+  const move = (p) => {
+    if (c.grid === active) return p;
+    const [x, y] = skyToPix(...pixToSky(p.x, p.y, c.grid), active);
+    return { ...p, x, y };
+  };
+  const epochAt = (mjd) => frames.reduce((b, f) => (Math.abs(f.mjd - mjd) < Math.abs(b.mjd - mjd) ? f : b), frames[0]).epoch;
+  const out = { ...move(c), points: (c.points || []).map(move) };
+  if (c.method === 'difference') {
+    out.from = epochAt(c.mjd_a);
+    out.to = epochAt(c.mjd_b);
+    if (c.epoch_mjd) out.epoch = epochAt(c.epoch_mjd);
+  } else if (c.grid !== active && c.type === 'transient' && c.points?.length) out.epoch = epochAt(c.points[0].mjd);
+  return out;
+}
+
+function rebuildCands() {
+  const active = state.data?.grid;
+  state.selected = null;
+  if (!active) { state.cands = []; renderCandidates(); return; }
+  const withSky = (c, grid) => ({ ...c, grid, sky: (c.points?.length ? c.points : [c]).map(p => pixToSky(p.x, p.y, grid)) });
+  const deep = state.deepData, qd = state.qc?.data, quick = state.quick;
+  const tracking = deep?.grid ? (deep.candidates || []).map(c => withSky({ ...c, method: 'tracking' }, deep.grid)) : [];
+  const difference = qd && quick?.grid ? qd.candidates.map(c => withSky(c, quick.grid)) : [];
+  state.cands = mergeFinds(tracking, difference).map(c => onGrid(c, active));
+  renderCandidates();
+  drawOverlay();
+}
+
+// ------------------------------------------------------------------ load
+async function run(opts) {
+  document.dispatchEvent(new CustomEvent('radians:run'));       // ui.js: switch from the landing page to the viewer
+  if (state.abort) state.abort.abort();
+  if (state.qabort) state.qabort.abort();
+  const ctl = new AbortController();
+  state.abort = ctl;
+  stop();
+  els.empty.hidden = true;
+  els.loadingBar.hidden = true;
+  // a prepared challenge target opens on its fast band at once, whatever was chosen last time
+  const prepared = TARGETS.some(x => x.q.toLowerCase() === String(opts.q || '').toLowerCase());
+  state.src = (opts.src ?? (prepared ? null : saved('radians-src'))) === 'deep' ? 'deep' : 'quick';
+  state.band = opts.band ?? null;
+  state.quick = null;
+  state.deepData = null;
+  state.qc = null;
+  state.cands = [];
+  state.deepBusy = false;
+  els.srcStatus.textContent = els.deepStatus.textContent = '';
+  try {
+    let target;
+    if (opts.ra !== null && opts.ra !== undefined && opts.dec !== null && opts.dec !== undefined) {
+      target = { name: opts.name ?? opts.q ?? null, ra: opts.ra, dec: opts.dec, pmra: opts.pmra, pmdec: opts.pmdec };
+    } else {
+      setLoading(true, t('finding', { q: opts.q }));
+      target = await api('api/resolve', { q: opts.q }, ctl.signal);
+    }
+    state.target = target;
+    syncSrcUi();
+    let shown = false;
+    if (state.src === 'quick') {
+      shown = await runQuick(target, opts, ctl.signal, true);
+      if (!shown) { state.src = 'deep'; syncSrcUi(); }        // nothing in that band: the all-detector view still works
+    }
+    await runDeep(target, opts, ctl, shown);
   } catch (e) {
     if (e.name !== 'AbortError') {
       depthHide();
@@ -246,8 +465,6 @@ async function run(opts) {
       if (!state.data) els.empty.hidden = false;
     }
   } finally {
-    clearInterval(tick);
-    clearInterval(poll);
     if (state.abort === ctl) { setLoading(false); els.loadingBar.hidden = true; }
   }
 }
@@ -263,8 +480,13 @@ function load(data, startIdx) {
   els.overlay.width = els.overlay.height = Math.max(400, n * 8);      // sharper markers
   els.hudScale.textContent = `${(data.grid.fov / 60).toFixed(1)}′ × ${(data.grid.fov / 60).toFixed(1)}′`;
   state.rgb = null;
+  const matchedOpt = els.view.querySelector('option[value="diff_matched"]');
+  matchedOpt.disabled = !data.quick;                     // only the engine pairs exposures by wavelength
+  if (isMatched() && !data.quick) els.view.value = 'diff_first';
+  if (isTimeColor() && data.frames.length < 2) els.view.value = 'images';
+  document.dispatchEvent(new CustomEvent('radians:view'));
   applyView(startIdx);
-  renderCandidates();
+  rebuildCands();
   onLoaded();
   syncRgb();
 }
@@ -272,16 +494,46 @@ function load(data, startIdx) {
 // ------------------------------------------------------------------ views
 function applyView(startIdx = state.idx) {
   if (!state.data) return;
-  state.shown = computeView(state.images, state.variances, els.view.value);
+  const md = isMatched() ? matchedDiffs() : null;
+  state.shown = md ? md.images : computeView(state.images, state.variances, isMatched() ? 'diff_first' : els.view.value);
   els.scrub.max = state.shown.length - 1;
-  els.viewHelp.textContent = isDiffView(els.view.value) ? t('viewHelpDiff') : els.view.value === 'time' ? t('viewHelpTime') : isStack() ? t('viewHelpStack') : '';
+  els.viewHelp.textContent = isMatched() ? '' : isDiffView(els.view.value) ? t('viewHelpDiff') + (!state.data.quick && els.wlMatch.checked ? ' ' + t('viewHelpDiffWl') : '')
+    : isTimeColor() ? t('viewHelpTime') : isStack() ? t('viewHelpStack') : '';
   computeLevels();
   buildTimeline();
   show(isStack() ? 0 : startIdx);
 }
 
+/** The fast band's wavelength-matched differences (each later visit minus the first), asked from the
+ * engine once per build. Returns null until they are in; the view then redraws itself. */
+function matchedDiffs() {
+  const q = state.data?.quick;
+  if (!q) return null;
+  const key = `${q.id}:${q.rev}`;
+  if (state.md && state.md.key === key) return state.md.images ? state.md : null;
+  const md = state.md = { key, images: null, how: [], limit: [] };
+  api('api/quick/diffs', { id: q.id }).then((d) => {
+    const n2 = d.n * d.n;
+    md.images = [new Float32Array(n2), ...d.pairs.map(p => decodeB64(p.image, Float32Array))];
+    md.how = [null, ...d.pairs];
+    md.limit = [1, ...d.pairs.map(p => 10 * p.sigma)];
+    if (state.md === md && isMatched() && state.data?.quick?.id === q.id) { const was = state.playing; applyView(); if (was) play(); }
+  }).catch((e) => { if (state.md === md) state.md = null; toast(e.message, true); });
+  return null;
+}
+
+function matchedHelp() {
+  const md = state.md && state.md.images ? state.md : null;
+  if (!md) return t('viewHelpMatchedWait');
+  const how = md.how[state.idx];
+  if (!how) return t('viewHelpMatchedFirst');
+  return how.matched ? t('viewHelpMatched', { na: how.n_a, nb: how.n_b, lo: how.wave_um[0].toFixed(2), hi: how.wave_um[1].toFixed(2) })
+    : t('viewHelpUnmatched');
+}
+
 function computeLevels() {
   if (!state.shown.length) return;
+  if (isTimeColor()) state.tcLevels = percentiles(state.images, [Number(els.lo.value), Number(els.hi.value)]);
   if (isDiffView(els.view.value)) {
     // symmetric limit from the absolute differences; "white point" slider still applies
     const abs = state.shown.map(a => a.map(Math.abs));
@@ -302,7 +554,7 @@ function frameFlags(i) {
 function render() {
   const { data } = state;
   if (!data) return;
-  if (els.view.value === 'time') { renderTime(); return; }
+  if (isTimeColor()) { renderTimeColor(); return; }
   if (rgbReady()) { renderRgb(); return; }
   const n = data.grid.n;
   const cmp = compareOn();
@@ -313,19 +565,46 @@ function render() {
   const ctx = els.sky.getContext('2d');
   const out = ctx.createImageData(n, n);
   const diffView = isDiffView(els.view.value);
-  const table = diffView ? lutDiverging() : lut(els.cmap.value);
+  const md = isMatched() && state.md && state.md.images ? state.md : null;     // blue/orange, fixed 10-sigma scale
+  const table = md ? lutBeforeNow() : diffView ? lutDiverging() : lut(els.cmap.value);
   const [lo, hi] = state.levels;
   const kind = els.stretch.value;
   const showFlags = els.flagView.checked;
+  const limR = md ? md.limit[cmp ? compareB() : state.idx] : 0, limL = md ? md.limit[0] : 0;
   for (let y = 0; y < n; y++) {
     const row = n - 1 - y;                                   // FITS y is up, canvas y is down
     for (let x = 0; x < n; x++) {
       const i = y * n + x, o = (row * n + x) * 4;
       const v = x < sx ? imgA[i] : img[i];
-      const tv = diffView ? stretchSigned(v, hi, kind) : stretchValue(v, lo, hi, kind);
+      const tv = md ? matchedDiffValue(v, x < sx ? limL : limR)
+        : diffView ? stretchSigned(v, hi, kind) : stretchValue(v, lo, hi, kind);
       if (Number.isNaN(tv)) { out.data[o] = 30; out.data[o + 1] = 12; out.data[o + 2] = 40; out.data[o + 3] = 255; continue; }
       const k = (diffView ? Math.round(128 + tv * 127) : Math.round(tv * 255)) * 3;
       out.data[o] = table[k]; out.data[o + 1] = table[k + 1]; out.data[o + 2] = table[k + 2]; out.data[o + 3] = 255;
+      if (showFlags && (flg[i] & data.bad_mask)) { out.data[o] = 255; out.data[o + 1] *= 0.4; out.data[o + 2] *= 0.4; }
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+  drawOverlay();
+}
+
+/** Colour by time: first visit blue, middle green, last red, all on one brightness scale. */
+function renderTimeColor() {
+  const { data } = state, n = data.grid.n;
+  const ch = timeColorChannels(state.images);
+  if (!ch) return;
+  const [lo, hi] = state.tcLevels, kind = els.stretch.value;
+  const showFlags = els.flagView.checked, flg = frameFlags(0);
+  const ctx = els.sky.getContext('2d'), out = ctx.createImageData(n, n);
+  for (let y = 0; y < n; y++) {
+    const row = n - 1 - y;
+    for (let x = 0; x < n; x++) {
+      const i = y * n + x, o = (row * n + x) * 4;
+      for (const [k, c] of [[0, ch.r], [1, ch.g], [2, ch.b]]) {
+        const v = stretchValue(c[i], lo, hi, kind);
+        out.data[o + k] = Number.isNaN(v) ? 0 : Math.round(v * 255);
+      }
+      out.data[o + 3] = 255;
       if (showFlags && (flg[i] & data.bad_mask)) { out.data[o] = 255; out.data[o + 1] *= 0.4; out.data[o + 2] *= 0.4; }
     }
   }
@@ -389,7 +668,8 @@ const COLORS = { moving: '#6fc3ff', variable: '#ffb347', transient: '#ff6fb5' };
 
 function toCanvas(x, y) {
   const W = els.overlay.width, n = state.data.grid.n, k = W / n;
-  return [(x + 0.5) * k, (n - 1 - y + 0.5) * k, k];
+  // third value: canvas pixels per SPHEREx detector pixel, so rings and labels keep their size on the sky
+  return [(x + 0.5) * k, (n - 1 - y + 0.5) * k, k * NATIVE_PX / state.data.grid.pixel_scale];
 }
 
 function frameMjd() {
@@ -404,7 +684,7 @@ function drawOverlay() {
   if (!state.data) return;
   if (els.cross.checked && state.target) drawTargetMarker(ctx);
   drawExtras(ctx);
-  if (els.showCands.checked) for (const [i, c] of (state.data.candidates || []).entries()) drawCandidate(ctx, c, i === state.selected);
+  if (els.showCands.checked) for (const [i, c] of state.cands.entries()) drawCandidate(ctx, c, i === state.selected);
   if (compareOn()) drawSplit(ctx);
 }
 
@@ -418,7 +698,14 @@ function drawTargetMarker(ctx) {
     if (pts.length) {
       x = pts.reduce((s, p) => s + p.x, 0) / pts.length;
       y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    } else if (f.target_px) {                   // fast band: the engine's predicted spot (picture pixels, y down)
+      x = f.target_px[0];
+      y = n - 1 - f.target_px[1];
+    } else if (state.data.quick && !state.target.pmra) {
+      [x, y] = skyToPix(state.target.ra, state.target.dec, state.data.grid);   // its grid centre is snapped to ~7"
     }
+  } else if (state.data.quick && !state.target.pmra) {
+    [x, y] = skyToPix(state.target.ra, state.target.dec, state.data.grid);
   }
   const [cx, cy, k] = toCanvas(x, y);
   const r = Math.max(14, 3 * k);
@@ -477,6 +764,11 @@ function drawCandidate(ctx, c, selected) {
 
 // ------------------------------------------------------------------ candidates panel
 function candText(c) {
+  if (c.method === 'difference') {
+    if (c.type === 'moving') return t('movingDescDiff', { rate: c.rate_arcsec_yr, err: c.rate_err, pa: c.pa_deg, sig: c.significance });
+    if (c.type === 'variable') return t('variableDescDiff', { ratio: c.ratio ? c.ratio.toFixed(2) : '?', sig: c.significance });
+    return t('transientDescDiff', { sig: c.significance });
+  }
   if (c.type === 'moving') return t('movingDesc', { rate: c.rate_arcsec_yr, pa: c.pa_deg, sig: c.significance, n: c.points.length });
   if (c.type === 'variable') return t('variableDesc', { ratio: c.ratio, dets: c.detectors.map(d => 'D' + d.detector).join(', '), sig: c.significance });
   return t('transientDesc', { epoch: c.epoch, sig: c.significance });
@@ -488,8 +780,10 @@ function monthLabel(iso) {
     : d.toLocaleDateString(getLang() === 'tr' ? 'tr-TR' : 'en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 }
 
-function epochMonth(e) {
-  const f = state.data.frames.find(fr => fr.epoch === e);
+function epochMonth(e, c = null) {
+  // a tracker's find shown on the fast band still counts its visits in the all-detector frames
+  const foreign = c && c.method === 'tracking' && c.grid !== state.data.grid && state.deepData?.frames;
+  const f = (foreign ? state.deepData.frames : state.data.frames).find(fr => fr.epoch === e);
   return f ? monthLabel(f.date_start) : `E${e}`;
 }
 
@@ -507,7 +801,8 @@ function catalogueHits(c) {
 // The two visits a variable's card shows side by side: is the later one the brighter?
 function candPair(c) {
   const fs = state.data.frames;
-  if (c.type !== 'variable' || !state.images.length || fs.length > 60) return null;
+  if (c.type !== 'variable' || c.method === 'difference' || !state.images.length || fs.length > 60) return null;
+  if (c.grid !== state.data.grid) return null;       // found in other data than the frames on screen: use its own numbers
   try {
     const { a, b } = candFrames(c);                              // a: fainter frame, b: brighter frame
     if (a === b) return null;
@@ -522,14 +817,23 @@ function measureCand(c) {
 }
 
 function renderCandidates() {
-  const cands = state.data?.candidates || [];
+  const cands = state.data ? state.cands : [];
+  const qd = state.qc?.data, band = state.quick?.quick.band;
+  const NOTES = { few_movers: 'noteFewMovers', few_single: 'noteFewSingle', unmatched: 'noteUnmatched', one_pass: 'noteOnePass', failed: 'noteFailed' };
+  const footnotes = (qd?.notes || []).filter(k => NOTES[k]).map(k => el('li', 'candnote small', t(NOTES[k])));
+  // one of the two finders may still be at work (the all-detector read takes minutes)
+  const waiting = state.deepBusy || Boolean(state.qc && !qd);
   els.candCount.textContent = state.data ? `(${cands.length})` : '';
   els.candRange.textContent = '';
   if (!state.data) { els.cands.replaceChildren(); return; }
   const fs = state.data.frames;
   const epochs = [...new Set(fs.map(f => f.epoch))].sort((a, b) => a - b);
   if (epochs.length > 1) els.candRange.textContent = t('fBetween', { a: monthLabel(fs[0].date_start), b: monthLabel(fs[fs.length - 1].date_start) });
-  if (!cands.length) { els.cands.replaceChildren(el('li', 'muted small', t('noCands'))); return; }
+  if (!cands.length) {
+    els.cands.replaceChildren(el('li', 'muted small', t(waiting ? 'candsWait' : 'noCands')), ...footnotes);
+    return;
+  }
+  if (waiting) footnotes.unshift(el('li', 'candnote small', t('candsWait')));
   els.cands.replaceChildren(...cands.map((c, i) => {
     const li = el('li', 'cand' + (i === state.selected ? ' on' : ''));
     const head = el('button', 'candhead');
@@ -539,8 +843,8 @@ function renderCandidates() {
     dot.style.background = COLORS[c.type];
     const hl = headline(c, epochs, candPair(c));
     const title = t(hl.key, { ...hl.vars, dir: hl.vars.dir ? t('dir_' + hl.vars.dir) : '' });
-    const when = hl.from && hl.to && hl.from !== hl.to ? t('fBetween', { a: epochMonth(hl.from), b: epochMonth(hl.to) })
-      : hl.from || hl.to ? epochMonth(hl.from || hl.to) : t('fPasses', { n: c.points?.length ?? epochs.length });
+    const when = hl.from && hl.to && hl.from !== hl.to ? t('fBetween', { a: epochMonth(hl.from, c), b: epochMonth(hl.to, c) })
+      : hl.from || hl.to ? epochMonth(hl.from || hl.to, c) : t('fPasses', { n: c.points?.length ?? epochs.length });
     const cl = clarity(c.significance);
     head.append(dot, el('b', '', title),
       el('span', 'candsub small', `${t(c.type)} · ${when}`),
@@ -552,13 +856,23 @@ function renderCandidates() {
     const cat = catalogueStatus(c, states, hits);
     const notes = el('div', 'candnotes small');
     if (c.is_target) notes.append(el('span', 'tag', t('isTarget')));
-    if (c.found_by?.includes('difference')) { const tw = el('span', 'tag new', '✓✓ ' + t('twoWays')); tw.title = t('twoWaysTip'); notes.append(tw); }
+    // which finder saw it: both agreeing is the strongest case
+    notes.append(el('p', 'candhow', t(c.methods.length > 1 ? 'fBoth' : c.methods[0] === 'difference' ? 'fByDifference' : 'fByTracking', { b: band ?? '' })));
+    if (c.also && c.type === 'moving' && c.also.rate_arcsec_yr) {
+      notes.append(el('p', 'candhow mono', t('fAlsoDiff', { b: band ?? '', rate: c.also.rate_arcsec_yr.toFixed(2), err: (c.also.rate_err ?? 0).toFixed(2) })));
+    } else if (c.also && c.type !== 'moving') {
+      // the two finders look at different wavelengths, so they may see different changes: say both
+      const ah = headline(onGrid({ ...c.also, grid: state.data.grid }, state.data.grid), epochs);
+      notes.append(el('p', 'candhow', t('fAlsoDiffSays', { b: band ?? '', what: t(ah.key, ah.vars) })));
+    }
+    // the all-detector difference pictures (each visit minus the others) saw the tracker's find too
+    if (c.found_by?.includes('difference') && c.methods.length < 2) { const tw = el('span', 'tag new', '✓✓ ' + t('twoWays')); tw.title = t('twoWaysTip'); notes.append(tw); }
     if (cat) {
       const line = el('p', 'candcat ' + cat.kind, t(cat.key, cat.vars));
       if (hits.gaia) line.title = t('knownGaia', { g: hits.gaia.g?.toFixed(1) ?? '?', pm: (Math.hypot(hits.gaia.pmra || 0, hits.gaia.pmdec || 0) / 1000).toFixed(2) });
       notes.append(line);
     }
-    if (tooFast(c)) notes.append(el('p', 'candwarn', t('fTooFast')));
+    if (tooFast(c) || c.implausible) notes.append(el('p', 'candwarn', t('fTooFast')));
     if (c.low_confidence) notes.append(el('p', 'candwarn', t('fSaturated')));
     if (notes.childElementCount) li.append(notes);
     try { li.append(candVisual(c, known)); } catch (err) { console.warn('candidate visual', err); }
@@ -590,7 +904,7 @@ function renderCandidates() {
       li.append(d);
     }
     return li;
-  }));
+  }), ...footnotes);
 }
 
 els.showCands.onchange = drawOverlay;
@@ -760,6 +1074,8 @@ function candReport(c, known) {
   const lines = [
     'Radians candidate report (NASA SPHEREx)',
     `Type: ${t(c.type)}: ${candText(c)}`,
+    `Found by: ${(c.methods || ['tracking']).map(m => (m === 'tracking' ? 'following sources across visits (all detectors)' : `the wavelength-matched difference picture (band ${state.quick?.quick.band ?? '?'})`)).join(' and ')}`,
+    ...(c.also && c.also.rate_arcsec_yr ? [`Difference picture: ${c.also.rate_arcsec_yr.toFixed(2)} +/- ${(c.also.rate_err ?? 0).toFixed(2)} "/yr towards PA ${c.also.pa_deg} deg`] : []),
     `Position (ICRS): ${formatRA(c.ra)} ${formatDec(c.dec)} = ${c.ra.toFixed(5)} ${c.dec.toFixed(5)} deg`,
     `Visits: ${fs.length}, ${fs[0].date_start.slice(0, 10)} to ${fs[fs.length - 1].date_end.slice(0, 10)}; detectors ${[...state.dets].sort().map(d => 'D' + d).join(' ')}`,
     `Field: ${formatRA(g.ra)} ${formatDec(g.dec)}, ${(g.fov / 60).toFixed(1)}' wide`,
@@ -787,7 +1103,7 @@ function show(i) {
   if (isStack()) {
     const fs = data.frames;
     els.hudDate.textContent = `${fs[0].date_start.slice(0, 10)} → ${fs[fs.length - 1].date_end.slice(0, 10)}`;
-    els.hudIdx.textContent = t('stackLabel', { n: fs.length });
+    els.hudIdx.textContent = t(isTimeColor() ? 'timeLabel' : 'stackLabel', { n: fs.length });
     rows = [
       [t('kTarget'), tgt.name ? tgt.name.replace(/^NAME /, '') : t('coordinates')],
       [t('kExposures'), String(fs.reduce((s, f) => s + f.n_exposures, 0))],
@@ -814,6 +1130,7 @@ function show(i) {
   }
   if (tgt.pmra) rows.push([t('kPm'), t('pmFollow', { v: (Math.hypot(tgt.pmra, tgt.pmdec) / 1000).toFixed(2) })]);
   info(els.frameInfo, rows);
+  if (isMatched()) els.viewHelp.textContent = matchedHelp();
   renderFlagSummary();
   for (const [j, li] of [...els.timeline.children].entries()) li.firstChild.classList.toggle('on', j === state.idx);
   syncCube();
@@ -888,7 +1205,14 @@ document.addEventListener('radians:palette', () => {
 });
 els.cmap.value = viewerCmap(getPalette());
 for (const e of [els.lo, els.hi]) e.oninput = () => { computeLevels(); render(); };
-els.view.onchange = () => { const was = state.playing; syncRgb(); applyView(); if (was) play(); syncUrl(true); };
+els.view.onchange = () => {
+  const was = state.playing;
+  syncRgb();
+  // the matched difference compares with the first visit: open on the last one, where the change is largest
+  applyView(isMatched() && state.data ? state.data.frames.length - 1 : state.idx);
+  if (was) play();
+  syncUrl(true);
+};
 
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input:not([type=range]):not([type=checkbox]), select, textarea')) return;
@@ -928,12 +1252,12 @@ els.overlay.addEventListener('click', (e) => {
   if (!state.data) return;
   if (zoomState.dragged) { zoomState.dragged = false; return; }
   if (compareOn()) return;
-  const cands = state.data.candidates || [];
+  const cands = state.cands;
   const rect = els.overlay.getBoundingClientRect();
   const n = state.data.grid.n;
   const x = (e.clientX - rect.left) / rect.width * n - 0.5;
   const y = n - 1 - ((e.clientY - rect.top) / rect.height * n - 0.5);
-  let best = null, bd = 3;
+  let best = null, bd = 3 * NATIVE_PX / state.data.grid.pixel_scale;       // 3 detector pixels
   cands.forEach((c, i) => { const d = Math.hypot(c.x - x, c.y - y); if (d < bd) { best = i; bd = d; } });
   if (best !== null) { state.selected = best; renderCandidates(); drawOverlay(); }
   else photAt(x, y);
@@ -951,6 +1275,8 @@ function syncUrl(replace = false) {
   p.set('fov', els.fov.value);
   p.set('mode', els.mode.value);
   if (state.dets.size < 6) p.set('det', [...state.dets].sort().join(','));
+  if (state.src === 'deep') p.set('src', 'deep');
+  else if (state.quick?.quick.band ?? state.band) p.set('band', state.quick?.quick.band ?? state.band);   // the band on screen
   if (els.view.value !== 'images') p.set('view', els.view.value);
   if (els.fps.value !== '2') p.set('fps', els.fps.value);
   if (els.stretch.value !== 'asinh') p.set('stretch', els.stretch.value);
@@ -1007,11 +1333,11 @@ function fromUrl() {
     if (s.wlw !== null) setSelect(els.wlW, s.wlw);
   }
   syncWlBox();
-  // a new spot (from the map, the planetarium or a shared link without bands): fast band first,
-  // unless it is one of the prepared challenge targets, which open in full at once
-  const prepared = s.q && TARGETS.some(x => x.q.toLowerCase() === s.q.toLowerCase());
-  setDets(s.det ? s.det.split(',').map(Number) : prepared ? ALL_DETS : newSpotDets());
-  const common = { fov: els.fov.value, mode: els.mode.value, frame: s.frame, autoplay: s.frame === null };
+  setDets(s.det ? s.det.split(',').map(Number) : ALL_DETS);
+  // links made before the fast band existed, and settings only the all-detector data has, open on it
+  const deepOnly = s.src === 'deep' || (!s.src && s.band === null && Boolean(s.det || (s.mode && s.mode !== 'epoch') || s.wlc !== null || s.cmap === 'rgb'));
+  const common = { fov: els.fov.value, mode: els.mode.value, frame: s.frame, autoplay: s.frame === null,
+    src: deepOnly ? 'deep' : 'quick', band: s.band };
   if (s.ra !== null && s.dec !== null) run({ q: s.q, ra: s.ra, dec: s.dec, pmra: s.pmra, pmdec: s.pmdec, ...common });
   else if (s.q) run({ q: s.q, ...common });
 }
@@ -1019,11 +1345,10 @@ function fromUrl() {
 els.search.onsubmit = (e) => {
   e.preventDefault();
   const q = els.q.value.trim();
-  if (!q) return;
-  if (!TARGETS.some(x => x.q.toLowerCase() === q.toLowerCase())) setDets(newSpotDets());
-  run({ q, fov: els.fov.value, mode: els.mode.value });
+  if (q) run({ q, fov: els.fov.value, mode: els.mode.value });
 };
-for (const e of [els.fov, els.mode]) e.onchange = requery;
+els.fov.onchange = () => requery();
+els.mode.onchange = requeryDeep;
 els.examples.onclick = (e) => {
   const b = e.target.closest('button[data-q]');
   if (!b) return;
@@ -1036,6 +1361,13 @@ els.examples.onclick = (e) => {
   run({ q: b.dataset.q, fov: els.fov.value, mode: els.mode.value });
 };
 window.addEventListener('popstate', fromUrl);
+// a curated object chosen in the search suggestions: opened by its catalogue position and motion
+document.addEventListener('radians:open', (e) => {
+  const d = e.detail || {};
+  if (!Number.isFinite(d.ra) || !Number.isFinite(d.dec)) return;
+  setDets(ALL_DETS);
+  run({ q: d.q, name: d.q, ra: d.ra, dec: d.dec, pmra: d.pmra || undefined, pmdec: d.pmdec || undefined, fov: els.fov.value, mode: els.mode.value });
+});
 
 
 // ================================================================== phase 4
@@ -1062,7 +1394,7 @@ function onLoaded() {
   const cur = state.target ? curated(state.target.ra, state.target.dec) : null;
   $('lookNote').hidden = cur?.look !== 'brightness';
   if (cur?.look === 'brightness') ex.tab = 'lightcurve';
-  setPhot(state.data.exposures || [], null);
+  setPhot((state.deepData || state.data).exposures || [], null);
   loadCatalogues();
   loadNeossat();
   if (e4.ctx.open) updateAladin();
@@ -1098,11 +1430,19 @@ function curiousCtx() {
   const spot = typeSpot(), tg = state.target;
   const mjd = spot.mjd ?? currentMjd();
   const g = ex.gaia.find(s => String(s.id) === gaiaIdAt(spot));
-  const near = (c) => (ex.click ? Math.hypot(c.x - ex.click.x, c.y - ex.click.y) < 2.5 : c.is_target);
-  const mover = (state.data.candidates || []).find(c => c.type === 'moving' && near(c));
+  const reach = 2.5 * NATIVE_PX / state.data.grid.pixel_scale;                  // 2.5 detector pixels
+  const near = (c) => (ex.click ? Math.hypot(c.x - ex.click.x, c.y - ex.click.y) < reach : c.is_target);
+  const mover = state.cands.find(c => c.type === 'moving' && near(c));
   // motion to carry the star back to older surveys: Gaia's if it has one, else the target's own
   const pm = g ? [g.pmra || 0, g.pmdec || 0] : ex.click ? [0, 0] : [tg.pmra || 0, tg.pmdec || 0];
-  return { ra: spot.ra, dec: spot.dec, mjd, pmra: pm[0], pmdec: pm[1], gaiaId: g ? String(g.id) : null,
+  // a line through the star's position in each pass of the fast band (the target, or the clicked star)
+  const q = state.quick?.quick;
+  let fitAt = null;
+  if (q && q.state === 'ready') {
+    fitAt = { id: q.id };
+    if (ex.click) { const [gx, gy] = skyToPix(ex.click.ra, ex.click.dec, state.quick.grid); fitAt = { id: q.id, x: gx.toFixed(2), y: gy.toFixed(2) }; }
+  }
+  return { ra: spot.ra, dec: spot.dec, mjd, pmra: pm[0], pmdec: pm[1], gaiaId: g ? String(g.id) : null, fitAt,
     cand: mover ? { ...mover, dir: COMPASS[Math.round((((mover.pa_deg % 360) + 360) % 360) / 45) % 8] } : null,
     points: ex.phot.map(p => ({ mjd: p.mjd, wavelength: p.wavelength, value: valueOf(p) })) };
 }
@@ -1156,13 +1496,13 @@ async function loadType() {
     const r = await ask({});                               // our own fit first: it does not wait for the catalogues
     if (!live()) return;
     typeState.res = { ...r, pending: true };
-    drawType();
+    renderAnalysis();                                      // the box, and the matched curve on the spectrum
   } catch { return; }
   await gaiaReady();
   if (!live()) return;
   try {
     const r = await ask({ catalogues: true, gaia_id: gaiaIdAt(spot) });
-    if (live()) { typeState.res = r; drawType(); }
+    if (live()) { typeState.res = r; renderAnalysis(); }
   } catch {
     if (live()) { typeState.res = { ...typeState.res, pending: false, catFail: true }; drawType(); }
   }
@@ -1179,14 +1519,26 @@ async function photAt(x, y) {
       if (Number.isFinite(v) && v > bv) { bv = v; bx = xx; by = yy; }
     }
   }
+  let px = bx, py = by;
+  if (state.data.quick) {
+    if (!state.deepData?.grid) {
+      const [ra, dec] = pixToSky(bx, by, state.data.grid);
+      ex.click = { x: bx, y: by, ra, dec };
+      renderAnalysis();
+      drawOverlay();
+      toast(t('needDeep'));
+      return;
+    }
+    [px, py] = skyToPix(...pixToSky(bx, by, state.data.grid), state.deepData.grid).map(Math.round);
+  }
   if (ex.photAbort) ex.photAbort.abort();
   const ctl = new AbortController();
   ex.photAbort = ctl;
   e4.analysis.hidden = false;
   e4.photSource.textContent = t('photLoading');
   try {
-    const r = await api('api/photometry', { ...gridParams(), x: bx, y: by }, ctl.signal);
-    setPhot(r.points, { x: r.x, y: r.y, ra: r.ra, dec: r.dec });
+    const r = await api('api/photometry', { ...gridParams(), x: px, y: py }, ctl.signal);
+    setPhot(r.points, { x: bx, y: by, ra: r.ra, dec: r.dec });
     drawOverlay();
   } catch (err) {
     if (err.name !== 'AbortError') { toast(err.message, true); renderAnalysis(); }
@@ -1229,9 +1581,79 @@ function tipFor(p, ep) {
   return rows;
 }
 
+/** The fast band's light curve at the spot being measured (the target, or the clicked star), from the
+ * engine: a 5x5 box, or a halo ring when the star is saturated, each picture divided by the usual
+ * brightness at its own wavelength. null while it is being measured. */
+function engineLc() {
+  const q = state.quick?.quick;
+  if (!q || q.state !== 'ready') return { error: 'none' };
+  let params = {};
+  if (ex.click) {
+    const [gx, gy] = skyToPix(ex.click.ra, ex.click.dec, state.quick.grid);
+    params = { x: gx.toFixed(2), y: (state.quick.grid.n - 1 - gy).toFixed(2) };       // the engine counts rows from the top
+  }
+  const key = `${q.id}:${q.rev}:${params.x ?? 'target'}:${params.y ?? ''}`;
+  if (ex.elc && ex.elc.key === key) return ex.elc.data;
+  const elc = ex.elc = { key, data: null };
+  api(`api/views/${q.id}/lightcurve`, params)
+    .then((d) => { elc.data = d; })
+    .catch((e) => { elc.data = { error: e.message }; })
+    .finally(() => { if (ex.elc === elc) renderAnalysis(); });
+  return null;
+}
+
+function drawEngineLc() {
+  const lc = engineLc(), band = state.quick?.quick.band;
+  if (!lc) { e4.chart.replaceChildren(el('p', 'muted small', t('elcLoading'))); e4.chartNote.textContent = ''; return; }
+  const pts = (lc.points || []).filter(p => Number.isFinite(lc.mode === 'delta' ? p.delta : p.ratio));
+  if (lc.error || !pts.length) { e4.chart.replaceChildren(el('p', 'muted small', t('elcNone'))); e4.chartNote.textContent = lc.message || ''; return; }
+  const ratio = lc.mode !== 'delta';
+  const byPass = new Map();
+  for (const p of pts) { if (!byPass.has(p.pass)) byPass.set(p.pass, []); byPass.get(p.pass).push(p); }
+  const dates = new Map((lc.dates || []).map(d => [d.index, d.start]));
+  scatterChart(e4.chart, {
+    series: [...byPass.keys()].sort((a, b) => a - b).map(k => ({
+      name: `${t('epochN', { n: k + 1 })} · ${(dates.get(k) || '').slice(0, 7)}`, color: SERIES[k % SERIES.length],
+      points: byPass.get(k).map(p => ({
+        x: p.mjd, y: ratio ? p.ratio : p.delta, hollow: p.saturated,
+        err: ratio && p.err && p.typical ? p.err / Math.abs(p.typical) : (ratio ? null : p.err),
+        tip: [`${mjdDate(p.mjd)} · ${p.wave_um.toFixed(3)} µm`, ratio ? `× ${p.ratio.toFixed(3)}` : `${p.delta.toFixed(3)} ${lc.units}`],
+      })),
+    })),
+    bands: state.data.quick ? visitBands() : undefined,
+    xLabel: t('lcX'), yLabel: ratio ? t('elcYRatio') : t('elcYDelta', { u: lc.units }), refLine: ratio ? 1 : 0,
+    xFmt: v => mjdDate(v).slice(0, 7), yFmt: v => v.toFixed(2),
+  });
+  e4.chartNote.textContent = t(lc.estimator === 'halo' ? 'elcNoteHalo' : 'elcNoteBox', { b: band });
+}
+
+function typeCurves() {
+  const fit = typeState.res?.fit;
+  if (!fit) return [];
+  const pts = (c) => c.wave.map((w, i) => ({ x: w, y: c.flux[i] }));
+  const out = [];
+  if (fit.standards?.curve) out.push({ name: t('tyCurveStd', { type: fit.standards.type }), color: '#FFB347', points: pts(fit.standards.curve) });
+  if (fit.model?.curve) out.push({ name: t('tyCurveModel', { teff: fit.model.teff }), color: '#6fc3ff', dash: '5 4', points: pts(fit.model.curve) });
+  return out;
+}
+
 function renderAnalysis() {
-  if (!state.data || !ex.phot || !ex.phot.length) { e4.analysis.hidden = true; return; }
+  const havePhot = Boolean(ex.phot && ex.phot.length);
+  const haveQuick = state.quick?.quick.state === 'ready';
+  if (!state.data || (!havePhot && !haveQuick)) { e4.analysis.hidden = true; return; }
   e4.analysis.hidden = false;
+  if (!havePhot) {
+    // all six bands are still being read: the fast band's light curve is already there
+    const tg0 = state.target;
+    e4.photSource.textContent = ex.click
+      ? t('photClicked', { pos: `${formatRA(ex.click.ra)} ${formatDec(ex.click.dec)}` })
+      : `${t('photTarget', { name: tg0.name ? tg0.name.replace(/^NAME /, '') : t('coordinates') })} · ${t('clickHint')}`;
+    for (const b of e4.analysis.querySelectorAll('[data-tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === 'lightcurve'));
+    drawType();
+    drawEngineLc();
+    e4.chartNote.textContent = `${e4.chartNote.textContent} ${t('elcNeedDeep')}`.trim();
+    return;
+  }
   drawType();
   const tg = state.target;
   e4.photSource.textContent = ex.click
@@ -1251,9 +1673,13 @@ function renderAnalysis() {
         x: p.wavelength, y: valueOf(p), err: wings ? null : p.err_ujy, hollow: p.flagged, color: wlColor(p.wavelength),
         series: `${t('epochN', { n: k })} · ${mjdDate(p.mjd).slice(0, 7)}`, tip: tipFor(p, k) }))) }],
       marks: SPECTRAL_BANDS, strip: wlColor,
+      // what the Type box matched: the standard star (or brown-dwarf model) that fits best, scaled to the data
+      lines: wings ? [] : typeCurves(),
       xLabel: t('specX'), yLabel: wings ? t('wingY') : t('specY'), xFmt: v => v.toFixed(1), yFmt,
     });
     e4.chartNote.textContent = (wings ? t('chartNoteWings') + ' ' : '') + t('chartNoteSpec');
+  } else if (ex.tab === 'lightcurve' && e4.photMode.value === 'engine') {
+    drawEngineLc();
   } else if (ex.tab === 'lightcurve') {
     const byDet = new Map();
     for (const p of pts) { if (!byDet.has(p.detector)) byDet.set(p.detector, []); byDet.get(p.detector).push(p); }
@@ -1426,16 +1852,16 @@ function renderNeossat() {
 }
 
 // ------------------------------------------------------------------ Aladin Lite context view
-const ALADIN_JS = 'https://cdn.jsdelivr.net/npm/aladin-lite@3.6.5/dist/aladin.js';
 
 async function updateAladin() {
   if (!state.data || !state.data.grid) return;
   try {
-    if (!window.A) window.A = (await import(ALADIN_JS)).default;
-    await window.A.init;
+    await loadAladin();
     const g = state.data.grid;
     if (!ex.aladin) {
-      ex.aladin = window.A.aladin('#aladin', { fov: g.fov / 3600 * 3, target: `${g.ra} ${g.dec}`,
+      const first = e4.ctxSurvey.selectedOptions[0];        // its own first survey: nothing is asked from CDS
+      ex.aladin = window.A.aladin('#aladin', { ...QUIET, survey: window.A.imageHiPS(first.value, { name: first.textContent }),
+        fov: g.fov / 3600 * 3, target: `${g.ra} ${g.dec}`,
         cooFrame: 'ICRS', showReticle: false, showFullscreenControl: true, showLayersControl: true });
       ex.ovl = window.A.graphicOverlay({ color: '#ffb347', lineWidth: 2 });
       ex.aladin.addOverlay(ex.ovl);
@@ -1486,8 +1912,7 @@ e4.ctxGaia.onchange = e4.ctxCatwise.onchange = () => ex.aladin && setAladinCats(
 
 // ------------------------------------------------------------------ start
 buildDetChips();
-buildBandBar();
-syncBandUi();
+buildBandChips();
 let startLang = parseState(location.search).lang;
 try { startLang = startLang || localStorage.getItem('radians-lang'); } catch { /* private mode */ }
 applyLang(startLang || 'en');
@@ -1496,7 +1921,7 @@ window.radians = { state, ex };   // handle for debugging in the console
 
 
 // ------------------------------------------------------------------ wavelength matching, zoom, GIF
-els.wlMatch.onchange = () => { requery(); };
+els.wlMatch.onchange = () => { requeryDeep(); };
 
 const zoomState = { z: 1, tx: 0, ty: 0, drag: null, dragged: false };
 function applyZoom() {
@@ -1533,13 +1958,15 @@ window.addEventListener('pointerup', () => { zoomState.drag = null; });
 function frameIndices(i, table) {
   const n = state.data.grid.n, img = state.shown[i];
   const diffView = isDiffView(els.view.value);
+  const md = isMatched() && state.md && state.md.images ? state.md : null;
   const [lo, hi] = state.levels, kind = els.stretch.value;
   const px = new Uint8Array(n * n);
   for (let y = 0; y < n; y++) {
     const row = n - 1 - y;
     for (let x = 0; x < n; x++) {
-      const tv = diffView ? stretchSigned(img[y * n + x], hi, kind) : stretchValue(img[y * n + x], lo, hi, kind);
-      px[row * n + x] = Number.isNaN(tv) ? 0 : (diffView ? Math.round(128 + tv * 127) : Math.round(tv * 255));
+      const tv = md ? matchedDiffValue(img[y * n + x], md.limit[i])
+        : diffView ? stretchSigned(img[y * n + x], hi, kind) : stretchValue(img[y * n + x], lo, hi, kind);
+      px[row * n + x] = Number.isNaN(tv) ? (md ? 128 : 0) : (diffView ? Math.round(128 + tv * 127) : Math.round(tv * 255));
     }
   }
   return px;
@@ -1547,10 +1974,22 @@ function frameIndices(i, table) {
 
 els.gif.onclick = () => {
   if (!state.data) return;
+  const fileName = (state.target && (state.target.name || els.q.value) || 'radians').toString().replace(/[^\w.-]+/g, '-');
+  if (isTimeColor()) {                              // one colour picture: a PNG, not a GIF
+    els.sky.toBlob((blob) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${fileName}-colour-by-time.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast(t('pngDone'));
+    });
+    return;
+  }
   toast(t('gifMaking'));
   setTimeout(() => {
     const n = state.data.grid.n, k = Math.max(1, Math.floor(480 / n)), W = n * k;
-    const table = isDiffView(els.view.value) ? lutDiverging() : lut(els.cmap.value);
+    const table = isMatched() && state.md?.images ? lutBeforeNow() : isDiffView(els.view.value) ? lutDiverging() : lut(els.cmap.value);
     const count = isStack() ? 1 : state.shown.length;
     const frames = [];
     for (let i = 0; i < count; i++) {
@@ -1736,22 +2175,23 @@ function syncWlBox() {
 els.wlWin.onchange = () => {
   if (els.wlWin.value && els.wlWin.value !== 'custom') els.wlC.value = els.wlWin.value;
   syncWlBox();
-  requery();
+  requeryDeep();
 };
 els.wlC.oninput = () => { if (els.wlWin.value !== 'custom') els.wlWin.value = 'custom'; syncWlBox(); };
-els.wlC.onchange = els.wlW.onchange = () => { syncWlBox(); requery(); };
+els.wlC.onchange = els.wlW.onchange = () => { syncWlBox(); requeryDeep(); };
 syncWlBox();
 
 // ------------------------------------------------------------------ colour composite (blue D1–D2, green D3–D4, red D5–D6)
 const rgbWanted = () => els.cmap.value === 'rgb';
-const rgbPossible = () => !isDiffView(els.view.value) && els.mode.value === 'epoch';
+const rgbPossible = () => !isDiffView(els.view.value) && els.mode.value === 'epoch' && !state.data?.quick;
 const rgbKey = () => JSON.stringify(state.params);
 const rgbReady = () => rgbWanted() && rgbPossible() && state.rgb && state.rgb.key === rgbKey() && state.rgb.ch;
 
 async function syncRgb() {
   els.rgbNote.hidden = !rgbWanted();
+  if (rgbWanted() && state.data?.quick) { els.rgbNote.textContent = t('rgbNeedsDeep'); return; }
   if (!rgbWanted() || !state.data || !state.params) return;
-  if (!rgbPossible()) { els.rgbNote.textContent = t('rgbNeeds'); return; }
+  if (!rgbPossible()) { els.rgbNote.textContent = t(state.data.quick ? 'rgbNeedsDeep' : 'rgbNeeds'); return; }
   const key = rgbKey();
   if (state.rgb && state.rgb.key === key) { noteRgb(); return; }
   state.rgb = { key, ch: null };
@@ -1805,48 +2245,6 @@ function renderRgb() {
   ctx.putImageData(out, 0, 0);
   drawOverlay();
 }
-document.addEventListener('radians:lang', syncBandUi);
-
-// Under the search box: how the text will be read, before anything is sent
-function showParse() {
-  const q = els.q.value.trim(), out = $('qParse');
-  if (q.length < 2) { out.hidden = true; return; }
-  const c = parseCoords(q);
-  out.textContent = c ? t('qAsPos', { ra: c[0].toFixed(4), dec: (c[1] >= 0 ? '+' : '') + c[1].toFixed(4) }) : t('qAsName', { q });
-  out.hidden = false;
-}
-els.q.addEventListener('input', showParse);
-els.q.addEventListener('blur', () => setTimeout(() => { $('qParse').hidden = true; }, 150));
-document.addEventListener('radians:lang', () => { if (!$('qParse').hidden) showParse(); });
-
-// Colour by time: every visit in its own colour (first blue, middle green, last red), added up and divided by
-// the colour total, so a star that stays put comes out white and anything that moves leaves a coloured trail.
-function renderTime() {
-  const { data } = state, n = data.grid.n, ims = state.images, N = ims.length;
-  const [lo, hi] = percentiles(ims, [Number(els.lo.value), Number(els.hi.value)]);
-  const kind = els.stretch.value, cols = ims.map((_, k) => timeColour(k, N));
-  const tot = [0, 1, 2].map(c => cols.reduce((s, x) => s + x[c], 0) || 1);
-  const ctx = els.sky.getContext('2d'), out = ctx.createImageData(n, n);
-  for (let y = 0; y < n; y++) {
-    const row = n - 1 - y;
-    for (let x = 0; x < n; x++) {
-      const i = y * n + x, o = (row * n + x) * 4;
-      let r = 0, g = 0, b = 0;
-      for (let k = 0; k < N; k++) {
-        const v = stretchValue(ims[k][i], lo, hi, kind);
-        if (Number.isNaN(v)) continue;
-        r += v * cols[k][0]; g += v * cols[k][1]; b += v * cols[k][2];
-      }
-      out.data[o] = Math.min(255, Math.round(255 * r / tot[0]));
-      out.data[o + 1] = Math.min(255, Math.round(255 * g / tot[1]));
-      out.data[o + 2] = Math.min(255, Math.round(255 * b / tot[2]));
-      out.data[o + 3] = 255;
-    }
-  }
-  ctx.putImageData(out, 0, 0);
-  drawOverlay();
-}
-
 // FITS of the visit on screen (or the stack): float32, MJy/sr, with the sky grid's WCS and the visit dates
 $('fitsDl').onclick = () => {
   if (!state.data) return;
@@ -1859,7 +2257,8 @@ $('fitsDl').onclick = () => {
     cards.push([k.slice(0, 8), typeof v === 'number' ? v : String(v)]);
   }
   cards.push(['BUNIT', 'MJy/sr', 'surface brightness'], ['TELESCOP', 'SPHEREx'], ['ORIGIN', 'Radians (NASA/IPAC IRSA data)'],
-    ['DETECTOR', [...state.dets].sort().map(x => 'D' + x).join(' ')]);
+    d.quick ? ['DETECTOR', 'D' + d.quick.band, 'fast band: median stack of one sky pass']
+      : ['DETECTOR', [...state.dets].sort().map(x => 'D' + x).join(' ')]);
   if (f) cards.push(['EPOCH', f.epoch, 'visit number'], ['DATE-BEG', String(f.date_start || '').slice(0, 19)], ['DATE-END', String(f.date_end || '').slice(0, 19)]);
   else cards.push(['COMMENT', 'stack of all visits']);
   const bytes = fitsBytes(img, n, cards);

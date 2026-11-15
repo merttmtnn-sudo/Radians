@@ -20,7 +20,7 @@ from astropy.io import fits
 from astropy.io.fits.hdu.compressed._codecs import Rice1
 from astropy.wcs import WCS, FITSFixedWarning
 
-from . import config
+from . import config, irsa
 
 BLOCK = 2880
 MAX_RANGES_PER_REQUEST = 90
@@ -67,8 +67,9 @@ def _parse_multipart(body: bytes, ctype: str):
 
 
 # One cap on IRSA requests for the whole server, however many visitors and worker threads there are
-# (config.IRSA_MAX_INFLIGHT; from Efe's PR #9). The Sky Explorer's cut-outs (explorer.py) share it.
-IRSA_SLOTS = threading.BoundedSemaphore(max(1, config.IRSA_MAX_INFLIGHT))
+# (config.IRSA_MAX_INFLIGHT; from Efe's PR #9). The fast engine, the Sky Explorer's cut-outs and the
+# colour tiles share it (app/irsa.py).
+IRSA_SLOTS = irsa.SLOTS
 
 
 def _get(url, merged, timeout=60):
@@ -76,20 +77,20 @@ def _get(url, merged, timeout=60):
     last = None
     for attempt in range(4):
         try:
-            with IRSA_SLOTS:                  # held for the request and its body, released before any retry wait
+            with IRSA_SLOTS:                      # one of the server-wide IRSA slots, body included
                 r = session().get(url, headers={"Range": "bytes=" + spec}, timeout=timeout, stream=True)
-                busy = r.status_code in (429, 502, 503, 504)
-                if not busy and r.status_code not in (200,):
+                status = r.status_code
+                if status in (200, 429, 502, 503, 504):
+                    r.close()
+                else:
                     r.raise_for_status()
                     body, ctype = r.content, r.headers.get("Content-Type", "")
-            if busy:                          # IRSA busy: wait as asked, then retry
+            if status in (429, 502, 503, 504):            # IRSA busy: wait as asked, then retry
                 wait = r.headers.get("Retry-After", "")
-                r.close()
-                last = IOError(f"HTTP {r.status_code}")
+                last = IOError(f"HTTP {status}")
                 time.sleep(min(30.0, float(wait) if wait.isdigit() else 2.0 ** attempt))
                 continue
-            if r.status_code == 200:          # server ignored the ranges: never download 65 MB
-                r.close()
+            if status == 200:                 # server ignored the ranges: never download 65 MB
                 if len(merged) == 1:
                     raise IOError(f"{url} does not support byte ranges")
                 return [p for rng in merged for p in _get(url, [rng], timeout)]

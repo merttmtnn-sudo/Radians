@@ -29,7 +29,7 @@ from astropy.io import fits
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, Response
 
-from . import config, fitsrange
+from . import config, irsa
 
 IRSA = "https://irsa.ipac.caltech.edu"
 TAP = IRSA + "/TAP/sync"
@@ -41,7 +41,7 @@ URI_RE = re.compile(r"^ibe/data/spherex/[\w./-]+\.fits$")
 WAVE_SEED = Path(__file__).resolve().parent / "wave_seed"
 
 router = APIRouter(prefix="/api/sx")
-_cutout_slots = fitsrange.IRSA_SLOTS             # one IRSA request cap shared with the blink reader
+_cutout_slots = irsa.SLOTS                       # one IRSA request cap shared with every other reader
 _pool = ThreadPoolExecutor(8)
 
 
@@ -307,7 +307,7 @@ def _fetch_cutout(uri, ra, dec, size):
     last = None
     for attempt in range(3):
         try:
-            with _cutout_slots:
+            with _cutout_slots:                       # one of the server-wide IRSA slots
                 r = _get(url, timeout=180, tries=4, stream=True)
                 try:
                     if not r.ok:
@@ -585,7 +585,8 @@ def _cube_tile(frame, order, npix):
     d = npix // 10000 * 10000
     url = f"{HIPS_ROOT}/Norder{order}/Dir{d}/Npix{npix}{'_' + str(frame) if frame else ''}.png"
     try:
-        r = _get(url, timeout=40, tries=3)
+        with irsa.SLOTS:
+            r = _get(url, timeout=40, tries=3)
     except Upstream:
         return None
     if r.status_code != 200:
@@ -628,7 +629,7 @@ mix_router = APIRouter(prefix="/hips/spherex-mix")
 
 
 def mix_tile(order, npix, r, g, b):
-    p = config.CACHE_DIR / "sxmix" / f"{r}-{g}-{b}_{order}_{npix}.png"
+    p = config.CACHE_DIR / "sxmix" / "rgb" / f"{r}-{g}-{b}_{order}_{npix}.png"
     if p.exists():
         return p.read_bytes()
     from PIL import Image

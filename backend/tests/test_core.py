@@ -329,6 +329,29 @@ def test_frames_with_a_wavelength_window(monkeypatch):
     assert c.get("/api/frames", params=q).json()["wl_window"] is None
 
 
+def test_resolve_falls_back_to_the_built_in_objects(monkeypatch):
+    """A name the resolver does not know, or a resolver that is down, still finds the curated objects."""
+    from fastapi.testclient import TestClient
+    from app import archive, main
+
+    def down(q):
+        raise OSError("resolver unreachable")
+
+    def unknown(q):
+        raise LookupError("no such object")
+
+    client = TestClient(main.app)
+    monkeypatch.setattr(archive, "resolve", down)
+    r = client.get("/api/resolve", params={"q": "barnards star"})
+    assert r.status_code == 200 and r.json()["source"] == "built-in list"
+    assert abs(r.json()["ra"] - 269.452) < 0.01 and r.json()["pmdec"] > 10000
+    assert client.get("/api/resolve", params={"q": "no such thing 123"}).status_code == 502
+    monkeypatch.setattr(archive, "resolve", unknown)
+    r = client.get("/api/resolve", params={"q": "Taurus Molecular Cloud"})
+    assert r.status_code == 200 and r.json()["pmra"] is None
+    assert client.get("/api/resolve", params={"q": "no such thing 123"}).status_code == 404
+
+
 def test_lookup_endpoints_are_rate_limited():
     from app import main
     for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr", "/api/curious/motion",

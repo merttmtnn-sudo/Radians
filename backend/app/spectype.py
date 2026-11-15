@@ -155,7 +155,7 @@ def _chi2(wave, flux, err, grid, template):
         return None
     wt = 1 / err[ok] ** 2
     scale = float(np.sum(flux[ok] * t[ok] * wt) / np.sum(t[ok] ** 2 * wt))
-    return float(np.sum((flux[ok] - scale * t[ok]) ** 2 * wt)), n
+    return float(np.sum((flux[ok] - scale * t[ok]) ** 2 * wt)), n, scale
 
 
 def _rank(b: dict, lib: dict, sources: tuple, window: tuple) -> list[dict]:
@@ -170,8 +170,8 @@ def _rank(b: dict, lib: dict, sources: tuple, window: tuple) -> list[dict]:
         got = _chi2(w, f, e, lib["grid_um"], lib["spectra"][i])
         if got is None or got[1] < 0.6 * inside.sum():       # the template misses too much of the data
             continue
-        chi2, n = got
-        out.append({"name": str(lib["names"][i]), "source": str(source), "chi2": chi2, "n": n,
+        chi2, n, scale = got
+        out.append({"index": i, "scale": scale, "name": str(lib["names"][i]), "source": str(source), "chi2": chi2, "n": n,
                     "chi2_red": chi2 / max(1, n - 1), "code": float(lib["codes"][i]), "teff": float(lib["teffs"][i])})
     return sorted(out, key=lambda r: r["chi2_red"])
 
@@ -183,7 +183,16 @@ def fit(points: list[dict]) -> dict:
     lib = library()
     b = bin_spectrum(points)
     out = {"n_points": b["n_points"], "n_bins": int(b["wave"].size), "saturated_fraction": round(b["saturated_fraction"], 3),
-           "standards": None, "model": None, "note": None}
+           "standards": None, "model": None, "note": None,
+           # the binned spectrum the fit used, for drawing it against the best match
+           "data": {"wave": b["wave"].round(4).tolist(), "flux": b["flux"].tolist(), "err": b["err"].tolist()}}
+
+    def curve(row, window):
+        """The reference spectrum of a ranked row, scaled to the data, inside the fitted window."""
+        grid, template = lib["grid_um"], lib["spectra"][row["index"]]
+        keep = np.isfinite(template) & (grid >= window[0]) & (grid <= window[1])
+        return {"wave": grid[keep].round(4).tolist(), "flux": (row["scale"] * template[keep]).tolist()}
+
     if lib is None:
         out["note"] = "no_library"
         return out
@@ -209,7 +218,8 @@ def fit(points: list[dict]) -> dict:
             teff = teff_of(best["name"])
             out["standards"] = {"type": best["name"], "source": best["source"], "chi2_red": round(best["chi2_red"], 2),
                                 "n_bins": best["n"], "range": [type_name(min(codes)), type_name(max(codes))],
-                                "teff": round(teff) if teff else None, "alternatives": others, "snr": round(snr_short, 1)}
+                                "teff": round(teff) if teff else None, "alternatives": others, "snr": round(snr_short, 1),
+                                "curve": curve(best, STANDARDS_UM)}
     if snr_all >= 3 and b["wave"].size >= MIN_BINS:
         models = _rank(b, lib, ("Sonora",), (BAND_EDGES_UM[0], BAND_EDGES_UM[-1]))
         if models:
@@ -218,7 +228,8 @@ def fit(points: list[dict]) -> dict:
             edge = best["teff"] in (float(np.nanmin(lib["teffs"])), float(np.nanmax(lib["teffs"])))
             out["model"] = {"teff": round(best["teff"]), "teff_range": [round(min(near)), round(max(near))],
                             "chi2_red": round(best["chi2_red"], 2), "n_bins": best["n"],
-                            "type": type_at_teff(best["teff"]), "at_edge": edge}
+                            "type": type_at_teff(best["teff"]), "at_edge": edge,
+                            "curve": curve(best, (BAND_EDGES_UM[0], BAND_EDGES_UM[-1]))}
     # the models only describe brown dwarfs: next to a star that the standards fit better, they say nothing
     st, mo = out["standards"], out["model"]
     if st and mo and (st["teff"] or 0) > 2600 and mo["at_edge"]:

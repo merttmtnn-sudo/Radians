@@ -1,6 +1,9 @@
 // "Map": the whole sky as SPHEREx sees it (the DR1 all-sky cube from NASA/IPAC IRSA) in Aladin Lite,
 // tinted in the colour of the chosen wavelength, with a 0.75-5 µm slider, an automatic wavelength tour,
 // highlight wavelengths, the challenge and Explore targets marked and listed, and click-anywhere-to-blink.
+import { pickTints, rgbToHex, scaleRgb, hexToRgb } from './colour.js';
+import { BLANK_FRAMES, FRAME_GAIN, PRESETS as SCI_PRESETS, REGIONS, NOTES } from './colourdata.js';
+import { loadConstellations, linePaths, labels as constLabels, constellationAt } from './constellations.js';
 import { t, getLang } from '../core/i18n.js';
 import { wlColor } from '../core/charts.js';
 import { CUBE_URL, CUBE_WL, BLANK, bandOf, nearestSlice, nextSlice } from '../core/cube.js';
@@ -8,7 +11,7 @@ import { TARGETS, EXPLORE } from '../content/facts.js';
 import { decodeB64, percentiles, stretchValue } from '../blink/sky.js';
 import { MAP_PALETTES, getPalette, setPalette, gradient, paletteFilters } from '../core/palette.js';
 
-const ALADIN_JS = 'https://cdn.jsdelivr.net/npm/aladin-lite@3.6.5/dist/aladin.js';
+import { loadAladin, QUIET } from '../core/aladin.js';
 const $ = (id) => document.getElementById(id);
 const root = document.documentElement;
 const HOME = { ra: 266.4, dec: -28.9, fov: 200 };          // the Galactic centre, Milky Way across the middle
@@ -36,31 +39,7 @@ const PRESETS = [
 ];
 
 
-// Famous sights for anyone who just wants to look around: fixed J2000 positions, one line each.
-const FAMOUS = [
-  { q: 'M42', ra: 83.822, dec: -5.391, en: ['Orion Nebula', 'A star nursery 1,300 light-years away; in the infrared you see through its dust.'], tr: ['Orion Bulutsusu', '1.300 ışık yılı ötede bir yıldız doğumevi; kızılötesinde tozunun içini görürsünüz.'] },
-  { q: 'Betelgeuse', ra: 88.793, dec: 7.407, en: ['Betelgeuse', 'A red supergiant so large it would swallow Jupiter’s orbit; it will one day explode.'], tr: ['Betelgeuse', 'Jüpiter’in yörüngesini yutacak kadar büyük bir kızıl süperdev; bir gün patlayacak.'] },
-  { q: 'Rigel', ra: 78.634, dec: -8.202, en: ['Rigel', 'A blue supergiant tens of thousands of times brighter than the Sun.'], tr: ['Rigel', 'Güneş’ten on binlerce kat parlak mavi bir süperdev.'] },
-  { q: 'Sirius', ra: 101.287, dec: -16.716, en: ['Sirius', 'The brightest star in the night sky, 8.6 light-years away, with a white-dwarf companion.'], tr: ['Sirius', 'Gece gökyüzünün en parlak yıldızı, 8,6 ışık yılı ötede, beyaz cüce bir eşi var.'] },
-  { q: 'Vega', ra: 279.235, dec: 38.784, en: ['Vega', 'The star that once defined magnitude zero; a dusty disc circles it.'], tr: ['Vega', 'Bir zamanlar sıfır kadiri tanımlayan yıldız; çevresinde tozlu bir disk var.'] },
-  { q: 'Polaris', ra: 37.955, dec: 89.264, en: ['Polaris', 'The North Star: the sky turns around this point.'], tr: ['Kutup Yıldızı', 'Gökyüzü bu noktanın çevresinde döner.'] },
-  { q: 'M45', ra: 56.75, dec: 24.117, en: ['Pleiades', 'The Seven Sisters: a young cluster drifting through a dust cloud.'], tr: ['Ülker', 'Yedi Kız Kardeş: bir toz bulutunun içinden geçen genç bir küme.'] },
-  { q: 'M31', ra: 10.685, dec: 41.269, en: ['Andromeda Galaxy', 'Our big neighbour, 2.5 million light-years away; it will merge with the Milky Way.'], tr: ['Andromeda Gökadası', '2,5 milyon ışık yılı ötedeki büyük komşumuz; Samanyolu ile birleşecek.'] },
-  { q: 'M1', ra: 83.633, dec: 22.015, en: ['Crab Nebula', 'What is left of a star that exploded in 1054, seen by astronomers in China.'], tr: ['Yengeç Bulutsusu', '1054’te patlayan, Çinli gökbilimcilerin gördüğü bir yıldızın kalıntısı.'] },
-  { q: 'eta Car', ra: 161.265, dec: -59.685, en: ['Eta Carinae', 'A giant star that brightened hugely in the 1840s and hides in its own dust.'], tr: ['Eta Carinae', '1840’larda çok parlayan ve kendi tozunun içine gizlenen dev bir yıldız.'] },
-  { q: 'Sgr A*', ra: 266.417, dec: -29.008, en: ['Galactic centre', 'A black hole of four million Suns sits here, behind dust that infrared light gets through.'], tr: ['Gökada merkezi', 'Burada dört milyon Güneş kütleli bir kara delik var; kızılötesi ışık önündeki tozu aşar.'] },
-  { q: 'LMC', ra: 80.894, dec: -69.756, en: ['Large Magellanic Cloud', 'A small galaxy circling ours, 160,000 light-years away.'], tr: ['Büyük Macellan Bulutu', 'Gökadamızın çevresinde dönen küçük bir gökada, 160.000 ışık yılı ötede.'] },
-  { q: 'SMC', ra: 13.187, dec: -72.829, en: ['Small Magellanic Cloud', 'The Large Cloud’s little sibling, stretched by its pull.'], tr: ['Küçük Macellan Bulutu', 'Büyük Bulut’un küçük kardeşi, onun çekimiyle uzamış.'] },
-  { q: 'M57', ra: 283.396, dec: 33.029, en: ['Ring Nebula', 'A dying Sun-like star blowing off its outer layers.'], tr: ['Halka Bulutsusu', 'Dış katmanlarını savuran, ölmekte olan Güneş benzeri bir yıldız.'] },
-  { q: 'M16', ra: 274.7, dec: -13.807, en: ['Eagle Nebula', 'Home of the Pillars of Creation, columns of gas where stars form.'], tr: ['Kartal Bulutsusu', 'Yıldızların doğduğu gaz sütunları, Yaratılış Sütunları burada.'] },
-  { q: 'M8', ra: 270.904, dec: -24.387, en: ['Lagoon Nebula', 'A glowing cloud of hydrogen lit by hot young stars.'], tr: ['Lagün Bulutsusu', 'Sıcak genç yıldızların aydınlattığı parlak bir hidrojen bulutu.'] },
-  { q: 'Antares', ra: 247.352, dec: -26.432, en: ['Antares', 'The red heart of the Scorpion, a supergiant in a dusty neighbourhood.'], tr: ['Antares', 'Akrep’in kızıl kalbi; tozlu bir mahallede bir süperdev.'] },
-  { q: 'Aldebaran', ra: 68.98, dec: 16.509, en: ['Aldebaran', 'The orange eye of the Bull, a giant star 65 light-years away.'], tr: ['Aldebaran', 'Boğa’nın turuncu gözü, 65 ışık yılı ötede dev bir yıldız.'] },
-  { q: 'Proxima Cen', ra: 217.429, dec: -62.68, en: ['Proxima Centauri', 'The nearest star to the Sun, 4.2 light-years away, with a planet.'], tr: ['Proxima Centauri', 'Güneş’e en yakın yıldız, 4,2 ışık yılı ötede; bir gezegeni var.'] },
-  { q: 'rho Oph', ra: 246.396, dec: -23.447, en: ['Rho Ophiuchi cloud', 'One of the nearest star-forming clouds, full of baby stars only infrared shows.'], tr: ['Rho Ophiuchi bulutu', 'En yakın yıldız doğum bulutlarından; yalnızca kızılötesinin gösterdiği bebek yıldızlarla dolu.'] },
-  { q: 'Horsehead Nebula', ra: 85.245, dec: -2.458, en: ['Horsehead Nebula', 'A dark cloud shaped like a horse’s head against glowing gas.'], tr: ['Atbaşı Bulutsusu', 'Parlayan gazın önünde at başı biçiminde karanlık bir bulut.'] },
-  { q: 'M51', ra: 202.47, dec: 47.195, en: ['Whirlpool Galaxy', 'A spiral galaxy pulling on a smaller companion.'], tr: ['Girdap Gökadası', 'Küçük bir eşini çeken sarmal bir gökada.'] },
-];
+// The famous-object markers can be switched off in the legend; the choice is remembered.
 const famousOn = () => { try { return localStorage.getItem('radians-famous') !== '0'; } catch { return true; } };
 
 const L = () => (getLang() === 'tr' ? 'tr' : 'en');
@@ -108,14 +87,17 @@ addEventListener('popstate', () => { if (new URLSearchParams(location.search).ge
 async function initMap() {
   if (map.aladin) return;
   try {
-    if (!window.A) window.A = (await import(ALADIN_JS)).default;
-    await window.A.init;
+    await loadAladin();
+    $('mapStatus').replaceChildren();
+    // The fill plane is the view's own first survey, so Aladin never asks CDS for its default one
+    // (blocked on some networks: the map then opened with a console error and a blank sky).
+    map.base = window.A.imageHiPS('radians-spherex-fill', { url: CUBE_URL, name: 'SPHEREx DR1 (fill)', successCallback: () => setFill(true) });
     map.aladin = window.A.aladin('#skymapAladin', {
+      ...QUIET, survey: map.base,
       fov: HOME.fov, cooFrame: 'galactic', projection: 'AIT', showReticle: false,
       showLayersControl: false, showFullscreenControl: true, showCooGridControl: true, showSimbadPointerControl: false,
       showProjectionControl: false, showFrame: true, showZoomControl: true,
       pixelateCanvas: false,                          // smooth magnified pixels instead of hard blocks
-      survey: TWOMASS_URL,                            // placeholder until the SPHEREx layer is up: IRSA, not CDS (whose DSS answered 404)
     });
     // ?c=ra,dec&z=fov&wl=µm open the map on a given view (shareable)
     const c = (P.get('c') || '').split(',').map(Number);
@@ -127,8 +109,6 @@ async function initMap() {
     // the chosen plane sits the same channel from a neighbouring band (another detector, see fillOf), so a hole
     // shows SPHEREx sky at a nearby wavelength instead of black.
     // (A second id for the same cube keeps Aladin from treating the two layers as one.)
-    map.base = window.A.imageHiPS('radians-spherex-fill', { url: CUBE_URL, name: 'SPHEREx DR1 (fill)', successCallback: () => setFill(true) });
-    map.aladin.setImageSurvey(map.base);
     map.hips = window.A.imageHiPS('radians-spherex', { url: CUBE_URL, name: 'SPHEREx DR1', successCallback: () => setSlice(map.slice) });
     map.aladin.setOverlayImageLayer(map.hips, 'spherex');
     map.aladin.on('zoomChanged', () => { deepChip(); twoMass(); });
@@ -140,6 +120,7 @@ async function initMap() {
     setSlice(map.slice);
     setRgb(getPalette() === 'rgb');
     addMarkers();
+    initExtras();
     div.addEventListener('pointerdown', (e) => { map.down = [e.clientX, e.clientY]; map.objectHit = false; });
     div.addEventListener('pointerup', (e) => {
       const d = map.down;
@@ -152,7 +133,14 @@ async function initMap() {
       }, 30);
     });
   } catch (err) {
-    $('mapStatus').textContent = 'Aladin Lite: ' + err.message;
+    // the sky viewer could not be loaded (both CDNs down or blocked): say so, and offer another try
+    map.aladin = null;
+    const again = document.createElement('button');
+    again.type = 'button';
+    again.className = 'btn sm';
+    again.textContent = t('mapRetry');
+    again.onclick = () => { $('mapStatus').textContent = t('mapRetrying'); initMap(); };
+    $('mapStatus').replaceChildren(`${t('mapFail')} (${err.message}) `, again);
   }
 }
 
@@ -170,6 +158,7 @@ function setSlice(i) {
   setFill();
   prefetchSoon();
   deepChip();
+  twoMass();                                      // a link that opens zoomed in gets its 2MASS note at once
 }
 
 // The fill plane: the same channel on the neighbouring band whose detector has (almost) no holes.
@@ -292,64 +281,6 @@ function buildPresets() {
   }));
 }
 
-// ---------------------------------------------------------------- science views: three wavelengths as R, G, B
-// A colour HiPS the server builds from any three cube planes (backend/app/explorer.py, /hips/spherex-mix/R-G-B)
-const MIXES = [
-  { key: 'mixIces', um: [4.27, 3.05, 1.10] },
-  { key: 'mixGas', um: [4.05, 2.166, 1.875] },
-  { key: 'mixDust', um: [3.29, 2.2, 1.10] },
-];
-const mix = { on: null, own: false };
-function buildMixes() {
-  const chip = (label, tip, onclick, key) => {
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'mapchip togg'; b.dataset.key = key;
-    b.title = tip; b.textContent = label; b.onclick = onclick;
-    return b;
-  };
-  $('mapMixes').replaceChildren(
-    ...MIXES.map(m => chip(t(m.key), t(m.key + 'Tip'), () => {
-      const tr = m.um.map(nearestSlice);
-      if (mix.on === tr.join('-')) { setMix(null); return; }
-      setMixSliders(tr); setMix(tr);
-    }, m.key)),
-    chip(t('mapMixOwn'), t('mapMixTip'), () => { mix.own = !mix.own; $('mapMixPanel').hidden = !mix.own; syncMixes(); }, 'own'));
-  syncMixes();
-}
-function setMixSliders(tr) {
-  ['R', 'G', 'B'].forEach((c, k) => { $('mapMix' + c).value = tr[k]; });
-  showMixVals();
-}
-function showMixVals() {
-  for (const c of ['R', 'G', 'B']) $('mapMix' + c + 'v').textContent = `${CUBE_WL[Number($('mapMix' + c).value)].toFixed(2)} µm`;
-}
-function setMix(tr) {
-  if (!map.aladin || !window.A) return;
-  try {
-    if (map.mixOn) { map.aladin.removeImageLayer('mix'); map.mixOn = false; }
-    if (tr) {
-      const id = tr.join('-');
-      const layer = window.A.imageHiPS('radians-mix-' + id, { url: new URL(`/hips/spherex-mix/${id}`, location.href).href, name: 'SPHEREx ' + id, imgFormat: 'png' });
-      map.aladin.setOverlayImageLayer(layer, 'mix');
-      map.mixOn = true;
-    }
-  } catch (e) { console.warn('mix layer', e); }
-  mix.on = tr ? tr.join('-') : null;
-  if (mix.on) $('mapWrap').dataset.mix = mix.on; else delete $('mapWrap').dataset.mix;   // colours stay colours under any palette
-  syncMixes();
-}
-function syncMixes() {
-  for (const b of $('mapMixes').children) {
-    const m = MIXES.find(x => x.key === b.dataset.key);
-    const on = b.dataset.key === 'own' ? mix.own : !!m && mix.on === m.um.map(nearestSlice).join('-');
-    b.setAttribute('aria-pressed', String(on));
-  }
-}
-for (const c of ['R', 'G', 'B']) $('mapMix' + c).oninput = showMixVals;
-$('mapMixGo').onclick = () => setMix(['R', 'G', 'B'].map(c => Number($('mapMix' + c).value)));
-setMixSliders(MIXES[0].um.map(nearestSlice));
-document.addEventListener('radians:lang', buildMixes);
-
 // ---------------------------------------------------------------- markers and target list
 function addMarkers() {
   const A = window.A;
@@ -358,11 +289,6 @@ function addMarkers() {
     c.addSources(list.map(x => A.source(x.ra, x.dec, { q: x.q })));
     map.aladin.addCatalog(c);
   };
-  map.famous = A.catalog({ name: 'Famous', color: '#8cc8ff', sourceSize: 12, shape: 'circle' });
-  map.famous.addSources(FAMOUS.map(x => A.source(x.ra, x.dec, { q: x.q })));
-  map.aladin.addCatalog(map.famous);
-  if (!famousOn()) map.famous.hide();
-  syncFamous();
   mk('Challenge', '#ffb347', 16, TARGETS);
   // Explore stars: positions come from the resolver, cached by the server
   Promise.all(EXPLORE.map(x => fetch(new URL(`api/resolve?q=${encodeURIComponent(x.q)}`, location.href)).then(r => (r.ok ? r.json() : null)).catch(() => null)))
@@ -387,7 +313,7 @@ function syncFamous() {
 $('mapFamousT').onclick = () => {
   const on = !famousOn();
   try { localStorage.setItem('radians-famous', on ? '1' : '0'); } catch { /* private window */ }
-  try { on ? map.famous?.show() : map.famous?.hide(); } catch { /* older Aladin */ }
+  try { on ? extra.catalog?.show() : extra.catalog?.hide(); } catch { /* older Aladin */ }
   if (!on && $('mapPop').dataset.kind === 'f') hidePop();
   syncFamous();
 };
@@ -439,16 +365,16 @@ function showPop(ra, dec, q, at) {
   const l = L();
   const tg = q && TARGETS.find(x => x.q === q);
   const ex = q && EXPLORE.find(x => x.q === q);
-  const fm = !tg && !ex && q && FAMOUS.find(x => x.q === q);
-  pop.dataset.kind = tg ? 'c' : ex ? 'e' : fm ? 'f' : 'p';
-  $('mapPopKind').textContent = t(tg ? 'mapKindChallenge' : ex ? 'mapKindExplore' : fm ? 'mapKindFamous' : 'mapKindPoint');
-  $('mapPopTitle').textContent = tg ? nice(q) : ex ? ex[l].split(':')[0] : fm ? fm[l][0] : t('mapHere');
-  const sub = tg ? tg[l].kind : ex ? cap(ex[l].split(':').slice(1).join(':').trim()) : fm ? fm[l][1] : '';
+  const pin = q && String(q).startsWith('pin:') ? extra.pins.find(p => `pin:${p.id}` === q) : null;   // a famous object
+  pop.dataset.kind = tg ? 'c' : ex ? 'e' : pin ? 'f' : 'p';
+  $('mapPopKind').textContent = t(tg ? 'mapKindChallenge' : ex ? 'mapKindExplore' : pin ? 'mapKindFamous' : 'mapKindPoint');
+  $('mapPopTitle').textContent = tg ? nice(q) : ex ? ex[l].split(':')[0] : pin ? pin[`name_${l}`] : t('mapHere');
+  const sub = tg ? tg[l].kind : ex ? cap(ex[l].split(':').slice(1).join(':').trim()) : pin ? pin[`blurb_${l}`] : '';
   $('mapPopSub').textContent = sub;
   $('mapPopSub').hidden = !sub;
   const d = +dec;
   $('mapPopPos').textContent = `RA ${(+ra).toFixed(4)}°   Dec ${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(4)}°`;
-  pop.dataset.q = q || `${(+ra).toFixed(5)} ${d.toFixed(5)}`;
+  pop.dataset.q = q && !pin ? q : `${(+ra).toFixed(5)} ${d.toFixed(5)}`;       // famous objects blink by position
   pop.hidden = false;
   showCoverage(+ra, d);
   const r = $('skymapAladin').getBoundingClientRect();
@@ -707,7 +633,7 @@ function twoMass() {
   if (!map.aladin) return;
   let fov = 180;
   try { fov = map.aladin.getFov()[0]; } catch { /* default */ }
-  const a = deep.layer || deep.busy ? 0 : Math.max(0, Math.min(1, (TM_FROM - fov) / (TM_FROM - TM_FULL)));
+  const a = deep.layer || deep.busy || extra.sky !== 'spherex' ? 0 : Math.max(0, Math.min(1, (TM_FROM - fov) / (TM_FROM - TM_FULL)));
   if (a > 0 && !map.tm) {
     try {
       map.tm = window.A.imageHiPS('radians-2mass', { url: TWOMASS_URL, name: '2MASS J H Ks', imgFormat: 'jpeg' });
@@ -733,8 +659,299 @@ $('mapDeepOff').onclick = () => {
 
 // ---------------------------------------------------------------- start
 buildPresets();
-buildMixes();
 buildChips();
 buildPals();
 if (new URLSearchParams(location.search).get('map') === '1') openMap(false);
-document.addEventListener('radians:lang', () => { buildPresets(); buildChips(); buildPals(); hidePop(); setSlice(map.slice); stopTour(); deepChip(); });
+// ================================================================ merged in from Skyshift
+// Famous-object pins with one-line stories, constellation lines and "You're looking at", colour
+// mixes of two or three wavelengths and science views, and other surveys of the same sky to compare.
+const extra = {
+  pins: [], catalog: null,
+  cons: { on: false, lines: null, names: null, ready: false },
+  sky: 'spherex', layer: null,
+  mix: { mode: 'off', picks: [1.254, 2.089, 3.570].map(nearestSlice), mapping: 'stretch', preset: SCI_PRESETS[0].id },
+};
+const SKIES = {
+  spherex: null,
+  twomass: TWOMASS_URL,
+  dss: 'https://irsa.ipac.caltech.edu/data/hips/CDS/DSS2/color',
+};
+// Three ready-made three-colour views (the team's "Science views"): red, green and blue are three planes of
+// the cube, each stretched on its own sky level by the server (explorer.py, /hips/spherex-mix/R-G-B).
+const RGB_VIEWS = [
+  { id: 'rgb-ices', key: 'mixIces', um: [4.27, 3.05, 1.10] },
+  { id: 'rgb-gas', key: 'mixGas', um: [4.05, 2.166, 1.875] },
+  { id: 'rgb-dust', key: 'mixDust', um: [3.29, 2.2, 1.10] },
+];
+const rgbView = () => (extra.mix.mode === 'science' ? RGB_VIEWS.find(x => x.id === extra.mix.preset) || null : null);
+const SKY_KEYS = { spherex: 'skySpherex', twomass: 'skyTwomass', dss: 'skyDss' };
+const um = (w) => `${w.toFixed(w < 1 ? 3 : 2)} µm`;
+const blank = new Set(BLANK_FRAMES);
+
+function initExtras() {
+  buildSkies();
+  buildMix();
+  loadPins();
+  try { if (localStorage.getItem('radians-mapconst') === '1') setConstellations(true); } catch { /* private mode */ }
+  loadConstellations().then(() => { extra.cons.ready = true; looking(); }).catch(() => {});
+  map.aladin.on('positionChanged', looking);
+  map.aladin.on('zoomChanged', looking);
+  const m = P.get('mix');                                  // ?mix=<spec>: open on a shared colour mix
+  if (m && /^[a-z0-9_-]+$/.test(m)) setTop('mix', new URL(`/hips/spherex-mix/${m}`, location.href).href, `mix ${m}`);
+}
+
+// ---------------------------------------------------------------- one colour picture on top of the SPHEREx layers
+function setTop(kind, url, name) {
+  if (!map.aladin || !window.A) return;
+  try {
+    if (extra.layer) { map.aladin.removeImageLayer('extra'); extra.layer = null; }
+    if (url) {
+      // (a new id for every picture keeps Aladin from re-using the previous one's tiles)
+      const id = 'radians-top-' + [...url].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36);
+      extra.layer = window.A.imageHiPS(id, { url, name });
+      map.aladin.setOverlayImageLayer(extra.layer, 'extra');
+      $('mapWrap').dataset.sky = kind;
+    } else delete $('mapWrap').dataset.sky;
+  } catch (e) { console.warn('map layer', e); }
+}
+
+// ---------------------------------------------------------------- other skies to compare with
+function buildSkies() {
+  $('mapSkies').replaceChildren(...Object.keys(SKIES).map((k) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.sky = k;
+    b.title = t(`skyTip${k[0].toUpperCase()}${k.slice(1)}`);
+    b.textContent = t(SKY_KEYS[k]);
+    b.setAttribute('aria-pressed', String(k === extra.sky));
+    b.onclick = () => setSky(k);
+    return b;
+  }));
+  $('mapSkyNote').textContent = extra.sky === 'spherex' ? '' : t('skyNoteOther');
+}
+function setSky(k) {
+  extra.sky = k;
+  if (k !== 'spherex') { stopTour(); extra.mix.mode = 'off'; buildMix(); setTop('cmp', SKIES[k], t(SKY_KEYS[k])); }
+  else applyMix();
+  buildSkies();
+  twoMass();
+}
+
+// ---------------------------------------------------------------- colour mixes (tiles from /hips/spherex-mix)
+const layerSpec = (frame, rgb, gain) =>
+  `f${frame}c${rgbToHex(rgb).slice(1)}g${String(Math.round(Math.min(8, Math.max(0.1, gain)) * 100)).padStart(2, '0')}`;
+const FEATURE_RGB = hexToRgb('#ff9f43'), CONTINUUM_RGB = hexToRgb('#4ea8ff');
+
+/** The layers of the picture: [{frame, rgb}], bottom first; null when one wavelength is shown. */
+function mixLayers() {
+  const m = extra.mix;
+  if (m.mode === 'mix') {
+    const frames = [...new Set(m.picks.filter(i => !blank.has(i)))].slice(0, 3);
+    if (frames.length < 2) return null;
+    const tints = pickTints(frames.map(i => CUBE_WL[i]), m.mapping);
+    return frames.map((frame, i) => ({ frame, rgb: tints[i] }));
+  }
+  if (m.mode === 'science') {
+    const p = SCI_PRESETS.find(x => x.id === m.preset) || SCI_PRESETS[0];
+    const feature = p.feature_um.map(nearestSlice), continuum = p.continuum_um.map(nearestSlice);
+    // feature in orange, the light beside it in blue: equal = white, absorbed = blue, glowing = orange
+    return [...continuum.map(frame => ({ frame, rgb: scaleRgb(CONTINUUM_RGB, 1 / continuum.length), role: 'continuum' })),
+      ...feature.map(frame => ({ frame, rgb: scaleRgb(FEATURE_RGB, 1 / feature.length), role: 'feature' }))];
+  }
+  return null;
+}
+function applyMix() {
+  if (extra.sky !== 'spherex') return;
+  const rv = rgbView();
+  if (rv) {
+    stopTour();
+    setTop('mix', new URL(`/hips/spherex-mix/${rv.um.map(nearestSlice).join('-')}`, location.href).href, `SPHEREx ${t(rv.key)}`);
+    return;
+  }
+  const layers = mixLayers();
+  if (!layers) { setTop(null); return; }
+  stopTour();
+  // FRAME_GAIN is the measured white balance of each plane: an ordinary star comes out white
+  const spec = layers.map(l => layerSpec(l.frame, l.rgb, FRAME_GAIN[l.frame] ?? 1)).join('_');
+  setTop('mix', new URL(`/hips/spherex-mix/${spec}`, location.href).href, 'SPHEREx false colour');
+}
+const regionOf = (w) => REGIONS.find(r => w >= r.lo && w < r.hi) || REGIONS[REGIONS.length - 1];
+
+function buildMix() {
+  const m = extra.mix, l = L();
+  const chip = (mode, key) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'mapchip' + (m.mode === mode ? ' on' : '');
+    b.setAttribute('aria-pressed', String(m.mode === mode));
+    b.textContent = t(key);
+    b.onclick = () => { m.mode = mode; if (mode !== 'off' && extra.sky !== 'spherex') { extra.sky = 'spherex'; buildSkies(); } buildMix(); applyMix(); };
+    return b;
+  };
+  $('mixModes').replaceChildren(chip('off', 'mixOff'), chip('mix', 'mixMix'), chip('science', 'mixScience'));
+  const body = $('mixBody');
+  body.replaceChildren();
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  if (m.mode === 'mix') {
+    body.append(el('p', 'mixtext', t('mixHelp')));
+    const layers = mixLayers() || [];
+    m.picks.forEach((frame, i) => {
+      const row = el('div', 'mixrow');
+      const sw = el('i', 'sw');
+      const tint = layers.find(x => x.frame === frame);
+      sw.style.background = tint ? rgbToHex(tint.rgb) : 'transparent';
+      const range = document.createElement('input');
+      range.type = 'range'; range.min = 0; range.max = 101; range.step = 1; range.value = frame;
+      range.setAttribute('aria-label', 'Wavelength');
+      const wl = el('span', 'wl', um(CUBE_WL[frame]));
+      range.oninput = () => { wl.textContent = um(CUBE_WL[Number(range.value)]); };
+      range.onchange = () => { let v = Number(range.value); if (blank.has(v)) v = 52; m.picks[i] = v; buildMix(); applyMix(); };
+      row.append(sw, wl, range);
+      if (m.picks.length > 2) {
+        const rm = el('button', 'btn sm ghost', t('mixRemove'));
+        rm.type = 'button';
+        rm.onclick = () => { m.picks.splice(i, 1); buildMix(); applyMix(); };
+        row.append(rm);
+      }
+      row.append(el('span', 'what', regionOf(CUBE_WL[frame])[l]));
+      body.append(row);
+    });
+    const tools = el('div', 'mixrow');
+    if (m.picks.length < 3) {
+      const add = el('button', 'btn sm', t('mixAdd'));
+      add.type = 'button';
+      add.onclick = () => {                               // between the two picks, on a log scale
+        const [a, b] = m.picks.map(i => CUBE_WL[i]).sort((x, y) => x - y);
+        m.picks.splice(1, 0, nearestSlice(Math.sqrt(a * b)));
+        buildMix(); applyMix();
+      };
+      tools.append(add);
+    }
+    const sel = document.createElement('select');
+    sel.className = 'input sm';
+    sel.setAttribute('aria-label', t('mixMapping'));
+    for (const [v, k] of [['stretch', 'mixStretch'], ['fixed', 'mixFixed']]) sel.add(new Option(t(k), v, false, m.mapping === v));
+    sel.onchange = () => { m.mapping = sel.value; buildMix(); applyMix(); };
+    tools.append(sel);
+    body.append(tools, el('p', 'small dim', t('mixUsesServer')));
+  } else if (m.mode === 'science') {
+    const row = el('div', 'chips');
+    for (const p of SCI_PRESETS) {
+      const b = el('button', 'mapchip' + (p.id === m.preset ? ' on' : ''), `${p[`name_${l}`]} · ${um(p.um)}`);
+      b.type = 'button';
+      b.onclick = () => { m.preset = p.id; buildMix(); applyMix(); };
+      row.append(b);
+    }
+    for (const v of RGB_VIEWS) {
+      const b = el('button', 'mapchip' + (v.id === m.preset ? ' on' : ''), t(v.key));
+      b.type = 'button';
+      b.title = t('mixThree');
+      b.onclick = () => { m.preset = v.id; buildMix(); applyMix(); };
+      row.append(b);
+    }
+    const rv = rgbView();
+    if (rv) {                                             // red, green and blue: one wavelength each
+      const three = el('div', 'mixlegend');
+      ['#ff5a4f', '#5fe07a', '#5aa2ff'].forEach((col, k) => {
+        const sp = el('span'), dot = el('i');
+        dot.style.background = col;
+        sp.append(dot, um(CUBE_WL[nearestSlice(rv.um[k])]));
+        three.append(sp);
+      });
+      body.append(row, el('p', 'mixtext', t(rv.key + 'Tip')), three, el('p', 'small dim', t('mixThree')), el('p', 'small dim', t('mixUsesServer')));
+      return;
+    }
+    const p = SCI_PRESETS.find(x => x.id === m.preset) || SCI_PRESETS[0];
+    const legend = el('div', 'mixlegend');
+    const item = (rgb, key, waves) => { const s = el('span'); const i = el('i'); i.style.background = rgbToHex(rgb); s.append(i, `${t(key)} (${waves.map(um).join(', ')})`); return s; };
+    legend.append(item(FEATURE_RGB, 'mixFeature', p.feature_um), item(CONTINUUM_RGB, 'mixContinuum', p.continuum_um));
+    body.append(row, el('p', 'mixtext', p[`blurb_${l}`]), legend, el('p', 'small dim', NOTES[`science_${l}`]));
+    const pin = extra.pins.find(x => x.id === p.pin) || null;
+    if (pin) {
+      const go = el('button', 'btn sm', `${t('mixGoodSpot')}: ${pin[`name_${l}`]}`);
+      go.type = 'button';
+      go.onclick = () => { flyTo(pin.ra_now, pin.dec_now, `pin:${pin.id}`); map.aladin.setFoV(pin.kind === 'star' || pin.moving ? 3 : 8); };
+      body.append(go);
+    }
+    body.append(el('p', 'small dim', t('mixUsesServer')));
+  }
+}
+
+// ---------------------------------------------------------------- famous objects (the engine's curated pins)
+async function loadPins() {
+  let pins = [];
+  try { pins = await fetch(new URL('api/pins', location.href)).then(r => (r.ok ? r.json() : [])); } catch { /* the map works without them */ }
+  // the five challenge targets already have their own amber markers
+  extra.pins = pins.filter(p => Number.isFinite(p.ra_now) && Number.isFinite(p.dec_now));
+  const famous = extra.pins.filter(p => p.kind !== 'target');
+  if (famous.length && window.A && map.aladin) {
+    extra.catalog = window.A.catalog({ name: 'Famous', color: '#8cc8ff', sourceSize: 11, shape: 'circle' });
+    extra.catalog.addSources(famous.map(p => window.A.source(p.ra_now, p.dec_now, { q: `pin:${p.id}` })));
+    map.aladin.addCatalog(extra.catalog);
+    if (!famousOn()) extra.catalog.hide();
+  }
+  syncFamous();
+  buildFamous();
+  if (extra.mix.mode === 'science') buildMix();           // the "good example" button needs the pins
+}
+function buildFamous() {
+  const l = L();
+  $('mapChipsF').replaceChildren(...extra.pins.filter(p => p.kind !== 'target').map((p) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'mapchip f';
+    b.title = p[`blurb_${l}`] || '';
+    b.append(document.createElement('i'), p[`name_${l}`]);
+    b.onclick = () => flyTo(p.ra_now, p.dec_now, `pin:${p.id}`);
+    return b;
+  }));
+}
+
+// ---------------------------------------------------------------- constellations and "You're looking at"
+async function setConstellations(on) {
+  const c = extra.cons;
+  c.on = on;
+  $('mapConst').setAttribute('aria-pressed', String(on));
+  try { localStorage.setItem('radians-mapconst', on ? '1' : '0'); } catch { /* private mode */ }
+  if (!map.aladin || !window.A) return;
+  try {
+    if (on && !c.lines) {
+      await loadConstellations();
+      c.lines = window.A.graphicOverlay({ name: 'constellation-lines', color: 'rgba(255, 255, 255, 0.34)', lineWidth: 1.1 });
+      map.aladin.addOverlay(c.lines);
+      c.lines.addFootprints(linePaths().map(path => window.A.polyline(path)));
+    }
+    if (on && !c.names) drawConstellationNames();
+    for (const o of [c.lines, c.names]) if (o) (on ? o.show() : o.hide());
+  } catch (e) { console.warn('constellations', e); }
+}
+function drawConstellationNames() {
+  const c = extra.cons;
+  if (c.names) { try { map.aladin.removeLayer?.(c.names); c.names.hide(); } catch { /* older Aladin */ } }
+  // an invisible marker: Aladin only writes labels next to a shape
+  c.names = window.A.catalog({ name: 'constellation-names', shape: 'circle', color: 'rgba(0, 0, 0, 0)', sourceSize: 4,
+    displayLabel: true, labelColumn: 'label', labelColor: 'rgba(255, 255, 255, 0.62)', labelFont: '500 12px system-ui, sans-serif' });
+  map.aladin.addCatalog(c.names);
+  c.names.addSources(constLabels(L()).filter(x => x.rank <= 2).map(x => window.A.source(x.ra, x.dec, { label: x.name.toUpperCase() })));
+}
+$('mapConst').onclick = () => setConstellations(!extra.cons.on);
+
+let lookTimer = null;
+function looking() {
+  clearTimeout(lookTimer);
+  lookTimer = setTimeout(() => {
+    const box = $('mapLooking');
+    if (!extra.cons.ready || !map.aladin) { box.textContent = ''; return; }
+    let fov = 180, ra, dec;
+    try { fov = map.aladin.getFov()[0]; [ra, dec] = map.aladin.pix2world(box.parentElement.clientWidth / 2, box.parentElement.clientHeight / 2, 'icrs') || []; } catch { /* outside the sky */ }
+    const c = fov <= 70 && Number.isFinite(ra) ? constellationAt(ra, dec, L()) : null;   // zoomed out, the centre says little
+    box.replaceChildren();
+    if (c) { const b = document.createElement('b'); b.textContent = c.name; box.append(`${t('mapLooking')}: `, b); }
+  }, 150);
+}
+
+document.addEventListener('radians:lang', () => {
+  buildPresets(); buildChips(); buildPals(); hidePop(); setSlice(map.slice); stopTour(); deepChip();
+  buildSkies(); buildMix(); buildFamous(); looking();
+  if (extra.cons.names) { drawConstellationNames(); if (!extra.cons.on) extra.cons.names.hide(); }
+});

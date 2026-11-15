@@ -67,7 +67,6 @@
       </form>
     </div>
     <p class="hint muted small" data-i18n="searchHint"></p>
-    <p class="qparse small mono" id="qParse" aria-live="polite" hidden></p>
   </section>
 
   <section class="targets" aria-labelledby="tgtTitle">
@@ -159,8 +158,14 @@
     <label class="palrange"><span data-i18n="mapContrast"></span><input type="range" id="mapContrast" min="0.6" max="2.5" step="0.05" value="1.3"></label>
     <button type="button" class="btn sm ghost" id="mapPalReset" data-i18n="mapPalReset"></button>
   </div>
+  <div class="maptools" role="toolbar" aria-labelledby="mapSkyLabel">
+    <span class="maptoolslabel" id="mapSkyLabel" data-i18n="mapSky"></span>
+    <div class="palchips" id="mapSkies"></div>
+    <span class="small dim" id="mapSkyNote"></span>
+  </div>
   <div class="mapwrap" id="mapWrap" data-pal="gray">
     <div id="skymapAladin"></div>
+    <div class="maplooking mono" id="mapLooking" aria-live="polite"></div>
     <div class="mapdeep" id="mapDeep" role="status" aria-live="polite" hidden>
       <span id="mapDeepText"></span>
       <button type="button" id="mapDeepGo"></button>
@@ -174,6 +179,10 @@
       <span><i class="ring c"></i><span data-i18n="mapChallenge"></span></span>
       <span><i class="ring e"></i><span data-i18n="mapExplore"></span></span>
       <button type="button" id="mapFamousT" class="mapfamt" aria-pressed="true"><i class="ring f"></i><span data-i18n="mapFamous"></span></button>
+      <button type="button" id="mapConst" aria-pressed="false">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15l5-9 5 6 4-8"/><circle cx="3" cy="15" r="1.2"/><circle cx="8" cy="6" r="1.2"/><circle cx="13" cy="12" r="1.2"/><circle cx="17" cy="4" r="1.2"/></svg>
+        <span data-i18n="mapConst"></span>
+      </button>
       <button type="button" id="mapHome">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M17 8V3h-5M3 12v5h5M17 12v5h-5"/></svg>
         <span data-i18n="mapAllSky"></span>
@@ -218,17 +227,15 @@
       <span class="maplabel mono" data-i18n="mapPresets"></span>
       <div class="chips" id="mapPresets" role="group"></div>
     </div>
+  </section>
+
+  <section class="mapcard" id="mixCard">
     <div class="maprow">
-      <span class="maplabel mono" data-i18n="mapMix"></span>
-      <div class="chips" id="mapMixes" role="group"></div>
+      <span class="maplabel mono" data-i18n="mixLabel"></span>
+      <div class="chips" id="mixModes" role="group"></div>
+      <span class="tag" data-i18n="falseColour" data-i18n-title="falseColourTip"></span>
     </div>
-    <div class="mapmix" id="mapMixPanel" hidden>
-      <label><i class="mixdot r"></i><span class="mono" id="mapMixRv"></span><input type="range" id="mapMixR" min="0" max="101" step="1"></label>
-      <label><i class="mixdot g"></i><span class="mono" id="mapMixGv"></span><input type="range" id="mapMixG" min="0" max="101" step="1"></label>
-      <label><i class="mixdot b"></i><span class="mono" id="mapMixBv"></span><input type="range" id="mapMixB" min="0" max="101" step="1"></label>
-      <button type="button" class="btn sm" id="mapMixGo" data-i18n="mapMixShow"></button>
-      <p class="small muted" data-i18n="mapMixTip"></p>
-    </div>
+    <div class="mixbody" id="mixBody"></div>
   </section>
 
   <section class="mapcard">
@@ -239,6 +246,10 @@
     <div class="maprow">
       <span class="maplabel mono"><i class="ring e"></i><span data-i18n="mapExplore"></span></span>
       <div class="chips" id="mapChipsE"></div>
+    </div>
+    <div class="maprow">
+      <span class="maplabel mono"><i class="ring f"></i><span data-i18n="mapFamous"></span></span>
+      <div class="chips" id="mapChipsF"></div>
     </div>
   </section>
 
@@ -314,27 +325,29 @@
 <!-- ================================================================ app -->
 <main class="layout app-only" id="app">
   <section class="viewer" aria-label="Sky viewer">
+    <div class="srcbar" id="srcBar" hidden>
+      <div class="seg" role="group" aria-label="Data" id="srcSeg">
+        <button type="button" data-src="quick" data-i18n="srcQuick" data-i18n-title="srcQuickTitle"></button>
+        <button type="button" data-src="deep" data-i18n="srcDeep" data-i18n-title="srcDeepTitle"></button>
+      </div>
+      <div class="detchips bandchips" id="bandChips" role="group" aria-label="Detector band"></div>
+      <p class="small muted srcstatus" role="status" aria-live="polite"><span id="srcStatus"></span> <span id="deepStatus"></span></p>
+    </div>
     <div class="viewbar">
       <div class="seg wide" role="group" aria-label="View" id="viewSeg">
         <button type="button" data-view="images" data-i18n="segImages"></button>
         <button type="button" data-view="diff_median" data-i18n="segDiff"></button>
+        <button type="button" data-view="timecolor" data-i18n="segTime" data-i18n-title="viewHelpTime"></button>
         <button type="button" data-view="stack" data-i18n="segStack"></button>
-        <button type="button" data-view="time" data-i18n="segTime"></button>
-      </div>
-      <div class="bandbar" id="bandBar">
-        <div class="seg" role="group" aria-label="Detectors" id="bandSeg">
-          <button type="button" data-band="fast" data-i18n="bandFast"></button>
-          <button type="button" data-band="all" data-i18n="bandAll"></button>
-        </div>
-        <div class="bandchips" id="bandChips" role="group" aria-label="Band"></div>
       </div>
       <select id="view" aria-label="View" class="input sm">
         <option value="images" data-i18n="viewImages"></option>
+        <option value="diff_matched" data-i18n="viewDiffMatched"></option>
         <option value="diff_median" data-i18n="viewDiffMedian"></option>
         <option value="diff_prev" data-i18n="viewDiffPrev"></option>
         <option value="diff_first" data-i18n="viewDiffFirst"></option>
+        <option value="timecolor" data-i18n="viewTime"></option>
         <option value="stack" data-i18n="viewStack"></option>
-        <option value="time" data-i18n="viewTime"></option>
       </select>
     </div>
     <p class="muted small viewhelp" id="viewHelp"></p>
@@ -368,7 +381,7 @@
       <button id="compare" class="btn sm" aria-pressed="false" data-i18n="compare" data-i18n-title="compareTitle"></button>
       <button id="zoom" class="btn sm mono" aria-label="Zoom">1×</button>
       <button id="gif" class="btn sm" data-i18n="gifDl"></button>
-      <button id="fitsDl" class="btn sm" data-i18n="fitsDl"></button>
+      <button id="fitsDl" class="btn sm" data-i18n="fitsDl" data-i18n-title="fitsTitle"></button>
     </div>
     <ol class="timeline" id="timeline"></ol>
 
@@ -429,6 +442,7 @@
           <select id="photMode" class="input sm">
             <option value="aperture" data-i18n="photAperture"></option>
             <option value="wings" data-i18n="photWings"></option>
+            <option value="engine" data-i18n="photEngine"></option>
           </select>
         </label>
         <label class="small check"><input id="photFlagged" type="checkbox" checked> <span data-i18n="photShowFlagged"></span></label>
@@ -637,6 +651,7 @@
 <div class="toast" id="toast" role="status" hidden></div>
 <script src="static/js/blink/app.js" type="module"></script>
 <script src="static/js/core/ui.js" type="module"></script>
+<script src="static/js/core/suggest.js" type="module"></script>
 <script src="static/js/content/about.js" type="module"></script>
 <script src="static/js/map/map.js" type="module"></script>
 <script src="static/js/planetarium/planetsec.js" type="module"></script>

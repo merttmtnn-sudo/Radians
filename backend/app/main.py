@@ -22,7 +22,6 @@ app = FastAPI(title="Radians", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 app.include_router(explorer.router)
 app.include_router(explorer.hips_router)
-app.include_router(explorer.mix_router)
 
 # ---------------------------------------------------------------- fair sharing of one server
 _hits: dict = {}
@@ -32,6 +31,8 @@ LIMITS = {"/api/frames": config.RATE_FRAMES, "/api/photometry": config.RATE_PHOT
 LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr",
                                               "/api/curious/motion", "/api/curious/period", "/api/curious/xmatch", "/api/object")})
 LIMITS["/api/sharp"] = config.RATE_FRAMES
+# the fast band's own lookups (its pictures, /api/quick, are long-polled and limited by the engine's build queue)
+LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/quick/changes", "/api/quick/diffs", "/api/quick/motion")})
 
 
 def _client(request: Request) -> str:
@@ -85,9 +86,27 @@ def resolve(q: str = Query(..., min_length=1, max_length=200)):
     try:
         return archive.resolve(q)
     except LookupError as e:
+        known = _builtin_object(q)
+        if known:
+            return known
         raise HTTPException(404, str(e))
     except Exception as e:
+        known = _builtin_object(q)                       # the resolver is down: the built-in list still knows its objects
+        if known:
+            return known
         raise HTTPException(502, f"name resolver unavailable: {e}")
+
+
+def _builtin_object(q: str) -> dict | None:
+    """One of the curated objects (challenge targets and famous sky) by any of its names, in the
+    shape of a resolver answer. Used when the name resolver is unreachable or does not know the name."""
+    from .engine import api_find
+    want = api_find.fold(q)
+    for p in api_find.pins():
+        if want and want in p["keys"]:
+            return {"name": p["name_en"], "ra": p["ra"], "dec": p["dec"], "pmra": p.get("pmra") or None,
+                    "pmdec": p.get("pmdec") or None, "source": "built-in list"}
+    return None
 
 
 @app.get("/api/about")
@@ -595,3 +614,17 @@ def sharp_view(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=
     out = explorer._cached_json("sharp", key, 7 * 86400, run)
     _report(job, stage="done")
     return JSONResponse(out, headers={"Cache-Control": "public, max-age=3600"})
+
+
+# ---------------------------------------------------------------- the fast engine (merged in from Skyshift)
+# /api/views/... (time-lapse views built one band at a time: preview, then full), /api/pins, /api/search,
+# /api/channels and /hips/spherex/{frame}. Included last on purpose: this app's own /api/resolve and
+# /api/coverage above keep answering under those two names.
+from . import mixtiles, quick  # noqa: E402
+from .engine import main as engine  # noqa: E402
+
+app.include_router(quick.router)        # /api/quick: an engine view in the viewer's frame format
+app.include_router(mixtiles.router)     # /hips/spherex-mix: false-colour mixes of the all-sky cube for the map
+                                        # (also the three-plane R-G-B recipe in explorer.py, same address)
+for _router in engine.routers:
+    app.include_router(_router)

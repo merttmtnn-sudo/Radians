@@ -2,6 +2,7 @@
 // it moves, whether it pulses, and what other catalogues list there. Nothing is asked until a tool's
 // button is pressed. The *Lines functions only turn answers into i18n keys, so node can test them.
 import { scatterChart } from '../core/charts.js';
+import { compass } from './finds.js';
 
 export const TOOLS = ['hr', 'motion', 'period', 'star'];
 const LY_PER_PC = 3.2616;
@@ -12,15 +13,23 @@ export function speedKms(rate, parallaxMas) {
 }
 
 /** "How it moves": [[key, vars], ...]. cand: the SPHEREx mover at this spot (or null); gaia: the
- * /api/curious/motion answer (or null when the spot has no Gaia star). */
-export function motionLines(cand, gaia) {
+ * /api/curious/motion answer (or null when the spot has no Gaia star); fit: the /api/quick/motion
+ * answer, a line through the star's position in every pass of the fast band (or null). */
+export function motionLines(cand, gaia, fit = null) {
   const out = [];
   const g = gaia && gaia.reachable && gaia.found ? gaia : null;
+  const f = fit && fit.ok ? fit : null;
   if (cand) {
     out.push(['cuMotionOurs', { rate: cand.rate_arcsec_yr.toFixed(2), dir: cand.dir, n: cand.points?.length ?? '?' }]);
     const v = g && g.parallax_ok ? speedKms(cand.rate_arcsec_yr, g.parallax_mas) : null;
     if (v != null) out.push(['cuSpeed', { v: Math.round(v) }]);
-  } else out.push(['cuMotionStill', {}]);
+  } else if (!(f && f.significant)) out.push(['cuMotionStill', {}]);
+  if (f) {
+    out.push([f.significant ? 'cuMotionFit' : 'cuMotionFitWeak',
+      { rate: f.rate.toFixed(2), err: f.err.toFixed(2), dir: compass(f.direction_deg), n: f.n, b: fit.band }]);
+    const v = !cand && f.significant && g && g.parallax_ok ? speedKms(f.rate, g.parallax_mas) : null;
+    if (v != null) out.push(['cuSpeed', { v: Math.round(v) }]);
+  } else if (fit && fit.reason === 'saturated') out.push(['cuMotionFitSat', {}]);
   if (gaia && !gaia.reachable) out.push(['tyGaiaDown', {}]);
   else if (!g) out.push(['tyNoGaia', {}]);
   else {
@@ -80,7 +89,10 @@ export function createCurious(host, { t, ctx }) {
   async function load(tool, c) {
     const gaia = () => (c.gaiaId ? get('api/curious/motion', { gaia_id: c.gaiaId }) : Promise.resolve(null));
     if (tool === 'hr') return get('api/curious/hr', { ra: c.ra.toFixed(4), dec: c.dec.toFixed(4), gaia_id: c.gaiaId });
-    if (tool === 'motion') return { gaia: await gaia() };
+    if (tool === 'motion') {
+      const [g, fit] = await Promise.all([gaia(), c.fitAt ? get('api/quick/motion', c.fitAt).catch(() => null) : Promise.resolve(null)]);
+      return { gaia: g, fit };
+    }
     if (tool === 'period') {
       const r = await fetch(new URL('api/curious/period', location.href), { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ points: c.points }) });
@@ -176,7 +188,7 @@ export function createCurious(host, { t, ctx }) {
     const d = s.data[s.tool];
     if (s.failed || !d) { out.append(el('p', 'muted small', t('cuFailed'))); return; }
     if (s.tool === 'hr') drawHr(out, d);
-    else if (s.tool === 'motion') { lines(out, motionLines(c.cand, d.gaia)); out.append(el('p', 'muted small', t('cuMotionNote'))); }
+    else if (s.tool === 'motion') { lines(out, motionLines(c.cand, d.gaia, d.fit)); out.append(el('p', 'muted small', t('cuMotionNote'))); }
     else if (s.tool === 'period') drawPeriod(out, d);
     else drawStar(out, d);
   }

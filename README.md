@@ -6,8 +6,8 @@ moving, and variable stars changing brightness.
 
 NASA Space Apps Challenge 2026 — *Planet X and SPHEREx*.
 
-**Live:** https://radians.onrender.com (free instance: it sleeps after 15 quiet minutes and takes about a minute to wake; the five challenge targets are built into the server and open at once, any other position takes 2–5 minutes the first time) ·
-**Slides (PDF):** [`docs/Radians-slides.pdf`](docs/Radians-slides.pdf)
+**Live (the version before this merge):** https://radians.onrender.com ·
+**Slides (PDF, also from before the merge):** [`docs/Radians-slides.pdf`](docs/Radians-slides.pdf)
 
 <p>
   <img src="docs/media/barnard-s-star.gif" width="240" alt="Barnard's Star moving north between four SPHEREx visits">
@@ -16,8 +16,34 @@ NASA Space Apps Challenge 2026 — *Planet X and SPHEREx*.
 </p>
 
 *Real SPHEREx DR1 frames as Radians blinks them (made by `backend/scripts/make_media.py`).*
-Slides: [`frontend/slides.html`](frontend/slides.html) (served at `/static/slides.html`) ·
-demo reel: [`docs/media/radians-demo.gif`](docs/media/radians-demo.gif) · recording script: [`docs/demo-script.md`](docs/demo-script.md)
+
+## Two models, one app
+
+Our team of four built two versions of this project during the event weekend, in two pairs, and then
+merged them into this one:
+
+- **Radians** (the interface you see): one page with Home, the Blink viewer, the all-sky Map and the
+  Planetarium; a candidate tracker with an injection test; SkyBoT, NEOSSat and Gaia overlays; a guide,
+  a story tour, a glossary; rate limits and the deployment.
+- **Skyshift** (the fast engine behind it, in `backend/app/engine`): one detector band at a time,
+  a preview within seconds and the whole band in well under a minute; exposure pairs matched by
+  wavelength; the blue/orange difference and colour by time; a second finder on the difference
+  picture; halo photometry for saturated stars; a motion fit for any star; colour mixes and science
+  views for the map; constellations and famous-object pins with one-line stories.
+
+After that merge the Radians pair's newer work (GitHub `main`, 15 Nov 2026) was merged in as well:
+**super-resolution** (dithered exposures drizzled onto 3″ pixels, with a before / after switch) in the
+Map's and the Planetarium's deep zoom; a **details panel** in the Planetarium (SIMBAD facts and a
+Wikipedia summary); the Map fading to 2MASS where SPHEREx's pixels run out; a second look at every
+tracker candidate in all-detector difference pictures ("found two ways"); three more ready-made
+colour views and six more famous objects; a phone layout; rate limits on the lookups; and a
+bibliography (`docs/KAYNAKCA.md`). Where both sides had built the same thing (fast band first,
+colour by time, FITS download, the IRSA limit, reading coordinates) there is one of each, described
+below.
+
+What the merge changed for a visitor: a new spot shows its first pictures after about 9 seconds
+instead of 2 to 5 minutes (measured, see [Speed](#speed)), the candidate list comes from two
+independent finders that are both tested, and the Map can mix wavelengths into colour.
 
 ## What the challenge asked for
 
@@ -26,44 +52,108 @@ Its optional ideas, and where Radians stands:
 
 | Suggestion on the challenge page | Radians |
 |---|---|
-| Easy to update with new data releases | Yes. Every public SPHEREx release in IRSA is searched (`spherex_qr3` and `spherex_dr1` today; one setting to add the next), and the exposure list is refreshed twice a day. |
-| Add each detector's data to improve signal-to-noise; spectra on the fly | Yes. Inverse-variance co-adds per visit (and per visit and detector); a 0.75–5 µm spectrum of any pixel on request. |
-| Add or subtract images from different times | Yes. Frame − median, frame − previous, frame − first, and a deep stack. |
-| Let users choose the field of view | Yes. 2′ to 20′. |
-| Overlay Gaia or WISE | Yes. Gaia DR3 drawn on the image at each frame's date; every candidate is checked against Gaia DR3, SIMBAD and CatWISE2020 (a catalogue that cannot be reached is named as "could not check"); Aladin Lite with AllWISE, 2MASS, CatWISE2020 and SPHEREx maps. |
-| Coordinates in the URL, embeddable | Yes. Every view is a link (`?ra=&dec=&fov=&det=&view=…`); `embed=1` hides the page chrome. |
-| Contamination flags | Yes. Per-pixel SPHEREx flags shown on demand, summarised per frame, and used to mark doubtful measurements. |
-| Public tools (Astropy, Aladin) | Astropy and PyVO throughout; Aladin Lite (CDS) for the wider view. |
+| Easy to update with new data releases | Yes. Every public SPHEREx release in IRSA is searched live (`spherex_qr3` and `spherex_dr1` today; one setting to add the next), and the exposure lists are refreshed. |
+| Add each detector's data to improve signal-to-noise; spectra on the fly | Yes. Median stacks per sky pass in the fast band; inverse-variance co-adds per visit (and per visit and detector) over all detectors; a 0.75–5 µm spectrum of any pixel on request. |
+| Add or subtract images from different times | Yes. A wavelength-matched difference (blue = was here, orange = is here now), frame − median, frame − previous, frame − first, a deep stack, and colour by time. |
+| Let users choose the field of view | Yes. 2′ to 20′ (the fast band builds up to 10′). |
+| Overlay Gaia or WISE | Yes. Gaia DR3 drawn on the image at each frame's date; every candidate is checked against Gaia DR3, SIMBAD and CatWISE2020 (a catalogue that cannot be reached is named as "could not check"); the same star in 2MASS and AllWISE; Aladin Lite with AllWISE, 2MASS, CatWISE2020 and SPHEREx maps. |
+| Coordinates in the URL, embeddable | Yes. Every view is a link (`?ra=&dec=&fov=&band=&view=…`); `embed=1` hides the page chrome. |
+| Contamination flags | Yes. Per-pixel SPHEREx flags shown on demand, summarised per frame, and used to mark doubtful measurements; saturated pixels are marked in the fast band. |
+| Use the 102 bands creatively | Yes. A slider and a tour over the 102 planes of the all-sky cube, "mix 2–3 wavelengths" into false colour, five science views (water ice, CO₂ ice, methane, Paschen-α, Brackett-γ: the feature against the light beside it) and three three-colour views (ices, hydrogen gas, warm dust). |
+| Public tools (Astropy, Aladin) | Astropy and PyVO throughout; Aladin Lite (CDS) for the Map and the wider view. |
 
 Beyond the list: known asteroids from IMCCE SkyBoT, archived NEOSSat images from the Canadian Space
-Agency, a candidate report you can copy, CSV export of every measurement, 2×/4× zoom with drag,
-animated-GIF download of any view, an injection test of the finder, English and Turkish.
+Agency, two candidate finders with injection tests (and a third look in all-detector difference
+pictures), super-resolution from dithered exposures, spectral typing against 200 reference spectra,
+an H-R diagram, a period search, FITS / CSV / GIF downloads, a Planetarium with a details panel,
+English and Turkish.
 
 ## How it works
 
-1. You type coordinates (`08h55m10.8s -07d14m42s`, `133.795 -7.245`) or a name (`Barnard's Star`).
-   Names are resolved with CDS Sesame, which also returns proper motion so fast movers stay centred.
+1. You type a name (`Barnard's Star`, `Orion Nebula`) or coordinates in any common format
+   (`08h55m10.8s -07d14m42s`, `133.795 -7.245`, `133,795 -7,245`, `RA 133.795 Dec -7.245`). The box
+   suggests curated objects while you type and says how it read coordinates. Names are resolved with
+   CDS Sesame, which also returns proper motion so fast movers stay centred; if the resolver is
+   down, the built-in objects still open.
 2. The backend asks NASA/IPAC IRSA which SPHEREx exposures cover that position (SIA2).
-3. Instead of downloading 65 MB files, it reads only the pixel rows it needs with HTTP byte ranges
-   (~30 kB per exposure), including the RICE-compressed contamination flags.
-4. Exposures are reprojected onto one grid, background-subtracted, grouped into epochs (SPHEREx
-   revisits the sky every ~6 months) and co-added with inverse-variance weights.
-5. Every exposure also gives a brightness measurement at a known wavelength (the SPHEREx
-   linear-variable filters), which is what makes on-the-fly spectra possible.
+3. Instead of downloading 65 MB files, it reads only the pixel rows it needs with HTTP byte ranges,
+   including the RICE-compressed contamination flags.
+4. **Fast band first.** One detector band (the object's own, else band 5) is read by the engine:
+   a preview from a few exposures per sky pass, spread in wavelength, then the whole band. Exposures
+   are grouped into sky passes (SPHEREx returns about every six months), and each pass is a median
+   stack on a 2″ north-up grid, all passes on one brightness scale.
+5. **All detectors after that**, in the background: every exposure of all six bands is reprojected
+   onto the native 6.15″ grid, background-subtracted, grouped into epochs and co-added with
+   inverse-variance weights. This feeds the 0.75–5 µm spectrum, the colour composite, the detector
+   tools, the Sharpening section and the tracker.
+6. Every exposure also gives a brightness at a known wavelength (the SPHEREx linear-variable
+   filters), which is what makes on-the-fly spectra possible.
+
+**Wavelength matching** is the rule behind every comparison: SPHEREx has no filter wheel, so each
+exposure sees a spot at its own wavelength, and two visits that sampled a band differently differ in
+colour, which looks like change. Co-adds use only wavelengths every visit sampled; differences pair
+exposures one by one within about one resolution element.
 
 New data releases are picked up automatically: the archive is queried live, and adding a release is
 one environment variable (`SPHEREX_COLLECTIONS=spherex_dr2,spherex_dr1`).
 
-## Roadmap
+## Results on the five challenge targets
 
-| Phase | What | Status |
-|---|---|---|
-| 0 | Data discovery: IRSA collections, file layout, byte-range access | ✅ |
-| 1 | Core backend: search, cutouts, reprojection, epochs, co-add, photometry, API | ✅ |
-| 2 | Blink player: input, playback, stretch, dates, shareable URLs | ✅ |
-| 3 | Discovery tools: difference/stack views, detector selection, flag summary, candidate finder, EN/TR | ✅ |
-| 4 | Extras: on-the-fly spectra, light curves, Gaia DR3 / SkyBoT overlays, NEOSSat archive, Aladin Lite context | ✅ |
-| 5 | Testing on challenge targets, deployment (Hugging Face Space), demo | ⏳ |
+All from real SPHEREx data through the app (pre-built in `backend/demo`, so they open at once).
+
+| Target | Tracker (all detectors) | Difference picture (one band) | Catalogue |
+|---|---|---|---|
+| Barnard's Star | 10.38″/yr north | 10.45 ± 1.01″/yr north (band 5) | 10.39″/yr |
+| ε Indi B | 4.65″/yr south-east | 4.37 ± 0.34″/yr; a line through its position in 4 passes gives 4.68 ± 0.34″/yr | 4.68″/yr |
+| WISE 0855−0714 | 8.16″/yr west (D5+D6) | declines: 3 matching exposures per pass | 8.15″/yr |
+| RW Aurigae | about 70% brighter in D3/D4 | about 52% fainter in band 6 | young variable |
+| R Draconis | nothing reported (it does not move) | about 46% fainter in band 6; halo light curve 0.51–1.64 × usual | Mira variable, ~246 d |
+
+RW Aurigae is not a contradiction: it brightened at short wavelengths while its 4–5 µm light faded,
+and the card shows both statements with their bands. ε Indi B is typed T3V from its spectrum (SIMBAD:
+T1V+T6V, an unresolved pair): "agree". Barnard's Star and RW Aurigae are saturated, so the Type box
+shows the catalogue side only and says why.
+
+## Validation
+
+Both finders are tested by putting fake objects into the real exposures of the five fields and
+counting what comes back. Details and both methods: [docs/VALIDATION.md](docs/VALIDATION.md).
+
+**Tracker** (`backend/scripts/inject_validate.py`; run again on the merged code, same result):
+
+| Injected | S/N 5 | S/N 8 | S/N 12 | S/N 20 | S/N 40 |
+|---|---|---|---|---|---|
+| Mover, 9″/yr | 0% (0/40) | 50% (20/40) | 85% (34/40) | 100% (40/40) | 100% (40/40) |
+| Variable (×3 in one visit) | 12% (5/40) | 80% (32/40) | 90% (36/40) | 88% (35/40) | 85% (34/40) |
+| New source (one visit only) | 0% (0/40) | 42% (17/40) | 85% (34/40) | 100% (40/40) | 98% (39/40) |
+
+**Difference picture** (`backend/scripts/engine/inject_validate.py`, no network needed):
+
+| Injected | S/N 5 | S/N 8 | S/N 12 | S/N 20 | S/N 40 |
+|---|---|---|---|---|---|
+| Mover, 9″/yr | 50% (16/32) | 100% (32/32) | 100% (32/32) | 91% (29/32) | 100% (32/32) |
+| Brightened (×2 in the last pass) | 22% (7/32) | 34% (11/32) | 53% (17/32) | 100% (32/32) | 100% (32/32) |
+| Appeared (last pass only) | 53% (17/32) | 100% (32/32) | 100% (32/32) | 100% (32/32) | 100% (32/32) |
+
+With nothing injected, neither finder reports anything besides the target in any of the five fields.
+The two tests define S/N differently (see the validation document), so the columns are not
+directly comparable.
+
+## Speed
+
+Measured on 15 Nov 2026 from Turkey, on a position in nobody's cache (150.123 +20.456):
+
+| Step | Time |
+|---|---|
+| Preview of the fast band on screen (about 8 exposures per pass) | 9 s |
+| The whole band (68 exposures, 3 passes) | 18 s |
+| All six bands (305 exposures) for the spectrum and the all-detector view | about 3 min |
+| Another band of a field already visited | 8 s |
+| A challenge target (pre-built) | under 1 s |
+
+More parallel requests do not help: IRSA throttles each client (measured by Efe: 12 in flight gave
+1.3 exposures a second, 32 gave 0.6, 64 gave 0.3), so every reader in the server shares one limit
+(`IRSA_MAX_INFLIGHT`, 12).
 
 ## Repository layout
 
@@ -72,192 +162,222 @@ Radians/
 ├── backend/                     Python (FastAPI) server: reads public NASA/IPAC IRSA data, serves the API and the site
 │   ├── app/
 │   │   ├── main.py              app, routes (/api/…), caching headers, rate limits, serves frontend/ at /static and /planet
+│   │   ├── quick.py             /api/quick…: an engine view in the viewer's frame format; differences, finds, motion
+│   │   ├── mixtiles.py          /hips/spherex-mix: false-colour mixes of the all-sky cube for the Map
+│   │   ├── irsa.py              one process-wide limit on requests in flight to IRSA
 │   │   ├── archive.py           finds SPHEREx exposures (IRSA SIA2), resolves names (CDS Sesame)
-│   │   ├── fitsrange.py         byte-range reads of remote FITS files (only the pixels needed)
+│   │   ├── fitsrange.py         byte-range reads of remote FITS files (all-detector build)
 │   │   ├── stack.py             reprojection, background subtraction, epochs, co-adds
+│   │   ├── detect.py            the tracker: moving / variable / one-epoch candidates across all visits
 │   │   ├── spectype.py          spectral type from a spectrum (standards + brown-dwarf models), fingerprints
 │   │   ├── typecat.py           SIMBAD spectral type and Gaia DR3 parameters of one object
-│   │   ├── curious.py           "for the curious" tools: H-R diagram data, speed, period search, 2MASS / AllWISE
-│   │   ├── detect.py            moving / variable candidate finder
+│   │   ├── curious.py           "for the curious": H-R diagram data, speed, period search, 2MASS / AllWISE
 │   │   ├── crossmatch.py        SIMBAD + CatWISE2020 for the candidate cards
 │   │   ├── external.py          Gaia DR3, SkyBoT, NEOSSat (CADC) lookups
 │   │   ├── explorer.py          planetarium API (/api/sx/…) and the infrared-RGB HiPS tiles (/hips/spherex-color)
-│   │   ├── config.py            settings from environment variables (data release, cache, workers)
-│   │   └── wave_seed/           pre-computed spectra for the demo targets
-│   ├── demo/cache/              cached answers for the five challenge targets (the demo works offline)
-│   ├── scripts/                 tools: cache warming (warm.py), demo media, profiling and debugging
-│   ├── tests/                   pytest suite
+│   │   ├── config.py            settings from environment variables
+│   │   └── engine/              the fast engine (merged in from Skyshift)
+│   │       ├── http.py, sia.py, fitsread.py, field.py, store.py    polite HTTP, exposure search, byte-range reader, cut-out cache
+│   │       ├── stacking.py      sky passes, wavelength matching, median stacks, display levels
+│   │       ├── views.py, api_views.py   view builds (preview, then the band) and /api/views/…
+│   │       ├── photometry.py    box and halo-ring photometry, light curve, spectrum
+│   │       ├── changes.py       the difference-picture finder
+│   │       ├── catalogs.py, spectype.py, advanced.py   catalogue cones, typing, period / motion / H-R / cross-match
+│   │       ├── api_find.py, sky.py, hips.py   curated objects and search, positions and proper motion, per-plane HiPS
+│   │       └── data/            curated objects (pins.json), reference spectra
+│   ├── demo/                    the five challenge targets, pre-built (cache/ + built.pkl.gz; engine/ for the fast band)
+│   ├── scripts/                 cache warming, demo media, validation; scripts/engine/ for the engine's builders
+│   ├── tests/                   pytest (146 tests, no network); tests/engine/ against a fake IRSA
 │   └── requirements.txt
 ├── frontend/                    the website (plain ES modules, no build step)
-│   ├── index.html               the single page: Home, Blink viewer, Map, Planetarium sections
+│   ├── index.html               the single page: Home, Blink viewer, Map, Planetarium
 │   ├── slides.html              presentation slides (served at /static/slides.html)
-│   ├── css/
-│   │   └── styles.css           Radians theme (dark/light), layout of every section
+│   ├── css/styles.css           Radians theme (dark/light), layout of every section
 │   ├── js/
-│   │   ├── core/                shared by every section
-│   │   │   ├── i18n.js          English / Turkish texts and the language switch
-│   │   │   ├── ui.js            page chrome: landing/viewer switch, light/dark, first-visit guide
-│   │   │   ├── palette.js       colour palettes (grey, negative, inferno, viridis, wavelength, infrared RGB)
-│   │   │   ├── cube.js          SPHEREx all-sky cube: wavelengths of its 102 planes
-│   │   │   └── charts.js        SVG charts (spectra, light curves)
-│   │   ├── blink/               the Blink viewer (watch a field change between SPHEREx visits)
-│   │   │   ├── app.js           viewer: search, playback, candidates, spectra, sharing
-│   │   │   ├── finds.js         plain words for the candidate cards, catalogue check
-│   │   │   ├── sky.js           image maths: stretch, stacking, WCS, decoding
-│   │   │   ├── typebox.js       "Type" box under the spectrum: catalogues vs our fit, fingerprints
-│   │   │   ├── curious.js       "For the curious": H-R diagram, how it moves, does it pulse, other catalogues
-│   │   │   ├── depth.js         "sharpening": the image gets cleaner as exposures pile up
-│   │   │   └── gif.js           GIF export
-│   │   ├── map/
-│   │   │   └── map.js           all-sky Map section (Aladin Lite + SPHEREx cube)
-│   │   ├── planetarium/
-│   │   │   └── planetsec.js     Planetarium section controls (time of night, places, targets)
-│   │   └── content/
-│   │       ├── facts.js         target facts, glossary, story texts
-│   │       ├── about.js         "About this target" panel
-│   │       └── funfacts.js      did-you-know cards
-│   ├── planet/                  planetarium engine (by Emre Bozkaya), shown inside the Planetarium section
-│   │   ├── index.html, css/     engine page (also usable on its own at /planet/)
-│   │   ├── js/                  sky renderer (sky.js), HiPS imagery (hips.js), astronomy (astro.js), app.js, tr.js
-│   │   └── data/                stars, constellations, Milky Way, deep-sky objects (d3-celestial, BSD-3)
+│   │   ├── core/                i18n.js (English / Turkish), ui.js, palette.js, cube.js, charts.js,
+│   │   │                        aladin.js (viewer loader with a fallback), coords.js + suggest.js (search box)
+│   │   ├── blink/               app.js (the viewer), sky.js (image maths), finds.js (cards, merging the two finders),
+│   │   │                        typebox.js, curious.js, depth.js (Sharpening), gif.js
+│   │   ├── map/                 map.js (the Map), colour.js + colourdata.js (false-colour maths and texts),
+│   │   │                        constellations.js
+│   │   ├── planetarium/         planetsec.js (Planetarium section controls)
+│   │   └── content/             facts.js, about.js, funfacts.js
+│   ├── data/                    constellation lines, names and boundaries (d3-celestial, BSD-3)
+│   ├── planet/                  planetarium engine (by Emre Bozkaya), also a page of its own at /planet/
 │   ├── media/                   GIFs and screenshots of the challenge targets
-│   └── tests/                   node --test suite for the image maths
+│   └── tests/                   node tests (42): image maths, cards, colour, coordinates, constellations, whole-site checks
 ├── docs/                        validation report, demo script, slides PDF, figures
-├── deploy/huggingface/          Dockerfile and card for a Hugging Face Space
+├── deploy/huggingface/          an unused Hugging Face Space set-up
 ├── explore/                     early probes of the IRSA archive (kept for reference)
 ├── Dockerfile, render.yaml      container and Render.com deployment
+├── start-radians.bat            Windows: sets up and starts the site
 └── .github/workflows/           CI: backend and frontend tests
 ```
 
 ## Run locally
 
+Windows: double-click `start-radians.bat` (first run: a few minutes to set up; then
+http://localhost:8765/).
+
+Any system:
+
 ```bash
-python -m venv .venv && .venv/bin/pip install -r backend/requirements.txt
-cd backend && ../.venv/bin/uvicorn app.main:app --reload
-# open http://127.0.0.1:8000
+python -m venv .venv && .venv/bin/pip install -r backend/requirements.txt pytest httpx
+.venv/bin/python -m uvicorn app.main:app --app-dir backend --port 8765
+# open http://localhost:8765     (Windows: .venv\Scripts\python instead of .venv/bin/python)
 ```
 
-Tests: `cd backend && python -m pytest -q tests` and `node --test frontend/tests`
+Tests (no network needed): `cd backend && python -m pytest -q` and, from the repository root,
+`node --test "frontend/tests/*.mjs"` (Node 21 or newer; on Node 20 leave the quotes out in a Unix shell).
 
-Fill the caches for the five demo targets (a few minutes, once): `cd backend && python scripts/warm.py`
+Settings (environment variables, all optional): `SPHEREX_COLLECTIONS`, `CACHE_DIR`, `MAX_WORKERS`,
+`WARM_ON_START`, `RATE_FRAMES`, `RATE_PHOT`, `MAX_COLD_BUILDS`, `CACHE_MAX_MB`, `IRSA_MAX_INFLIGHT`
+(default 16), `SKYSHIFT_DATA` (the engine's cache folder; default `data/` next to `backend/`),
+`SKYSHIFT_SIA_TTL_HOURS`, `SKYSHIFT_MAX_DISK_GB`.
 
 ## Deploy
 
 The `Dockerfile` runs everything in one container. **Render** (what the live site uses): New → Web
-Service → public repository URL, Docker, Free plan, `MAX_WORKERS=16`; or use the `render.yaml` Blueprint.
+Service → public repository URL, Docker, Free plan; or use the `render.yaml` Blueprint. The live
+service was created by hand, so it does not redeploy on `git push`: use Manual Deploy → Deploy
+latest commit in the dashboard.
 
-**Hugging Face** Docker Spaces now need a paid plan. With one, create a Docker Space, then:
-
-```bash
-deploy/push_hf.sh <hf-user>/<space-name>
-```
-
-The script pushes the current commit with `deploy/huggingface/README.md` as the Space card.
-Settings (environment variables): `MAX_WORKERS` (parallel IRSA reads, 32 in the container),
-`WARM_ON_START=1` (prepare the demo targets in the background at start-up), `CACHE_DIR`.
-
-**Speed.** A new position needs every SPHEREx exposure that covers it (300–400), about 0.5 MB each over
-HTTP byte ranges, most of it the compressed flag rows: 2–5 minutes, on the free Render server too (about
-2 minutes measured for Barnard's Star with an empty cache). The page shows how many exposures have been
-read. The cache lives in the container, and Render's free plan starts a fresh container on every deploy
-and wake-up, so only the five challenge targets, built into the image by `scripts/bake_demo.py`, are
-always instant.
-
-**Deploying to Render** does not happen on `git push`: the live service was created by hand, so use
-Manual Deploy → Deploy latest commit in the dashboard.
+The free plan sleeps after 15 quiet minutes, wakes in about a minute, and starts with an empty cache
+on every wake and deploy; the five challenge targets are built into the image and always open at once.
+The merged app has **not been deployed yet**, and its memory use on the 512 MB free plan has not
+been measured.
 
 ## API
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/resolve?q=Barnard's Star` | name or coordinates → RA/Dec (+ proper motion) |
-| `GET /api/observations?ra=&dec=` | SPHEREx exposures covering a position |
-| `GET /api/frames?ra=&dec=&fov=300&mode=epoch` | aligned frames (`epoch`, `epoch_detector`, `exposure`) + photometry + candidates |
-| `POST /api/spectype` | spectral type and molecular fingerprints of a spectrum (its points in the body); with `catalogues: true` also SIMBAD's type, Gaia DR3 parameters and whether they agree with the fit |
-| `GET /api/curious/hr`, `/api/curious/motion`, `/api/curious/xmatch`, `POST /api/curious/period` | the "for the curious" tools: Gaia neighbours for an H-R diagram, Gaia motion and speed, 2MASS / AllWISE entries, Lomb-Scargle period of a light curve |
-| `GET /api/progress?job=` | progress of a running `/api/frames?…&job=` request |
+| `GET /api/resolve?q=Barnard's Star` | name or coordinates → RA/Dec (+ proper motion); falls back to the built-in objects |
+| `GET /api/search?q=barn` | suggestions while typing: curated objects with their stories |
+| `GET /api/pins` | the curated objects (challenge targets and famous sky) |
+| `GET /api/coverage?ra=&dec=` | has SPHEREx seen this spot: exposures, sky passes, exposures per detector band |
+| `GET /api/quick?ra=&dec=&fov=&band=&have=&wait=` | the fast band in the viewer's frame format: preview, then the whole band |
+| `GET /api/quick/diffs?id=` | each later pass minus the first, at matching wavelengths |
+| `GET /api/quick/changes?id=` | finds on the difference picture, as candidate cards |
+| `GET /api/quick/motion?id=&x=&y=` | a line through a star's position in every pass |
+| `POST /api/views`, `GET /api/views/{id}/…` | the engine's own API: status, pass pictures, light curve, spectrum, type, FITS (see `backend/app/engine/api_views.py`) |
+| `GET /api/frames?ra=&dec=&fov=300&mode=epoch` | all detectors: aligned frames (`epoch`, `epoch_detector`, `exposure`) + photometry + tracker candidates |
+| `GET /api/progress?job=`, `/api/depth` | progress of a running build; data for the Sharpening section |
 | `GET /api/photometry?ra=&dec=&fov=&x=&y=` | per-exposure brightness and wavelength at one pixel: an on-the-fly spectrum |
-| `GET /api/coverage?ra=&dec=` | has SPHEREx seen this spot: exposures, sky passes, exposures per detector band (the map card) |
+| `POST /api/spectype` | spectral type, best-match curves and molecular fingerprints of a spectrum; optionally the catalogue side and the verdict |
 | `GET /api/sharp?ra=&dec=&fov=&det=&factor=` | super-resolution: one detector band of a spot drizzled onto 3″ pixels (SPHEREx's are 6.15″) from its dithered exposures, plus the ordinary 6.15″ stack for a before / after comparison (map and planetarium deep zoom; cached a week) |
 | `GET /api/object?ra=&dec=&id=&lang=&kind=` | planetarium details panel: SIMBAD facts (type, magnitudes, distance, spectral type, other names) and a Wikipedia summary in the page language, found through Wikidata catalogue codes |
-| `GET /api/gaia?ra=&dec=&radius=` | Gaia DR3 stars (ESA archive), with proper motions |
-| `GET /api/crossmatch?ra=&dec=&radius=&cat=` | SIMBAD and CatWISE2020 objects in the field, each with its own `ok` (one being down does not fail the request) |
-| `GET /api/sso?ra=&dec=&radius=&mjd=` | known asteroids and comets in the field at each date (IMCCE SkyBoT) |
-| `GET /api/neossat?ra=&dec=&radius=` | archived NEOSSat images of the area (CSA, via CADC) |
-| `GET /api/sx/images`, `/api/sx/cutout`, `/api/sx/catalog`, `/api/sx/simbad`, `/api/sx/resolve`, `/api/sx/hips-properties` | the planetarium and its time-lapse / spectra tool (see below) |
-| `GET /hips/spherex-color/…` | SPHEREx infrared colour sky as a HiPS (B = D1+D2, G = D3+D4, R = D5+D6), used by the map's "Infrared RGB" palette |
+| `GET /api/curious/hr`, `/motion`, `/xmatch`, `POST /api/curious/period` | H-R diagram data, Gaia motion and speed, 2MASS / AllWISE, period search |
+| `GET /api/gaia`, `/api/crossmatch`, `/api/sso`, `/api/neossat` | Gaia DR3; SIMBAD and CatWISE2020; SkyBoT; NEOSSat |
+| `GET /api/sx/…` | the planetarium and its own time-lapse / spectra tool |
+| `GET /hips/spherex-color/…` | infrared colour sky as a HiPS (B = D1+D2, G = D3+D4, R = D5+D6) |
+| `GET /hips/spherex-mix/{spec}/…` | planes of the all-sky cube mixed into false colour, as a HiPS: 2–3 tinted layers (`f21c0080ffg089_…`), or three plane numbers as red-green-blue (`88-65-18`) |
+| `GET /hips/spherex/{frame}/…` | one plane of the all-sky cube as a plain HiPS (redirects to IRSA) |
 
 ### Planetarium
 
 `/planet/` is **SPHEREx Sky Explorer** by team member Emre Bozkaya
 ([EmreBozkaya127/SPHEREx-Sky-Wiever](https://github.com/EmreBozkaya127/SPHEREx-Sky-Wiever)): a planetarium for
-any place and time (Istanbul, now, by default) drawn over the SPHEREx all-sky cube, with survey comparison,
-catalogue overlays, and a time-lapse / spectrophotometry tool that works on every SPHEREx exposure of a target.
-His Node.js server was ported to Python (`backend/app/explorer.py`); HiPS tiles come straight from IRSA.
-Star, constellation and Milky Way data: d3-celestial (BSD-3, see `frontend/planet/data/LICENSE-d3-celestial.txt`).
+any place and time drawn over the SPHEREx all-sky cube, with survey comparison, catalogue overlays, and a
+time-lapse / spectrophotometry tool that works on every SPHEREx exposure of a target. His Node.js server was
+ported to Python (`backend/app/explorer.py`); HiPS tiles come straight from IRSA.
 
-## Validation
+## Using the viewer
 
-`backend/scripts/inject_validate.py` puts fake objects into the real SPHEREx exposures of the five
-challenge fields (Gaussian PSF, σ = 0.62 px, on empty sky), runs the same finder as the app, and counts
-what comes back: 40 injections per cell, S/N per visit as the finder measures it (aperture flux over
-robust noise, which includes confusion). Details in [docs/VALIDATION.md](docs/VALIDATION.md).
+- **Fast band / All detectors** (top of the viewer): the fast band is on screen first; the D1–D6
+  chips next to it load another band. All detectors is the co-add of everything, read afterwards.
+  The choice is remembered for the next new spot (a curated object keeps its own best band).
+- **Views**: Images; **Difference** (in the fast band: each later visit minus the first at matching
+  wavelengths; otherwise frame − median / previous / first; always blue = was here, orange = is here
+  now); **Colour by time** (every visit in its own colour, first blue, last red: what stays put is
+  white, what moves leaves a trail); Stack.
+- **Space** play/pause, **← →** step frames, the timeline jumps to a visit. All frames share one
+  brightness scale, so a star that brightens really is brighter.
+- Hover the image for RA/Dec, pixel value and the SPHEREx flags of that pixel; click any star to
+  measure it. The light curve of the fast band is there at once; the spectrum needs all six bands.
+- **Candidates**: one list from two finders. A card says what changed in plain words, which finder
+  saw it ("found two ways" when both did, or when the all-detector difference pictures show the
+  tracker's find too), what Gaia DR3, SIMBAD and CatWISE2020 know there, and warns about saturated
+  stars and ghosts.
+- Under the spectrum: the **Type** box (catalogues next to our own fit, with the best-match curve
+  drawn over the points) and **For the curious** (H-R diagram, how it moves, does it pulse, other
+  catalogues).
+- Every view is a URL; add `&embed=1` for a chrome-free player to put in an `<iframe>`. GIF, PNG,
+  CSV and FITS downloads (FITS: the visit or stack on screen, with its sky coordinates).
 
-| Injected | S/N 5 | S/N 8 | S/N 12 | S/N 20 | S/N 40 |
-|---|---|---|---|---|---|
-| Mover, 9″/yr | 0% (0/40) | 50% (20/40) | 85% (34/40) | 100% (40/40) | 100% (40/40) |
-| Variable (×3 in one visit) | 12% (5/40) | 80% (32/40) | 90% (36/40) | 88% (35/40) | 85% (34/40) |
-| New source (one visit only) | 0% (0/40) | 42% (17/40) | 85% (34/40) | 100% (40/40) | 98% (39/40) |
+## Using the Map
 
-| Field (nothing injected) | Visits | Candidates besides the target |
-|---|---|---|
-| Barnard's Star | 5 | 0 |
-| eps Indi B | 4 | 0 |
-| WISE J085510.83-071442.5 | 4 | 0 |
-| RW Aur | 3 | 0 |
-| R Dra | 3 | 0 |
-
-With nothing injected, the finder reports no candidate besides the target in any of the five fields.
-S/N 5 is below the finder's detection threshold (8) on purpose.
+A slider and a tour over the 102 wavelengths of the SPHEREx all-sky cube, six palettes, **colour
+mixes** of two or three wavelengths, eight **science views** (five with the feature's wavelength in
+orange and the light beside it in blue; three with three wavelengths as red, green and blue: ices,
+hydrogen gas, warm dust), constellations, the challenge targets, Explore stars and 28 famous objects
+as markers with a card that blinks the spot (the famous ones can be switched off in the legend), and
+2MASS and DSS skies to compare with. Below 0.7° the **super-resolution** button reads the real
+exposures of the spot in the band of the chosen wavelength and drizzles them onto 3″ pixels
+(`backend/app/sharp.py`); Before / After switches to the ordinary 6″ stack on the same brightness
+scale. Closer than 0.25° the map fades to 2MASS (1″ pixels) and says on screen that this is not
+SPHEREx. All colour is false colour and labelled so.
 
 ## Sharing one free server
 
-Each visitor may ask for 20 views and 90 spectra a minute, and 60 a minute of each catalogue / fit lookup
-(crossmatch, coverage, spectral type, object details, the "for the curious" tools; super-resolution counts as a view) (HTTP 429 with `Retry-After` beyond that);
-at most two new positions are read from IRSA at the same time; IRSA's own `Retry-After` is honoured;
-the cut-out cache is trimmed to 4 GB, oldest first. All four are environment settings
-(`RATE_FRAMES`, `RATE_PHOT`, `RATE_LOOKUP`, `MAX_COLD_BUILDS`, `CACHE_MAX_MB`).
+Each visitor may ask for 20 all-detector views (super-resolution counts as one) and 90 spectra a
+minute, and 60 a minute of each catalogue or fit lookup (crossmatch, coverage, spectral type, object
+details, the "for the curious" tools, the fast band's finds and motion fit); beyond that the answer is
+HTTP 429 with `Retry-After`. At most two new positions are read by the all-detector build at the
+same time, and two by the engine; every request to IRSA takes one of 12 slots; IRSA's own
+`Retry-After` is honoured; the cut-out caches are trimmed, oldest first. All of these are
+environment settings (`RATE_FRAMES`, `RATE_PHOT`, `RATE_LOOKUP`, `MAX_COLD_BUILDS`, `CACHE_MAX_MB`,
+`IRSA_MAX_INFLIGHT`).
 
 ## Limitations
 
 - SPHEREx pixels are 6.15″: motions below about 1″ a year do not show between visits a year apart.
-- Saturated stars have no usable core. Their brightness comes from the PSF wings (relative only), and
-  motion measured on them depends on the unsaturated wings.
-- Visits are compared only at wavelengths every visit sampled (wavelength matching, on by default).
-  When visits share few wavelengths, fewer exposures go into each co-add and the comparison is noisier;
-  when two visits share no detector at all, matching falls back to each detector on its own.
-- Completeness falls off below S/N 8 to 12 per visit (see Validation); a source fainter than that in
+- Saturated stars have no usable core. Their brightness comes from the PSF wings or a halo ring
+  (relative only), and the Type box shows the catalogue side only.
+- Visits are compared only at wavelengths every visit sampled. When visits share few wavelengths the
+  comparison is noisier, and the difference finder says "too few pictures" instead of guessing.
+- The fast band is one detector band of up to 10′. What only all detectors can give (the full
+  spectrum, the colour composite) arrives minutes later on a position nobody has looked at.
+- Completeness of both finders falls off at low S/N (see Validation); a source fainter than that in
   every visit will not be reported.
-- Asteroids move within a visit and blur in the co-adds; SkyBoT marks the known ones per exposure.
+- Asteroids move within a visit and blur in the stacks; SkyBoT marks the known ones per exposure.
 - It cannot prove a Planet X: a planet hundreds of AU away moves by arcminutes between visits (mostly
   parallax), so it shows as a spot that is "new" in one visit and "gone" in another, not as one mover.
-  The transient finder lists such spots; following them up is for telescopes.
 - "Not in Gaia DR3" means no Gaia star brighter than G = 19 within 7″. Infrared-only objects such as
-  WISE 0855 are never in Gaia: check CatWISE2020 in the context view before calling anything new.
-- A position nobody has looked at yet takes 2–5 minutes on the free server (all exposures are read
-  once), and again after the server restarts; only the five challenge targets are built in.
+  WISE 0855 are never in Gaia: check CatWISE2020 before calling anything new.
+- Colour mixes and science views of the Map are made on the server from the cube's display tiles
+  (8-bit, already stretched): for looking, not for measuring; a new place takes seconds to fill in.
+- Super-resolution cannot beat the telescope's own blur (about 9″): the 3″ grid samples that blur
+  better than the 6.15″ pixels do, it does not make new detail.
+- Not checked after the merges: the phone layout on a real phone, Turkish wording of the new texts
+  by a native speaker, the embed mode, and the deployment.
 
 ## Use of AI
 
-Radians was written during the hackathon weekend (from 14 November 2026) with an AI coding
-assistant, Anthropic's Claude, under the team's direction: it wrote much of the code, tests and
-documentation, and commits it helped write carry a `Co-Authored-By: Claude` line. Every image in the
-app and the slides is real SPHEREx data; nothing shown as data is AI-generated. The results above
-were checked against catalogue values.
+Both versions and the merge were written during the hackathon weekend (14–15 November 2026) with an
+AI coding assistant, Anthropic's Claude (Claude Code), under the team's direction: it wrote most of
+the code, tests and documentation from the team's product decisions, summarised SPHEREx documents
+into build notes, drafted the English and Turkish interface texts, and helped check results. The
+team chose the challenge, the product, the features and the look, made every scope decision
+(including each choice of the merge), tested the app and checked the science against catalogues.
+Commits the assistant helped write carry a `Co-Authored-By: Claude` line. Every image shown as data
+is real SPHEREx data; nothing shown as data is AI-generated, and colour pictures are labelled false
+colour.
+
+## Inspiration disclosure
+
+Before the hackathon (12–13 November 2026), one team member built a separate pre-event prototype,
+"SPHEREx Blink". The fast engine in `backend/app/engine` was **written from zero during the event**.
+We studied the prototype's code and documentation to learn archive facts (for example, how to read
+only the needed bytes of SPHEREx files) and took inspiration from its interface and features. **No
+code was copied from it** (a few short lines may read the same where there is only one natural way
+to write them, such as a FITS keyword or a standard library call). We also looked at the
+public-domain WiseView tool for ideas only. The planetarium engine is team member Emre Bozkaya's
+own SPHEREx Sky Explorer, adapted for this site.
 
 ## Licence
 
 Code and text: MIT ([LICENSE](LICENSE)). Data stay under their providers' terms (see below).
+This project is not endorsed by NASA. No NASA logos are used.
 
 ## Team
 
@@ -271,60 +391,23 @@ has made use of data from the European Space Agency (ESA) mission Gaia (https://
 processed by the Gaia Data Processing and Analysis Consortium (DPAC). This research has made use of the
 SIMBAD database and Aladin, operated at CDS, Strasbourg, France, and of IMCCE's SkyBoT service.
 
-
-- **SPHEREx** spectral images (DR1): NASA/IPAC Infrared Science Archive (IRSA). Photometry follows the
-  IRSA SPHEREx tutorial notebooks (annulus background, flag bits, wavelength from the WCS-WAVE table).
-- **2MASS, AllWISE, DSS2 and SPHEREx HiPS** sky maps for the Aladin Lite context view: served by IRSA.
-- **Gaia DR3**: ESA Gaia archive (TAP). **CatWISE2020**: VizieR. Gaia stars are moved to each frame's
-  date with their proper motions, so fast movers line up with the SPHEREx image.
-- **Spectral types**: reference spectra from the Pickles (1998) stellar flux library, the SpeX Prism spectral
-  standards (Burgasser et al.; via the SPLAT toolkit) and the Sonora Bobcat brown-dwarf models (Marley et al.
-  2021), smoothed to SPHEREx resolution by `backend/scripts/build_spectral_library.py`. Catalogue types and
-  parameters: SIMBAD (CDS) and Gaia DR3 (ESA).
-- **Known Solar System objects**: IMCCE SkyBoT.
-- **NEOSSat** (Canadian Space Agency) archive search: CADC.
-- Name resolution by CDS Sesame (Strasbourg); sky viewer: Aladin Lite (CDS).
-- Planetarium, time-lapse / spectra tool and the infrared colour recipe: Emre Bozkaya (SPHEREx Sky Explorer);
-  sky data from d3-celestial (Olaf Frohn, BSD-3).
-- Built with Astropy, PyVO, NumPy, SciPy and FastAPI; the browser side has no build step or framework.
-
-## Finding things
-
-- **Views** (computed instantly in the browser): images, *frame − median of all* (static sky cancels,
-  movers and variables stay), *frame − previous*, *frame − first*, and a deep *stack* of every frame.
-- **Detectors**: pick D1–D6 or a preset. Cold brown dwarfs such as WISE 0855 are bright only at
-  4–5 µm, so try *D5+D6* with wavelength matching off (the *WISE 0855* button does this).
-- **Candidate finder**: every query also runs a simple search that
-  - co-adds each visit only at wavelengths every visit sampled (**wavelength matching**: SPHEREx has
-    no filters, so without it a colour difference between visits looks like a change),
-  - finds sources in each epoch (Gaussian peak fits, which stay unbiased on SPHEREx's undersampled PSF),
-  - removes small astrometric offsets between epochs using bright common stars,
-  - fits straight-line motion through 3 or more epochs (one outlier epoch may be dropped) → **moving**,
-  - compares brightness only within the same detector, and needs two detectors to agree → **variable**,
-  - flags sources seen in one epoch and truly absent in the others → **one epoch only**.
-
-  On the challenge targets it recovers Barnard's Star (10.38″/yr, PA 354°; catalogue 10.39″/yr, 356°),
-  ε Indi B (4.65″/yr, PA 125°; catalogue 4.68″/yr, 123°), WISE 0855 with D5+D6 (8.16″/yr, PA 285°;
-  catalogue 8.15″/yr, 275°; see [Validation](docs/VALIDATION.md#wise-0855)) and the variability of RW Aurigae (×1.7).
-  Candidates are suggestions to check by eye, each with a SIMBAD link.
-
-## Using the viewer
-
-- **Space** play/pause, **← →** step frames, the timeline jumps to an epoch.
-- All frames share one brightness scale, so a star that brightens really is brighter.
-- Hover the image for RA/Dec, pixel value (MJy/sr) and the SPHEREx contamination flags of that pixel.
-- Every view is a URL: `/?q=RW%20Aur&fov=240&frame=1&cmap=heat&view=diff_median&det=4,5,6&lang=tr`. Add `&embed=1` for a
-  chrome-free player to put in an `<iframe>`.
-
-## Spectra, light curves and context (phase 4)
-
-- **Spectrum**: SPHEREx's linear-variable filters see every position at a different wavelength in each
-  exposure, so the brightness of one pixel across all exposures *is* a 0.75–5 µm spectrum. The target's
-  spectrum appears below the player; click any star to measure it instead. Colours mark epochs.
-- **Light curve**: each detector divided by its own median; real variability moves all detectors together.
-- **Saturated stars** (Barnard's Star, R Dra) switch automatically to *PSF wings* photometry: the flux in a
-  ring 2.5–4.5 px from the core, which still follows the star's brightness.
-- **Overlays**: Gaia DR3 circles (propagated to the frame date; a line shows 5 years of motion for stars
-  faster than 0.15″/yr) and SkyBoT crosses for known asteroids at that exact time.
-- **NEOSSat**: links to archived images of the field from Canada's asteroid-hunting microsatellite.
-- **Wider context**: Aladin Lite with 2MASS / AllWISE / SPHEREx / DSS2 maps, the Radians field outlined.
+- **SPHEREx** spectral images and the DR1 all-sky HiPS cube: NASA/JPL-Caltech SPHEREx mission, served by
+  the NASA/IPAC Infrared Science Archive (IRSA). Photometry follows the IRSA SPHEREx tutorial notebooks
+  (annulus background, flag bits, wavelength from the WCS-WAVE table).
+- **2MASS, AllWISE, DSS2 and SPHEREx HiPS** sky maps: served by IRSA.
+- **Gaia DR3**: ESA Gaia archive (TAP). **CatWISE2020**: IRSA / VizieR. **2MASS and AllWISE** catalogue
+  entries: VizieR (CDS, Harvard mirror). Catalogue stars are moved to each frame's date with their
+  proper motions, so fast movers line up with the SPHEREx image.
+- **SIMBAD / Sesame**: CDS, Strasbourg (also through the Harvard mirror). Sky viewer: **Aladin Lite**
+  (CDS, GPL-3.0, loaded from a CDN).
+- **Spectral types**: reference spectra from the Pickles (1998) stellar flux library, the SpeX Prism
+  spectral standards (Burgasser et al.; via the SPLAT toolkit) and the Sonora Bobcat brown-dwarf models
+  (Marley et al. 2021, Zenodo record 5063476), smoothed to SPHEREx resolution. Type–temperature tables:
+  Pecaut & Mamajek (2013), Filippazzo et al. (2015).
+- **Known Solar System objects**: IMCCE SkyBoT. **NEOSSat** (Canadian Space Agency) archive search: CADC.
+- **Constellation lines, names and boundaries; star, constellation and Milky Way data of the
+  planetarium**: d3-celestial by Olaf Frohn (BSD-3-Clause, see `frontend/data/LICENSE-d3-celestial.txt`).
+- **Planetarium, its time-lapse / spectra tool and the infrared colour recipe**: Emre Bozkaya
+  (SPHEREx Sky Explorer).
+- Built with Astropy, PyVO, NumPy, SciPy, Pillow and FastAPI; the browser side has no build step or
+  framework.

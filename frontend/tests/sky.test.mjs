@@ -103,3 +103,40 @@ test('rgbChannels groups detectors into blue / green / red per epoch', () => {
   assert.equal(ch[2].g[0], 3);
   assert.equal(ch.all.b[0], 15);
 });
+
+// ---------------------------------------------------------------- merged-in views (colour by time, matched difference)
+test('colour by time: first visit blue, middle green, last red', async () => {
+  const { timeColorChannels, timeColour, computeView } = await import('../js/blink/sky.js');
+  const near = (x, y) => Math.abs(x - y) < 1e-5;
+  // pixel 0: a steady star (4 in every visit) -> white; pixel 1: only in the first visit -> blue;
+  // pixel 2: only in the last -> red; pixel 3: never seen in the last visit
+  const a = Float32Array.of(4, 9, 0, 2), b = Float32Array.of(4, 0, 0, 2), c = Float32Array.of(4, 0, 9, NaN);
+  const three = timeColorChannels([a, b, c]);
+  assert.ok(near(three.r[0], 4) && near(three.g[0], 4) && near(three.b[0], 4));
+  assert.ok(three.b[1] > three.g[1] && three.g[1] > three.r[1]);
+  assert.ok(three.r[2] > three.g[2] && three.g[2] > three.b[2]);
+  assert.ok(near(three.r[3], 2) && near(three.b[3], 2));        // the missing visit is left out, not counted as dark
+  const four = timeColorChannels([a, b, b, c]);                 // every visit counts, not only three of them
+  assert.ok(near(four.g[0], 4) && four.b[1] > four.r[1]);
+  const blue = timeColour(0, 4), red = timeColour(3, 4);
+  assert.ok(blue[2] > blue[0] && red[0] > red[2]);
+  const two = timeColorChannels([a, c]);
+  assert.ok(near(two.g[0], 4) && two.b[1] > two.r[1] && two.r[2] > two.b[2]);
+  assert.equal(timeColorChannels([a]), null);
+  assert.equal(computeView([a, b, c], null, 'timecolor').length, 1);
+});
+
+test('matched difference: noise stays dark, before is blue, now is orange', async () => {
+  const { matchedDiffValue, lutBeforeNow, BEFORE_RGB, NOW_RGB } = await import('../js/blink/sky.js');
+  assert.equal(matchedDiffValue(0.5, 10), 0);                  // 0.5 sigma of a 10-sigma scale: under the knee
+  assert.equal(matchedDiffValue(-1, 10), -0);
+  assert.ok(matchedDiffValue(5, 10) > 0.4 && matchedDiffValue(5, 10) < 0.5);
+  assert.equal(matchedDiffValue(50, 10), 1);
+  assert.equal(matchedDiffValue(-50, 10), -1);
+  assert.ok(Number.isNaN(matchedDiffValue(NaN, 10)));
+  const lut = lutBeforeNow();
+  assert.deepEqual([...lut.slice(0, 3)].map(Math.round).slice(0, 3).length, 3);
+  assert.ok(Math.abs(lut[1 * 3 + 2] - BEFORE_RGB[2]) <= 3);    // most negative: blue
+  assert.ok(Math.abs(lut[255 * 3] - NOW_RGB[0]) <= 1);         // most positive: orange
+  assert.ok(lut[128 * 3] < 10 && lut[128 * 3 + 1] < 12 && lut[128 * 3 + 2] < 16);   // no change: dark
+});

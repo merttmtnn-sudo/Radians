@@ -22,10 +22,53 @@ export function clarity(z) {
 
 export const tooFast = (c) => c.type === 'moving' && c.rate_arcsec_yr > TOO_FAST;
 
+/** Angular separation of two sky positions (degrees in, arcsec out). */
+export function sepArcsec(ra1, dec1, ra2, dec2) {
+  const cosd = Math.cos(0.5 * (dec1 + dec2) * Math.PI / 180);
+  return Math.hypot(((ra1 - ra2 + 540) % 360 - 180) * cosd, dec1 - dec2) * 3600;
+}
+
+export const MERGE_ARCSEC = 9;       // about one SPHEREx point-spread width
+
+/** One list from the two finders.
+ * tracking: finds of the all-detector tracker (sources followed across visits);
+ * difference: finds on the fast band's wavelength-matched difference picture.
+ * Every find carries `sky`: the [ra, dec] of each position it has (a mover has several).
+ * Two finds of the same type whose positions come within `radius` are one thing seen twice: one card
+ * (the tracker's, which has the full track), with methods = both and `also` = the other find.
+ * Returns new objects {...find, methods, also}; the tracker's finds first, in their own order. */
+export function mergeFinds(tracking, difference, radius = MERGE_ARCSEC) {
+  const closest = (a, b) => Math.min(...a.sky.flatMap(p => b.sky.map(q => sepArcsec(p[0], p[1], q[0], q[1]))));
+  const used = new Set();
+  const out = tracking.map((a) => {
+    let best = -1, bd = Infinity;
+    difference.forEach((b, j) => {
+      if (used.has(j) || b.type !== a.type) return;
+      const d = closest(a, b);
+      if (d < bd) { bd = d; best = j; }
+    });
+    if (best < 0 || bd > radius) return { ...a, methods: ['tracking'], also: null };
+    used.add(best);
+    return { ...a, methods: ['tracking', 'difference'], also: difference[best] };
+  });
+  difference.forEach((b, j) => { if (!used.has(j)) out.push({ ...b, methods: ['difference'], also: null }); });
+  return out;
+}
+
 /** The headline of a card: {key, vars, from, to} where from/to are the epochs compared (if any).
  * epochs: the sorted epoch numbers of the view. pair: {brighter, from, to} when the page already knows
  * which two visits it shows side by side, so the words match the pictures. */
 export function headline(c, epochs = [], pair = null) {
+  if (c.method === 'difference' && c.type !== 'moving') {      // first visit against the last (c.from, c.to)
+    const from = c.from ?? null, to = c.to ?? null;
+    if (c.kind === 'appeared') return { key: 'fAppeared', vars: {}, to };
+    if (c.kind === 'vanished') return { key: 'fVanished', vars: {}, from };
+    const brighter = c.kind === 'brightened';
+    if (!c.ratio) return { key: brighter ? 'fBrighter' : 'fFainter', vars: {}, from, to };   // saturated: no number
+    if (brighter && c.ratio >= 2) return { key: 'fBrighterX', vars: { x: c.ratio.toFixed(1) }, from, to };
+    const pct = Math.round(brighter ? (c.ratio - 1) * 100 : (1 - 1 / c.ratio) * 100);
+    return { key: brighter ? 'fBrighterBy' : 'fFainterBy', vars: { pct }, from, to };
+  }
   if (c.type === 'moving') {
     return { key: 'fMover', vars: { rate: c.rate_arcsec_yr, dir: compass(c.pa_deg) } };
   }

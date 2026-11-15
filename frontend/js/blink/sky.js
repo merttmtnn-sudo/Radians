@@ -137,8 +137,10 @@ export function parseState(search) {
     fov: num('fov'), mode: p.get('mode'), fps: num('fps'),
     stretch: p.get('stretch'), cmap: p.get('cmap'),
     frame: num('frame'), embed: p.get('embed') === '1',
-    det: p.get('det'), view: p.get('view'), lang: p.get('lang'), wl: p.get('wl') !== '0',
+    det: p.get('det'), view: p.get('view') === 'time' ? 'timecolor' : p.get('view'),   // 'time': the name in older shared links
+    lang: p.get('lang'), wl: p.get('wl') !== '0',
     wlc: num('wlc'), wlw: num('wlw'),
+    src: p.get('src'), band: num('band'),
   };
 }
 
@@ -185,7 +187,7 @@ export function computeView(images, variances, view) {
     case 'diff_median': { const m = medianImage(images); return images.map(im => diff(im, m)); }
     case 'diff_prev': return images.map((im, i) => diff(im, images[(i - 1 + images.length) % images.length]));
     case 'diff_first': return images.map(im => diff(im, images[0]));
-    case 'stack': case 'time': return [stackImage(images, variances)];   // 'time' is drawn from the frames (app.js)
+    case 'stack': case 'timecolor': return [stackImage(images, variances)];   // 'timecolor' is drawn from the frames (timeColorChannels)
     default: return images;
   }
 }
@@ -204,34 +206,55 @@ export function lutDiverging() {
   return out;
 }
 
-/** Read "RA Dec" the way the server does (archive.parse_coords): two decimal-degree numbers (decimal commas
- * allowed), or sexagesimal hours + degrees ("17h57m48s +04d41m36s", "17:57:48 +04:41:36", "17 57 48 +04 41 36").
- * Returns [ra, dec] in degrees or null when it is not a position (then the text is looked up as a name). */
-export function parseCoords(text) {
-  let s = String(text || '').trim();
-  if (/^[+-]?\d+,\d+\s+[+-]?\d+,\d+$/.test(s)) s = s.replace(/,/g, '.');
-  s = s.replace(/,/g, ' ').trim();
-  const num = /^[+-]?\d+(\.\d*)?$/;
-  let parts = s.split(/\s+/);
-  let ra, dec;
-  if (parts.length === 2 && parts.every(p => num.test(p))) {
-    [ra, dec] = parts.map(Number);
-  } else {
-    parts = s.replace(/[hdms°:'"′″]/gi, ' ').trim().split(/\s+/);
-    if (parts.length !== 6 || !parts.every(p => num.test(p))) return null;
-    const [h, m, sec, dd, dm, ds] = parts.map(Number);
-    if (m >= 60 || sec >= 60 || dm >= 60 || ds >= 60) return null;
-    const neg = parts[3].startsWith('-');
-    ra = 15 * (h + m / 60 + sec / 3600);
-    dec = (neg ? -1 : 1) * (Math.abs(dd) + dm / 60 + ds / 3600);
-  }
-  return ra >= 0 && ra < 360 && dec >= -90 && dec <= 90 ? [ra, dec] : null;
-}
-
 /** Colour of visit k of n for the colour-by-time view: blue -> green -> red. */
 export function timeColour(k, n) {
   const u = n > 1 ? k / (n - 1) : 0.5;
   return u < 0.5 ? [0.2 + 0.2 * u, 0.45 + 1.1 * u, 1 - 1.2 * u] : [0.3 + 1.4 * (u - 0.5), 1 - 1.3 * (u - 0.5), 0.4 - 0.6 * (u - 0.5)];
+}
+
+/** Colour by time: every visit in its own colour (timeColour: the first blue, the middle green, the
+ * last red), added up and divided by the colour total. What stays put comes out white; what moves
+ * leaves a blue -> green -> red trail. A pixel a visit did not see is left out of that pixel's sum.
+ * Returns {r, g, b} images on the brightness scale of the visits, or null with fewer than two. */
+export function timeColorChannels(images) {
+  const F = images.length;
+  if (F < 2) return null;
+  const n = images[0].length, cols = images.map((_, k) => timeColour(k, F));
+  const out = [new Float32Array(n), new Float32Array(n), new Float32Array(n)];
+  for (let i = 0; i < n; i++) {
+    const sum = [0, 0, 0], tot = [0, 0, 0];
+    for (let k = 0; k < F; k++) {
+      const v = images[k][i];
+      if (!Number.isFinite(v)) continue;
+      for (let c = 0; c < 3; c++) { sum[c] += v * cols[k][c]; tot[c] += cols[k][c]; }
+    }
+    for (let c = 0; c < 3; c++) out[c][i] = tot[c] ? sum[c] / tot[c] : NaN;
+  }
+  return { r: out[0], g: out[1], b: out[2] };
+}
+
+export const BEFORE_RGB = [78, 168, 255];     // blue: it was here
+export const NOW_RGB = [255, 159, 67];        // orange: it is here now
+const DIFF_BACKDROP = [5, 8, 14];
+
+/** Lookup table for a wavelength-matched difference: index 0 = much fainter now (blue), 128 = no
+ * change (dark), 255 = much brighter now (orange). */
+export function lutBeforeNow() {
+  const out = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const t = (i - 128) / 127, a = Math.min(1, Math.abs(t)), tint = t < 0 ? BEFORE_RGB : NOW_RGB;
+    for (let c = 0; c < 3; c++) out[i * 3 + c] = DIFF_BACKDROP[c] + (tint[c] - DIFF_BACKDROP[c]) * a;
+  }
+  return out;
+}
+
+/** A difference value on -1..1 for lutBeforeNow: linear up to `limit` (10 sigma of the difference
+ * noise), with a small knee so that 1-sigma noise stays dark. NaN for missing data. */
+export function matchedDiffValue(v, limit, knee = 0.1) {
+  if (!Number.isFinite(v)) return NaN;
+  const a = Math.min(1, Math.abs(v) / (limit || 1));
+  const s = a <= knee ? 0 : (a - knee) / (1 - knee);
+  return v < 0 ? -s : s;
 }
 
 /** Minimal FITS file (one float32 image, sky WCS from a header dict) as bytes. */

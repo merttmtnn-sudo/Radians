@@ -122,3 +122,20 @@ def test_route_fit_first_then_catalogues(tmp_path, monkeypatch):
     assert r["fit"]["standards"]["type"] == "M4V"
     assert not r["catalogue"]["simbad"]["ok"] and not r["catalogue"]["gaia"]["ok"] and r["agreement"] == "unknown"
     assert c.post("/api/spectype", json={"points": [], "ra": 400, "dec": 0}).status_code == 422
+
+
+def test_fit_returns_the_best_match_as_a_curve_through_the_data():
+    """The curve the page draws over the spectrum: the reference spectrum, scaled, inside the fitted window."""
+    r = spectype.fit(synth("G2V", flux=5e3))
+    st = r["standards"]
+    wave, flux = np.array(st["curve"]["wave"]), np.array(st["curve"]["flux"])
+    assert wave.size > 50 and wave.min() >= spectype.STANDARDS_UM[0] and wave.max() <= spectype.STANDARDS_UM[1]
+    data_w, data_f = np.array(r["data"]["wave"]), np.array(r["data"]["flux"])
+    inside = (data_w >= wave.min()) & (data_w <= wave.max())
+    assert inside.sum() >= 20
+    at_data = np.interp(data_w[inside], wave, flux)
+    assert np.median(np.abs(at_data / data_f[inside] - 1)) < 0.03          # it runs through the binned points
+    cold = spectype.fit(synth("T5V", flux=5e3))
+    assert cold["model"] and len(cold["model"]["curve"]["wave"]) > 50
+    assert max(cold["model"]["curve"]["wave"]) > 4.5                        # models cover the long wavelengths too
+    assert spectype.fit(synth("G2V", saturate=0.9))["standards"] is None    # no fit, no curve
