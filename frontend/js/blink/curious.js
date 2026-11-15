@@ -2,8 +2,9 @@
 // it moves, whether it pulses, and what other catalogues list there. Nothing is asked until a tool's
 // button is pressed. The *Lines functions only turn answers into i18n keys, so node can test them.
 import { scatterChart } from '../core/charts.js';
+import { compass } from './finds.js';
 
-export const TOOLS = ['hr', 'motion', 'period', 'star'];
+export const TOOLS = ['hr', 'motion', 'period', 'star', 'facts'];
 const LY_PER_PC = 3.2616;
 
 /** km/s across the sky from a motion in arcsec/yr and a parallax in mas; null without a parallax. */
@@ -12,15 +13,23 @@ export function speedKms(rate, parallaxMas) {
 }
 
 /** "How it moves": [[key, vars], ...]. cand: the SPHEREx mover at this spot (or null); gaia: the
- * /api/curious/motion answer (or null when the spot has no Gaia star). */
-export function motionLines(cand, gaia) {
+ * /api/curious/motion answer (or null when the spot has no Gaia star); fit: the /api/quick/motion
+ * answer, a line through the star's position in every pass of the fast band (or null). */
+export function motionLines(cand, gaia, fit = null) {
   const out = [];
   const g = gaia && gaia.reachable && gaia.found ? gaia : null;
+  const f = fit && fit.ok ? fit : null;
   if (cand) {
     out.push(['cuMotionOurs', { rate: cand.rate_arcsec_yr.toFixed(2), dir: cand.dir, n: cand.points?.length ?? '?' }]);
     const v = g && g.parallax_ok ? speedKms(cand.rate_arcsec_yr, g.parallax_mas) : null;
     if (v != null) out.push(['cuSpeed', { v: Math.round(v) }]);
-  } else out.push(['cuMotionStill', {}]);
+  } else if (!(f && f.significant)) out.push(['cuMotionStill', {}]);
+  if (f) {
+    out.push([f.significant ? 'cuMotionFit' : 'cuMotionFitWeak',
+      { rate: f.rate.toFixed(2), err: f.err.toFixed(2), dir: compass(f.direction_deg), n: f.n, b: fit.band }]);
+    const v = !cand && f.significant && g && g.parallax_ok ? speedKms(f.rate, g.parallax_mas) : null;
+    if (v != null) out.push(['cuSpeed', { v: Math.round(v) }]);
+  } else if (fit && fit.reason === 'saturated') out.push(['cuMotionFitSat', {}]);
   if (gaia && !gaia.reachable) out.push(['tyGaiaDown', {}]);
   else if (!g) out.push(['tyNoGaia', {}]);
   else {
@@ -34,11 +43,102 @@ export function motionLines(cand, gaia) {
   return out;
 }
 
-/** "Does it pulse?": [[key, vars], ...] for a /api/curious/period answer. */
+const days = (v) => (v < 20 ? v.toFixed(1) : String(Math.round(v)));
+const month = (mjd) => new Date((mjd - 40587) * 86400000).toISOString().slice(0, 7);
+const NO_ANSWER = { too_faint: 'cuPeriodFaint', saturated: 'cuPeriodSat', empty: 'cuPeriodEmpty', wing: 'cuPeriodWing' };
+
+/** "Does it pulse?": [[key, vars], ...] for a /api/curious/period answer. It answers two things: is
+ * there a rhythm inside the visits, and did the brightness change from one visit to another. When
+ * the spot cannot be tested (too faint, saturated, no star there) it says why and guesses nothing. */
 export function periodLines(d) {
-  if (!d || !d.ok) return [['cuPeriodNone', {}]];
-  const vars = { p: Math.round(d.period_d), err: Math.max(1, Math.round(d.err_d)) };
-  return [[d.convincing ? 'cuPeriod' : 'cuPeriodWeak', vars], ['cuPeriodCycles', { c: d.cycles.toFixed(1) }]];
+  if (!d || !d.ok) return [[d && d.reason === 'saturated' && d.wings ? 'cuPeriodSatWings' : NO_ANSWER[d && d.reason] || 'cuPeriodNone', {}]];
+  const out = [];
+  if (d.convincing) {
+    const short = d.period_d < 20;                        // the error is written as finely as the period
+    out.push(['cuPeriod', { p: days(d.period_d), err: short ? Math.max(d.err_d, 0.1).toFixed(1) : String(Math.max(1, Math.round(d.err_d))) }]);
+    out.push(['cuPeriodDetail', { amp: Math.max(1, Math.round(d.amplitude_pct)), c: Math.round(d.cycles) }]);
+    if (d.aliased) out.push(['cuPeriodAlias', {}]);
+  } else if (d.search) out.push(['cuPeriodNoRhythm', { lo: days(d.search.lo_d), hi: days(d.search.hi_d) }]);
+  else out.push(['cuPeriodNoSearch', {}]);
+  const ch = d.change;
+  if (!ch) out.push(['cuChangeOne', {}]);
+  else if (ch.significant) {
+    out.push([ch.brighter ? 'cuChangeBrighter' : 'cuChangeFainter',
+      { pct: Math.round(ch.pct), sigma: Math.round(ch.sigma), a: month(ch.from_mjd), b: month(ch.to_mjd) }]);
+  } else out.push(['cuChangeSteady', { pct: Math.max(1, Math.round(Math.max(ch.pct, 3 * ch.err_pct))) }]);
+  const left = Object.values(d.dropped || {}).reduce((s, v) => s + v, 0);
+  out.push(['cuPeriodUsed', { n: d.n, left }]);
+  return out;
+}
+
+/** Is it a known variable star? [[key, vars], ...] for a /api/curious/variable answer (or null), next
+ * to our own answer d: a catalogue period is compared with ours when we found one. */
+export function knownLines(k, d) {
+  if (!k) return [];
+  const out = [], v = k.vsx || {}, g = k.gaia || {};
+  if (v.reachable === false) out.push(['cuKnownDown', { cat: 'VSX' }]);
+  else if (v.found) out.push([v.period_d ? 'cuKnownVsxPeriod' : 'cuKnownVsx', { name: v.name, type: v.type || '?', p: v.period_d ? days(v.period_d) : '' }]);
+  if (g.reachable === false) out.push(['cuKnownDown', { cat: 'Gaia DR3' }]);
+  else if (g.found && g.variable) out.push([g.class ? 'cuKnownGaiaClass' : 'cuKnownGaia', { cls: g.class || '' }]);
+  if (!out.length) out.push(['cuKnownNone', {}]);
+  if (d && d.ok && d.convincing && v.found && v.period_d) {
+    out.push([Math.abs(d.period_d / v.period_d - 1) < 0.1 ? 'cuKnownAgree' : 'cuKnownDiffer', {}]);
+  }
+  return out;
+}
+
+/** "About this star": [[key, vars], ...] for a /api/curious/facts answer: what Gaia DR3 knows about
+ * the star itself, and the planets the NASA Exoplanet Archive lists around it. */
+export function factsLines(d) {
+  const out = [];
+  const s = d && d.star, sig = (v) => (v >= 100 ? Math.round(v).toLocaleString('en-US') : v >= 10 ? v.toFixed(0) : v >= 1 ? v.toFixed(1) : v.toFixed(2));
+  if (!s || s.reachable === false) out.push(['cuFactsDown', {}]);
+  else if (!s.found) out.push(['tyNoGaia', {}]);
+  else {
+    if (s.distance_ly != null) out.push([s.distance_from === 'parallax' ? 'cuFactDist' : 'cuFactDistModel', { d: sig(s.distance_ly) }]);
+    if (s.radius_sun != null) out.push(['cuFactRadius', { r: sig(s.radius_sun) }]);
+    if (s.luminosity_sun != null) out.push(['cuFactLum', { l: sig(s.luminosity_sun) }]);
+    if (s.mass_sun != null) out.push(['cuFactMass', { m: sig(s.mass_sun) }]);
+    if (s.age_gyr != null) out.push(['cuFactAge', { a: sig(s.age_gyr) }]);
+    if (s.rv_kms != null) out.push([s.rv_kms < 0 ? 'cuFactToward' : 'cuFactAway', { v: Math.round(Math.abs(s.rv_kms)) }]);
+    if (s.space_kms != null) out.push(['cuFactSpace', { v: Math.round(s.space_kms) }]);
+    const a = s.in_1000yr_arcmin;
+    if (a >= 0.5 && s.direction) {
+      out.push([a >= 15.5 ? 'cuFactFutureMoon' : 'cuFactFuture',
+        { a: a < 60 ? `${a.toFixed(1)}′` : `${(a / 60).toFixed(1)}°`, dir: s.direction, moons: (a / 31).toFixed(1) }]);
+    }
+    for (const kind of s.binary || []) out.push([`cuFactBinary_${kind}`, {}]);
+    if (!(s.binary || []).length && s.ruwe != null) out.push([s.double_hint ? 'cuFactRuwe' : 'cuFactSingle', { r: s.ruwe.toFixed(1) }]);
+  }
+  const p = d && d.planets;
+  if (!p || p.reachable === false) out.push(['cuPlanetsDown', {}]);
+  else if (!p.planets.length) out.push(['cuPlanetsNone', {}]);
+  else {
+    out.push(['cuPlanets', { n: p.planets.length, host: p.host || '' }]);
+    for (const pl of p.planets.slice(0, 8)) {
+      const vars = { name: pl.name, p: pl.period_d != null ? sig(pl.period_d) : '?', m: pl.mass_earth != null ? sig(pl.mass_earth) : '', year: pl.year || '?' };
+      out.push([pl.mass_earth != null ? 'cuPlanet' : 'cuPlanetNoMass', vars]);
+    }
+  }
+  return out;
+}
+
+/** Catalogue brightness next to ours: rows [band, wavelength µm, catalogue mJy, SPHEREx mJy or null,
+ * SPHEREx / catalogue or null]. surveys: the /api/curious/xmatch answer; points: the measured
+ * spectrum [{wavelength, value (µJy), saturated, flagged}]. SPHEREx's value is the median of the
+ * clean points within 4% of the band's wavelength (at least three). */
+export function fluxRows(surveys, points) {
+  const rows = [];
+  for (const s of surveys || []) {
+    for (const f of (s.state === 'found' && s.fluxes) || []) {
+      if (f.um < 0.75 || f.um > 5.0) continue;                    // outside what SPHEREx sees
+      const near = (points || []).filter(p => !p.saturated && !p.flagged && Number.isFinite(p.value)
+        && Math.abs(p.wavelength / f.um - 1) <= 0.04).map(p => p.value).sort((a, b) => a - b);
+      const ours = near.length >= 3 ? near[near.length >> 1] : null;
+      rows.push([`${s.survey} ${f.band}`, f.um, f.ujy / 1000, ours != null ? ours / 1000 : null, ours != null && f.ujy > 0 ? ours / f.ujy : null]);
+    }
+  }
+  return rows;
 }
 
 /** "Other catalogues": rows [name, id or null, magnitudes text, stateKey or null]. */
@@ -64,7 +164,10 @@ function el(tag, cls, text) {
 
 /**
  * host: an empty element. ctx(): what is being measured right now, or null:
- *   { ra, dec, mjd, pmra, pmdec, gaiaId, cand, points: [{mjd, wavelength, value}] }.
+ *   { ra, dec, mjd, pmra, pmdec, gaiaId, cand, spot, wings,
+ *     points: [{mjd, wavelength, value, err, flagged, saturated}] }.
+ *   spot: the "is a star there" check of the photometry ({state: 'star' | 'empty' | 'wing'}) or null.
+ *   gaiaDown: the page could not load the field's Gaia stars, so a missing gaiaId means "unknown".
  * Returns { reset() } to call whenever another spot is measured, and { redraw() } on a language change.
  */
 export function createCurious(host, { t, ctx }) {
@@ -80,15 +183,27 @@ export function createCurious(host, { t, ctx }) {
   async function load(tool, c) {
     const gaia = () => (c.gaiaId ? get('api/curious/motion', { gaia_id: c.gaiaId }) : Promise.resolve(null));
     if (tool === 'hr') return get('api/curious/hr', { ra: c.ra.toFixed(4), dec: c.dec.toFixed(4), gaia_id: c.gaiaId });
-    if (tool === 'motion') return { gaia: await gaia() };
+    if (tool === 'motion') {
+      const [g, fit] = await Promise.all([gaia(), c.fitAt ? get('api/quick/motion', c.fitAt).catch(() => null) : Promise.resolve(null)]);
+      return { gaia: g, fit };
+    }
     if (tool === 'period') {
+      // what the catalogues know is worth showing even where we cannot test the star ourselves
+      const known = get('api/curious/variable', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), gaia_id: c.gaiaId })
+        .then(k => (!c.gaiaId && c.gaiaDown ? { ...k, gaia: { reachable: false } } : k)).catch(() => null);
+      if (c.spot && (c.spot.state === 'empty' || c.spot.state === 'wing')) return { ok: false, reason: c.spot.state, known: await known };
       const r = await fetch(new URL('api/curious/period', location.href), { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ points: c.points }) });
+        body: JSON.stringify({ points: c.points, wings: !!c.wings }) });
       if (!r.ok) throw new Error(String(r.status));
-      return r.json();
+      return { ...(await r.json()), known: await known };
+    }
+    if (tool === 'facts') {
+      const d = await get('api/curious/facts', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), gaia_id: c.gaiaId });
+      // without the field's Gaia list we do not know which Gaia star this is: say so, not "not in Gaia"
+      return !c.gaiaId && c.gaiaDown ? { ...d, star: { reachable: false } } : d;
     }
     const [g, x] = await Promise.all([gaia(), get('api/curious/xmatch', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), pmra: c.pmra, pmdec: c.pmdec, mjd: c.mjd.toFixed(1) })]);
-    return { gaia: g, surveys: x.surveys };
+    return { gaia: g, surveys: x.surveys, flux: fluxRows(x.surveys, c.points) };
   }
 
   async function run(tool) {
@@ -128,14 +243,33 @@ export function createCurious(host, { t, ctx }) {
 
   function drawPeriod(out, d) {
     lines(out, periodLines(d));
+    const known = knownLines(d.known, d);
+    if (known.length) {
+      const box = el('div', 'culines cuknown');
+      box.append(el('h5', '', t('cuKnownTitle')), ...known.map(([key, vars]) => el('p', '', t(key, vars))));
+      out.append(box);
+    }
     if (!d.ok) return;
-    const two = el('div', 'cutwo'), gram = el('div', 'cuchart'), fold = el('div', 'cuchart');
-    two.append(gram, fold);
+    const two = el('div', 'cutwo'), curve = el('div', 'cuchart'), second = el('div', 'cuchart');
+    two.append(curve, second);
     out.append(two, el('p', 'muted small', t('cuPeriodNote')));
-    scatterChart(gram, { series: [{ name: 'LS', color: '#8a8f99', points: d.periodogram.map(([x, y]) => ({ x, y })) }],
-      xLabel: t('cuPeriodDays'), yLabel: t('cuPower'), xFmt: v => v.toFixed(0), yFmt: v => v.toFixed(2), height: 240 });
-    scatterChart(fold, { series: [{ name: 'fold', color: '#FFB347', points: d.folded.flatMap(([ph, v]) => [{ x: ph, y: v }, { x: ph + 1, y: v }]) }],
-      xLabel: t('cuPhase'), yLabel: t('cuRatio'), xFmt: v => v.toFixed(1), yFmt: v => v.toFixed(2), height: 240 });
+    // the light curve itself: every usable point, and the level of each visit with its error
+    const t0 = d.points.length ? d.points[0][0] : 0;
+    scatterChart(curve, {
+      series: [{ name: t('cuPoints'), color: '#8a8f99', points: d.points.map(([x, y]) => ({ x: x - t0, y })) },
+        { name: t('cuVisits'), color: '#FFB347', points: d.visits.map(v => ({ x: v.mjd - t0, y: v.level, err: v.err,
+          tip: [month(v.mjd), `${v.level.toFixed(3)} ± ${v.err.toFixed(3)} · ${v.n}`] })) }],
+      xLabel: t('cuDaysSince', { d: month(t0) }), yLabel: t('cuRatio'), xFmt: v => v.toFixed(0), yFmt: v => v.toFixed(2), height: 240 });
+    if (d.convincing) {
+      scatterChart(second, { series: [{ name: 'fold', color: '#FFB347', points: d.folded.flatMap(([ph, v]) => [{ x: ph, y: v }, { x: ph + 1, y: v }]) }],
+        xLabel: t('cuPhase'), yLabel: t('cuRatio'), xFmt: v => v.toFixed(1), yFmt: v => v.toFixed(2), height: 240 });
+    } else if (d.search) {
+      // how well each trial period fits, against the height that scrambled data reach one time in a hundred
+      const xs = d.periodogram.map(([x]) => x);
+      scatterChart(second, { series: [{ name: t('cuPower'), color: '#8a8f99', points: d.periodogram.map(([x, y]) => ({ x, y })) }],
+        lines: [{ name: t('cuChanceLine'), color: '#FFB347', dash: '5 4', points: [{ x: Math.min(...xs), y: d.threshold }, { x: Math.max(...xs), y: d.threshold }] }],
+        xLabel: t('cuPeriodDays'), yLabel: t('cuPower'), xFmt: v => v.toFixed(0), yFmt: v => v.toFixed(2), height: 240 });
+    }
   }
 
   function drawStar(out, d) {
@@ -150,6 +284,21 @@ export function createCurious(host, { t, ctx }) {
       table.append(tr);
     }
     out.append(table, el('p', 'muted small', t('cuStarNote')));
+    if (d.flux && d.flux.length) {
+      // the same star's brightness in the other surveys, next to what SPHEREx measured at that wavelength
+      const mjy = (v) => (v >= 100 ? v.toFixed(0) : v >= 1 ? v.toFixed(1) : v.toFixed(2));
+      const ft = el('table', 'cutable');
+      const fh = el('tr');
+      for (const k of ['cuFluxBand', 'cuFluxTheirs', 'cuFluxOurs', 'cuFluxRatio']) fh.append(el('th', '', t(k)));
+      ft.append(fh);
+      for (const [band, um, theirs, ours, ratio] of d.flux) {
+        const tr = el('tr');
+        tr.append(el('td', '', `${band} (${um.toFixed(2)} µm)`), el('td', 'mono', mjy(theirs)),
+          el('td', 'mono', ours != null ? mjy(ours) : '–'), el('td', 'mono', ratio != null ? ratio.toFixed(2) : '–'));
+        ft.append(tr);
+      }
+      out.append(el('h5', 'cusub', t('cuFluxTitle')), ft, el('p', 'muted small', t('cuFluxNote')));
+    }
   }
 
   function draw() {
@@ -176,8 +325,9 @@ export function createCurious(host, { t, ctx }) {
     const d = s.data[s.tool];
     if (s.failed || !d) { out.append(el('p', 'muted small', t('cuFailed'))); return; }
     if (s.tool === 'hr') drawHr(out, d);
-    else if (s.tool === 'motion') { lines(out, motionLines(c.cand, d.gaia)); out.append(el('p', 'muted small', t('cuMotionNote'))); }
+    else if (s.tool === 'motion') { lines(out, motionLines(c.cand, d.gaia, d.fit)); out.append(el('p', 'muted small', t('cuMotionNote'))); }
     else if (s.tool === 'period') drawPeriod(out, d);
+    else if (s.tool === 'facts') { lines(out, factsLines(d)); out.append(el('p', 'muted small', t('cuFactsNote'))); }
     else drawStar(out, d);
   }
 

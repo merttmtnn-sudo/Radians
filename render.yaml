@@ -15,3 +15,5 @@ services:
         value: "16"
       - key: WARM_ON_START
         value: "1"
+      - key: IRSA_MAX_INFLIGHT    # every reader in the server shares this many requests to IRSA
+        value: "12"

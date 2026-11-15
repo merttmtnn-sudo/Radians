@@ -9,23 +9,19 @@ bilimsel çalışmaları listeler. Sitede gösterilen her görüntü ve sayı bu
 | Kaynak | Radians’ta ne için | Bağlantı |
 |---|---|---|
 | **NASA SPHEREx** (Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer), NASA/JPL-Caltech | Blink karelerinin tamamı: tek tek spektral pozlar (0,75–5 µm, 6,15″ piksel), hata ve maske katmanları | https://spherex.caltech.edu |
-| **NASA/IPAC Infrared Science Archive (IRSA)** | SPHEREx pozlarının arşivi ve arama servisi; haritadaki 102 düzlemli SPHEREx HiPS küpü; CatWISE2020 sorguları; 2MASS renkli HiPS kopyası | https://irsa.ipac.caltech.edu |
-| **2MASS** (Two Micron All Sky Survey) | Haritada en yakın yakınlaştırmada, SPHEREx piksellerinin yetmediği yerde gösterilen 1″ görüntü (ekranda “Bu SPHEREx değildir” yazar) | https://irsa.ipac.caltech.edu/Missions/2mass.html |
+| **NASA/IPAC Infrared Science Archive (IRSA)** | SPHEREx pozlarının arşivi ve arama servisi; haritadaki 102 düzlemli SPHEREx HiPS küpü; CatWISE2020 sorguları | https://irsa.ipac.caltech.edu |
 | **ESA Gaia DR3** (Gaia Archive, TAP) | Bilinen yıldızlarla karşılaştırma, öz hareket ve paralaks | https://gea.esac.esa.int/archive/ |
 | **CatWISE2020** (IRSA) | 3,4–4,6 µm kaynaklarıyla ve WISE öz hareketleriyle karşılaştırma | https://irsa.ipac.caltech.edu |
-| **SIMBAD** (CDS, Strasbourg; Harvard aynası) | Nesne adları, türleri, öz hareketleri; planetaryum bilgi kartları | https://simbad.cds.unistra.fr |
+| **SIMBAD** (CDS, Strasbourg; Harvard aynası) | Nesne adları, türleri, öz hareketleri | https://simbad.cds.unistra.fr |
 | **Sesame ad çözümleyici** (CDS) | Aramaya yazılan adın koordinata çevrilmesi | https://cds.unistra.fr/cgi-bin/Sesame |
-| **VizieR** (CDS; Harvard aynası) | Yıldızların farklı dalga boylarındaki parlaklıkları (tayf karşılaştırması) | https://vizier.cds.unistra.fr |
+| **VizieR** (CDS; Harvard aynası) | Yıldızların 2MASS ve AllWISE kataloglarındaki parlaklıkları (tayf karşılaştırması); değişen yıldız katalogları | https://vizier.cds.unistra.fr |
 | **SkyBoT** (IMCCE, Paris Gözlemevi) | Görüntünün tarihinde o noktadan geçen bilinen asteroit ve kuyruklu yıldızlar | https://ssp.imcce.fr/webservices/skybot/ |
-| **NEOSSat** (Kanada Uzay Ajansı; CADC arşivi) | Aynı noktanın başka bir uzay teleskobuyla çekilmiş görüntülerinin listesi | https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca |
-| **Wikidata** (CC0) ve **Wikipedia** (CC BY-SA 4.0) | Planetaryum bilgi kartlarındaki kısa açıklamalar; her kartta kaynağına bağlantı verilir | https://www.wikidata.org · https://www.wikipedia.org |
-| **d3-celestial veri dosyaları** (Olaf Frohn, BSD-3) | Planetaryumdaki parlak yıldızlar, takımyıldız çizgileri ve Samanyolu ana hatları | https://github.com/ofrohn/d3-celestial |
 
 **Teşekkür.** Bu çalışma NASA/IPAC Infrared Science Archive’ın (California Institute of Technology’nin NASA ile
 yaptığı sözleşme altında işletilir) verilerini ve servislerini; CDS’nin (Strasbourg Astronomical Data Center)
 SIMBAD, VizieR, Sesame ve Aladin hizmetlerini; Avrupa Uzay Ajansı Gaia görevinin (https://www.cosmos.esa.int/gaia)
 Gaia Data Processing and Analysis Consortium tarafından işlenen verilerini; 2MASS (University of Massachusetts ve
-IPAC/Caltech ortak projesi, NASA ve NSF fonlu) verilerini kullanır.
+IPAC/Caltech ortak projesi, NASA ve NSF fonlu) katalog verilerini kullanır.
 
 ## 2. Yazılım
 
@@ -38,7 +34,7 @@ IPAC/Caltech ortak projesi, NASA ve NSF fonlu) verilerini kullanır.
 | FastAPI, Uvicorn | Sunucu | MIT, BSD-3 |
 | Requests, Pillow | HTTP istekleri, renkli HiPS karoları | Apache-2.0, MIT-CMU |
 | Inter Tight, JetBrains Mono | Yazı tipleri | SIL OFL 1.1 |
-| Planetaryum motoru (Emre Bozkaya, SPHEREx Sky Explorer) | WebGL planetaryum | ekip içi |
+| Kızılötesi RGB renk tarifi (Emre Bozkaya, SPHEREx Sky Explorer) | Haritadaki “Kızılötesi RGB” paleti | ekip içi |
 | Coqui TTS / XTTS-v2 | Tanıtım videosundaki anlatım: ekip üyesinin kendi sesinden, onayıyla üretildi | MPL-2.0 (kod), Coqui Public Model License (model; ticari olmayan kullanım) |
 
 Barındırma: Render.com. Sürekli test: GitHub Actions. Kaynak kod: https://github.com/merttmtnn-sudo/Radians

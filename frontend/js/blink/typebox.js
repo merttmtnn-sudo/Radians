@@ -37,10 +37,13 @@ export function catalogueLines(cat, pending, failed) {
   return out;
 }
 
-const cleanName = (id) => String(id || '').replace(/^(NAME|V\*|\*\*|\*|EM\*|PM\*|BD\*)\s+/i, '').trim();
+const cleanName = (id) => String(id || '').replace(/^(NAME|V\*|\*\*|\*|EM\*|PM\*|BD\*)\s+/i, '').replace(/\s+/g, ' ').trim();
 
 /** Our column: [[key, vars], ...] from the "fit" part of the answer. */
-export function oursLines(fit) {
+export function oursLines(fit, spot = null) {
+  // photometry gives a number anywhere: without a star at the spot a type would describe nothing
+  if (spot && spot.state === 'empty') return [['tySpotEmpty', {}]];
+  if (spot && spot.state === 'wing') return [['tySpotWing', {}]];
   if (!fit) return [];
   if (fit.note === 'saturated') return [['tySaturated', {}]];
   if (fit.note === 'too_faint' || fit.note === 'no_library') return [['tyTooFaint', {}]];
@@ -74,11 +77,12 @@ export function printLine(f) {
 /** Everything the box says, as keys: {catalogue, ours, verdict, prints}. */
 export function typeLines(res) {
   // no usable spectrum (saturated, too faint): no verdict, and no rows that would all say "no data"
-  const none = !res.fit || ['saturated', 'too_faint', 'no_library'].includes(res.fit.note);
+  const noStar = !!res.spot && (res.spot.state === 'empty' || res.spot.state === 'wing');
+  const none = noStar || !res.fit || ['saturated', 'too_faint', 'no_library'].includes(res.fit.note);
   const prints = (res.fingerprints || []).filter(() => !none);
   return {
     catalogue: catalogueLines(res.catalogue, res.pending, res.catFail),
-    ours: oursLines(res.fit),
+    ours: oursLines(res.fit, res.spot),
     verdict: res.agreement && !none ? [`tyAgree_${res.agreement}`, res.agreement] : null,
     prints: prints.some(f => f.verdict !== 'no_data') ? prints.map(printLine) : [],
   };

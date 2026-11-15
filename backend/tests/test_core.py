@@ -229,35 +229,6 @@ def test_rate_limit_trusts_only_the_proxy_entry():
     assert main._client(req) == "9.9.9.9"
 
 
-def test_depth_series_noise_falls_and_stars_appear():
-    rng = np.random.default_rng(1)
-    n, frames = 41, []
-    sky = np.zeros((n, n))
-    for k, (x, y) in enumerate([(8, 9), (20, 30), (31, 12), (12, 25), (28, 22)]):
-        sky[y, x] = 3.0 + k * 0.2                       # faint stars: below 5 sigma in one exposure
-    for i in range(64):
-        e = Exposure(f"o{i}", 1 + i % 6, "u", 60000 + i - 0.01, 60000 + i + 0.01, 0, 0, 100, "c")
-        img = (sky + rng.normal(0, 1, (n, n))).astype(np.float32)
-        frames.append(stack.Frame(e, img, np.ones((n, n), np.float32), np.zeros((n, n), np.uint32)))
-    d = stack.depth_series(list(reversed(frames)), n)
-    st = d["steps"]
-    assert st[0]["n_exposures"] == 1 and st[-1]["n_exposures"] == 64 and d["total"] == 64
-    assert st[-1]["noise"] < st[0]["noise"] / 6                         # ~1/sqrt(64) = 1/8
-    assert st[-1]["stars"] >= 5 and st[0]["stars"] < 5
-    assert d["max_coverage"] == 64
-    q = np.frombuffer(__import__("base64").b64decode(st[-1]["image"]), np.int16).reshape(n, n)
-    assert abs(q[30, 20] * d["scale"] - sky[30, 20]) < 0.6
-
-
-def test_live_preview_reports_partial_coadd():
-    from app import main
-    add = main._live_preview("jobdepth", 5, 10)
-    for _ in range(3):
-        add(_frame(np.ones((5, 5))))
-    p = main._progress["jobdepth"]["preview"]
-    assert p["count"] == 3 and p["n"] == 5 and p["image"]
-
-
 def test_sia_falls_back_to_stale_cache_when_irsa_is_down(monkeypatch, tmp_path):
     import json, os, time as _t
     from app import archive as ar
@@ -329,18 +300,34 @@ def test_frames_with_a_wavelength_window(monkeypatch):
     assert c.get("/api/frames", params=q).json()["wl_window"] is None
 
 
+def test_resolve_falls_back_to_the_built_in_objects(monkeypatch):
+    """A name the resolver does not know, or a resolver that is down, still finds the curated objects."""
+    from fastapi.testclient import TestClient
+    from app import archive, main
+
+    def down(q):
+        raise OSError("resolver unreachable")
+
+    def unknown(q):
+        raise LookupError("no such object")
+
+    client = TestClient(main.app)
+    monkeypatch.setattr(archive, "resolve", down)
+    r = client.get("/api/resolve", params={"q": "barnards star"})
+    assert r.status_code == 200 and r.json()["source"] == "built-in list"
+    assert abs(r.json()["ra"] - 269.452) < 0.01 and r.json()["pmdec"] > 10000
+    assert client.get("/api/resolve", params={"q": "no such thing 123"}).status_code == 502
+    monkeypatch.setattr(archive, "resolve", unknown)
+    r = client.get("/api/resolve", params={"q": "Taurus Molecular Cloud"})
+    assert r.status_code == 200 and r.json()["pmra"] is None
+    assert client.get("/api/resolve", params={"q": "no such thing 123"}).status_code == 404
+
+
 def test_lookup_endpoints_are_rate_limited():
     from app import main
     for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr", "/api/curious/motion",
               "/api/curious/period", "/api/curious/xmatch"):
         assert main.LIMITS[p] == config.RATE_LOOKUP
-
-
-def test_objinfo_variants_and_limit():
-    from app import main, objinfo
-    assert "M  42" in objinfo.variants("M42") and objinfo.variants("HIP 33856")[0] == "HIP 33856"
-    assert objinfo.variants("Sirius") == ["Sirius", "NAME Sirius"]
-    assert main.LIMITS["/api/object"] == config.RATE_LOOKUP
 
 
 def test_sharp_grids_and_limit():
@@ -416,3 +403,25 @@ def test_injected_faint_mover_recovered_two_ways():
     finds = detect.difference_finds(eps, eps[0])
     for sx, sy in ((8.2, 30.1), (31.6, 9.4), (28.3, 33.7)):
         assert not any(math.hypot(f["x"] - sx, f["y"] - sy) < 2 for f in finds)
+
+
+def test_outage_falls_back_to_a_nearby_cached_list(tmp_path, monkeypatch):
+    """IRSA down and this exact spot never asked: a list cached a few arcseconds away is used,
+    one cached far away is not. (From Efe's PR #11.)"""
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(config, "COLLECTIONS", ["spherex_qr3"])
+    exp = Exposure(obs_id="X", detector=1, url="u", mjd_start=60000.0, mjd_end=60000.1,
+                   wl_min=1.0, wl_max=1.1, exptime=100.0, collection="spherex_qr3")
+
+    monkeypatch.setattr(archive, "_sia_table", lambda coll, ra, dec, tries=5: "table")
+    monkeypatch.setattr(archive, "_rows", lambda t, coll: [exp])
+    assert [e.obs_id for e in archive.query_exposures(269.4521, 4.6934)] == ["X"]
+
+    def down(coll, ra, dec, tries=5):
+        raise archive.ArchiveUnavailable("HTTP 502")
+
+    monkeypatch.setattr(archive, "_sia_table", down)
+    near = archive.query_exposures(269.4521 + 5 / 3600, 4.6934 - 5 / 3600)    # about 7 arcsec away
+    assert [e.obs_id for e in near] == ["X"]
+    with pytest.raises(archive.ArchiveUnavailable):
+        archive.query_exposures(269.4521 + 0.1, 4.6934)                       # 6 arcmin away: too far

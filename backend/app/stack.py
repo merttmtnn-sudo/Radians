@@ -84,7 +84,10 @@ def _cutout_cached(exp: Exposure, ra, dec, half):
         if not p.exists():
             config.atomic_write(p, pickle.dumps(c))
         return c
-    c = fitsrange.read_cutout(exp.url, ra, dec, half)
+    # with the exposure's sky footprint: two requests instead of four (False: the short cut did not apply)
+    c = fitsrange.read_cutout_fast(exp.url, ra, dec, half, exp.region) if getattr(exp, "region", None) else False
+    if c is False:
+        c = fitsrange.read_cutout(exp.url, ra, dec, half)
     p.parent.mkdir(parents=True, exist_ok=True)
     if c is not None:
         config.atomic_write(p, pickle.dumps(c))
@@ -199,6 +202,74 @@ def photometry_at(frames: list["Frame"], wout, x, y):
         pts.append({"obs_id": f.exp.obs_id, "detector": f.exp.detector, "mjd": f.exp.mjd, "date": mjd_iso(f.exp.mjd),
                     "wavelength": lam, "bandwidth": bw, "x": float(x), "y": float(y), **m})
     return {"x": float(x), "y": float(y), "ra": ra, "dec": dec, "points": sorted(pts, key=lambda p: p["mjd"])}
+
+
+# ---------------------------------------------------------------- is a star there at all?
+SPOT_HALF = 9               # px: the box around the spot that is looked at
+SPOT_PEAK_R = 1.5           # px: a star at the spot peaks this close to it
+SPOT_MIN_SNR = 5.0          # the peak must stand this far above the noise of the picture
+SPOT_WING_RATIO = 2.0       # a neighbour this many times brighter owns the light on its slope
+
+
+def spot_check(frames: list["Frame"], positions) -> dict:
+    """Is there a point of light at a spot? Photometry gives a number anywhere, also on empty sky and
+    on the slope of a brighter star, and a spectral type or a period fitted to that says nothing.
+
+    Looks at the median of all exposures in a small box around the spot (positions: the spot's grid
+    pixel in each frame, so a moving target is followed). Returns {"state", "snr", "neighbour", "n"}:
+    state "star" (a peak at the spot), "empty" (nothing stands out) or "wing" (the light there is
+    the slope of a brighter neighbour); snr: height of the peak over the picture's noise;
+    neighbour: brightest pixel within 6 px, in units of the spot's own peak. A wing also says where
+    that neighbour is ("offset": [dx, dy] in grid pixels), so the page can measure it instead."""
+    h = SPOT_HALF
+    boxes = []
+    for f, (x, y) in zip(frames, positions):
+        ix, iy = int(round(x)), int(round(y))
+        n = f.image.shape[0]
+        y0, y1, x0, x1 = max(0, iy - h), min(n, iy + h + 1), max(0, ix - h), min(n, ix + h + 1)
+        if y1 <= y0 or x1 <= x0:
+            continue
+        box = np.full((2 * h + 1, 2 * h + 1), np.nan, "f4")
+        box[y0 - (iy - h):y1 - (iy - h), x0 - (ix - h):x1 - (ix - h)] = f.image[y0:y1, x0:x1]
+        boxes.append(box)
+    out = {"state": "star", "snr": None, "neighbour": None, "n": len(boxes)}
+    if len(boxes) < 3:
+        return out                                        # too little to judge: do not get in the way
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")                   # pixels blank in every exposure
+        deep = np.nanmedian(np.stack(boxes), axis=0)
+    yy, xx = np.mgrid[-h:h + 1, -h:h + 1]
+    r = np.hypot(xx, yy)
+    fin = np.isfinite(deep)
+    core = fin & (r <= SPOT_PEAK_R)
+    sky = fin & (r >= R_BG_IN) & (r <= R_BG_OUT)
+    if not core.any() or sky.sum() < 8:
+        return out                                        # a blanked (saturated) core is a very bright star
+    bg = float(np.median(deep[sky]))
+    rest = deep[fin & (r > 3)]
+    noise = 1.4826 * float(np.median(np.abs(rest - np.median(rest))))
+    if not noise > 0:
+        return out
+    where = np.flatnonzero(core.ravel())
+    k = int(where[np.argmax(deep.ravel()[where])])
+    py, px = divmod(k, 2 * h + 1)
+    peak = float(deep[py, px]) - bg
+    around = deep[max(0, py - 1):py + 2, max(0, px - 1):px + 2]
+    is_peak = bool(deep[py, px] >= np.nanmax(around))
+    near = fin & (r > SPOT_PEAK_R) & (r <= 6)
+    neighbour, offset = 0.0, None
+    if near.any():
+        where = np.flatnonzero(near.ravel())
+        k = int(where[np.argmax(deep.ravel()[where])])
+        neighbour = (float(deep.ravel()[k]) - bg) / max(peak, noise)
+        offset = [int(k % (2 * h + 1)) - h, int(k // (2 * h + 1)) - h]
+    snr = peak / noise
+    out.update(snr=round(snr, 1), neighbour=round(neighbour, 1))
+    if snr < SPOT_MIN_SNR:
+        out["state"] = "empty"
+    elif not is_peak and neighbour >= SPOT_WING_RATIO:
+        out.update(state="wing", offset=offset)
+    return out
 
 
 def build_frame(exp: Exposure, ra, dec, n, wout, target) -> Frame | None:
@@ -461,53 +532,3 @@ class Accumulator:
         """Pipeline (propagated) noise of the co-add: median of sqrt(1 / sum of weights)."""
         d = self.den[self.den > 0]
         return float(np.median(1.0 / np.sqrt(d))) if d.size else None
-
-
-class DepthAccumulator(Accumulator):
-    """Co-add for the sharpening view. The noise is SPHEREx's own: the per-pixel uncertainty maps of the exposures,
-    propagated through the co-add. (Measuring the scatter of the image itself does not work here: in a crowded
-    Milky Way field it is set by the stars, and alternate exposures come from different detectors, i.e. different
-    wavelengths, so even a half-difference keeps the stars' colours.)"""
-
-    def stats(self):
-        """(image, noise, stars): stars are local maxima more than 5 noise above the local sky."""
-        img = self.image()
-        noise = self.sigma()
-        return img, noise, count_stars(img, noise)
-
-
-def count_stars(img, noise):
-    from scipy.ndimage import maximum_filter, median_filter
-    if not noise or not np.isfinite(img).any():
-        return 0
-    a = np.where(np.isfinite(img), img, np.nanmedian(img))
-    sky = median_filter(a, size=9, mode="nearest")
-    peak = (a == maximum_filter(a, size=3, mode="nearest")) & (a - sky > 5 * noise) & np.isfinite(img)
-    peak[:2, :] = peak[-2:, :] = peak[:, :2] = peak[:, -2:] = False
-    return int(peak.sum())
-
-
-def quantize(img, scale):
-    """float image -> int16 in units of `scale` (NaN = -32768): half the bytes of float32 for the depth series."""
-    q = np.where(np.isfinite(img), np.clip(np.round(img / scale), -32767, 32767), -32768)
-    return q.astype(np.int16)
-
-
-def depth_series(frames: list[Frame], n: int, max_steps: int = 12):
-    """Co-adds of the first 1, 2, 4 ... all exposures in time order, with noise and star counts at every step."""
-    frames = sorted(frames, key=lambda f: f.exp.mjd)
-    total = len(frames)
-    ks = sorted({int(k) for k in np.unique(np.round(np.geomspace(1, total, min(max_steps, total))))} | {total})
-    acc, steps = DepthAccumulator(n), []
-    for i, f in enumerate(frames, 1):
-        acc.add(f)
-        if i in ks:
-            img, noise, stars = acc.stats()
-            steps.append({"n_exposures": i, "date": mjd_iso(f.exp.mjd), "noise": noise, "stars": stars, "img": img})
-    final_noise = steps[-1]["noise"] or float(np.nanstd(steps[-1]["img"])) or 1.0
-    peak = max(float(np.nanmax(np.abs(s["img"]))) for s in steps)
-    scale = max(float(final_noise) / 20.0, peak / 32000.0)          # fine steps, but never clip a bright star
-    for s in steps:
-        s["image"] = b64(quantize(s.pop("img"), scale))
-    return {"steps": steps, "scale": scale, "coverage": b64(acc.cov), "max_coverage": int(acc.cov.max()),
-            "total": total, "first_date": mjd_iso(frames[0].exp.mjd), "last_date": mjd_iso(frames[-1].exp.mjd)}

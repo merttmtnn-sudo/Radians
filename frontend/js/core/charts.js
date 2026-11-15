@@ -40,14 +40,17 @@ function extent(vals, pad) {
 
 /**
  * opts: { series: [{name, color, points: [{x, y, err, hollow, tip}]}], xLabel, yLabel,
- *         xFmt, yFmt, height, empty }
+ *         xFmt, yFmt, height, empty,
+ *         lines: [{name, color, dash, points: [{x, y}]}] }   curves drawn behind the points (not hoverable;
+ *                                                           they do not stretch the axes)
  */
 export function scatterChart(host, opts) {
   host.replaceChildren();
   host.classList.add('chart');
   const series = opts.series.filter(s => s.points.length);
+  const curves = (opts.lines || []).filter(l => l && l.points.length > 1);
   // legend (always for >= 2 series; identity never by colour alone: names are written out)
-  if (series.length >= 2) {
+  if (series.length + curves.length >= 2) {
     const lg = document.createElement('div');
     lg.className = 'legend';
     for (const s of series) {
@@ -55,6 +58,14 @@ export function scatterChart(host, opts) {
       const sw = document.createElement('i');
       sw.style.background = s.color;
       it.append(sw, document.createTextNode(`${s.name} (${s.points.length})`));
+      lg.append(it);
+    }
+    for (const l of curves) {
+      const it = document.createElement('span');
+      const sw = document.createElement('i');
+      sw.className = 'curve';
+      sw.style.background = l.color;
+      it.append(sw, document.createTextNode(l.name));
       lg.append(it);
     }
     host.append(lg);
@@ -121,6 +132,18 @@ export function scatterChart(host, opts) {
   svg('text', { x: 14, y: (m.t + H - m.b) / 2, 'text-anchor': 'middle', class: 'label', transform: `rotate(-90 14 ${(m.t + H - m.b) / 2})` }, g).textContent = opts.yLabel;
   if (opts.refLine !== undefined && opts.refLine > ys[0] && opts.refLine < ys[1]) {
     svg('line', { x1: m.l, x2: W - m.r, y1: Y(opts.refLine), y2: Y(opts.refLine), class: 'ref' }, g);
+  }
+
+  // curves (e.g. the reference spectrum that fits best), clipped to the plot and behind the points
+  if (curves.length) {
+    const clip = 'clip' + Math.random().toString(36).slice(2, 8);
+    svg('rect', { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b }, svg('clipPath', { id: clip }, svg('defs', {}, root)));
+    const cg = svg('g', { 'clip-path': `url(#${clip})` }, root);
+    for (const l of curves) {
+      const ok = l.points.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+      svg('path', { d: ok.map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(''), fill: 'none',
+        stroke: l.color, 'stroke-width': 1.8, 'stroke-opacity': 0.9, 'stroke-dasharray': l.dash || 'none', 'stroke-linejoin': 'round' }, cg);
+    }
   }
 
   const marks = svg('g', {}, root);

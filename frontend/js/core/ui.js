@@ -48,12 +48,16 @@ function syncSeg() {
 $('viewSeg').onclick = (e) => {
   const b = e.target.closest('button[data-view]');
   if (!b) return;
-  view.value = b.dataset.view;
+  // "Difference" opens the wavelength-matched one (blue = was here, orange = is here now) when the
+  // data on screen has it (the fast band); otherwise frame - median.
+  const matched = view.querySelector('option[value="diff_matched"]');
+  view.value = b.dataset.view === 'diff_median' && matched && !matched.disabled ? 'diff_matched' : b.dataset.view;
   view.dispatchEvent(new Event('change'));
   syncSeg();
 };
 view.addEventListener('change', syncSeg);
 document.addEventListener('radians:loaded', syncSeg);
+document.addEventListener('radians:view', syncSeg);
 syncSeg();
 
 // ---------------------------------------------------------------- first-visit guide

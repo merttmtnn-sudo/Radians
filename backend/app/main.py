@@ -16,13 +16,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import archive, config, crossmatch, detect, explorer, external, stack
+from . import archive, config, crossmatch, detect, external, net, stack
 
 app = FastAPI(title="Radians", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
-app.include_router(explorer.router)
-app.include_router(explorer.hips_router)
-app.include_router(explorer.mix_router)
 
 # ---------------------------------------------------------------- fair sharing of one server
 _hits: dict = {}
@@ -30,8 +27,10 @@ _hits_lock = threading.Lock()
 LIMITS = {"/api/frames": config.RATE_FRAMES, "/api/photometry": config.RATE_PHOT}
 # endpoints that ask SIMBAD / Gaia / VizieR / IRSA for a visitor or fit on the server: one budget each
 LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/coverage", "/api/crossmatch", "/api/spectype", "/api/curious/hr",
-                                              "/api/curious/motion", "/api/curious/period", "/api/curious/xmatch", "/api/object")})
+                                              "/api/curious/facts", "/api/curious/motion", "/api/curious/period", "/api/curious/variable", "/api/curious/xmatch")})
 LIMITS["/api/sharp"] = config.RATE_FRAMES
+# the fast band's own lookups (its pictures, /api/quick, are long-polled and limited by the engine's build queue)
+LIMITS.update({p: config.RATE_LOOKUP for p in ("/api/quick/changes", "/api/quick/diffs", "/api/quick/motion", "/api/quick/warm")})
 
 
 def _client(request: Request) -> str:
@@ -47,7 +46,7 @@ async def _revalidate(request: Request, call_next):
     browsers keep running an old app.js / styles.css after a deploy."""
     resp = await call_next(request)
     path = request.url.path
-    if path == "/" or path.startswith(("/static/", "/planet/")) and not path.startswith("/planet/data/"):
+    if path == "/" or path.startswith("/static/"):
         resp.headers["Cache-Control"] = "no-cache"
     return resp
 
@@ -83,11 +82,45 @@ def health():
 @app.get("/api/resolve")
 def resolve(q: str = Query(..., min_length=1, max_length=200)):
     try:
-        return archive.resolve(q)
+        got = archive.resolve(q)
+        return _object_on_path(got) or got
     except LookupError as e:
+        known = _builtin_object(q)
+        if known:
+            return known
         raise HTTPException(404, str(e))
     except Exception as e:
+        known = _builtin_object(q)                       # the resolver is down: the built-in list still knows its objects
+        if known:
+            return known
         raise HTTPException(502, f"name resolver unavailable: {e}")
+
+
+def _object_on_path(got: dict) -> dict | None:
+    """Typed coordinates that lie on the path of a curated moving object (where it was at some date
+    between 2000 and today) are that object: it is answered with its catalogue position and motion,
+    so the viewer follows it and uses its settings. The challenge text gives WISE 0855 this way."""
+    if got.get("source") != "coordinates":
+        return None
+    from . import quick
+    p = quick.find_pin(got["ra"], got["dec"])
+    if not p or abs(p.get("pmra") or 0.0) + abs(p.get("pmdec") or 0.0) <= quick.MOVING_MAS_YR:
+        return None
+    return {"name": p["name_en"], "ra": p["ra"], "dec": p["dec"], "pmra": p.get("pmra") or None, "pmdec": p.get("pmdec") or None,
+            "source": "built-in list", "matched": "path", "pin": p["id"], "typed": {"ra": got["ra"], "dec": got["dec"]},
+            "moved_arcsec": round(quick._separation_arcsec(got["ra"], got["dec"], p["ra_now"], p["dec_now"]), 1)}
+
+
+def _builtin_object(q: str) -> dict | None:
+    """One of the curated objects (challenge targets and famous sky) by any of its names, in the
+    shape of a resolver answer. Used when the name resolver is unreachable or does not know the name."""
+    from .engine import api_find
+    want = api_find.fold(q)
+    for p in api_find.pins():
+        if want and want in p["keys"]:
+            return {"name": p["name_en"], "ra": p["ra"], "dec": p["dec"], "pmra": p.get("pmra") or None,
+                    "pmdec": p.get("pmdec") or None, "source": "built-in list"}
+    return None
 
 
 @app.get("/api/about")
@@ -204,20 +237,6 @@ def _report(job, **kw):
             _progress.popitem(last=False)
 
 
-def _live_preview(job, n, total):
-    """While exposures are read, share the co-add of those read so far (in reading order) with the progress
-    poller, so the page can show the image sharpening as it loads."""
-    acc = stack.DepthAccumulator(n)
-    every = max(1, total // 40)
-
-    def add(f):
-        acc.add(f)
-        if acc.count in (1, 2, 3, 5) or acc.count % every == 0:
-            img, noise, stars = acc.stats()
-            _report(job, preview={"n": n, "count": acc.count, "noise": noise, "stars": stars, "image": stack.b64(img)})
-    return add
-
-
 def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job=None):
     fov = min(max(fov, config.MIN_FOV), config.MAX_FOV)
     n = int(round(fov / config.PIXEL_SCALE)) | 1                     # odd -> target on a pixel centre
@@ -244,8 +263,7 @@ def _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job=N
                             headers={"Retry-After": "60"})
     try:
         _report(job, stage="read", done=0, total=len(exps))
-        frs = stack.build_frames(exps, cra, cdec, n, target, progress=lambda i, k: _report(job, done=i, total=k),
-                                 on_frame=_live_preview(job, n, len(exps)) if job else None)
+        frs = stack.build_frames(exps, cra, cdec, n, target, progress=lambda i, k: _report(job, done=i, total=k))
     finally:
         _cold.release()
     threading.Thread(target=stack.prune_cache, daemon=True).start()
@@ -275,6 +293,7 @@ def frames(
     matched: bool = Query(True, description="co-add only wavelength-matched exposures (visits compared like for like)"),
     wl_min: float | None = Query(None, ge=0.5, le=5.5, description="wavelength window, micron: keep exposures that saw the target at >= wl_min"),
     wl_max: float | None = Query(None, ge=0.5, le=5.5, description="... and <= wl_max (no extra reads: every exposure is already read)"),
+    sharp: int | None = Query(None, ge=2, le=3, description="one super-resolution picture per visit, on pixels this many times finer (mode, matched and candidates are then ignored)"),
 ):
     b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures, job)
     if b is None:
@@ -294,6 +313,21 @@ def frames(
         if not frs:
             return {"grid": None, "frames": [], "exposures": [], "wl_range": wl_range, "wl_window": window,
                     "message": "No SPHEREx exposure saw this position in that wavelength window."}
+    if sharp:
+        # every exposure of a visit, all detector bands together, drizzled onto finer pixels (app/sharp.py);
+        # kept with the build, so going back and forth costs nothing
+        kept = b.setdefault("sharp", {})
+        key = (sharp, tuple(window) if window else None)
+        if key not in kept:
+            kept[key] = sharp_views.visits(frs, b["ra"], b["dec"], n, sharp)
+        out = kept[key]
+        if out is None:
+            return {"grid": None, "frames": [], "exposures": [], "wl_range": wl_range, "wl_window": window,
+                    "message": "No exposure could be used for a sharpened picture here."}
+        return {**out, "query": {"ra": ra, "dec": dec, "pmra": pmra, "pmdec": pmdec, "ref_epoch": ref_epoch, "mode": "epoch"},
+                "flag_bits": {str(bit): name for bit, name in config.FLAG_BITS.items()}, "bad_mask": config.BAD_MASK,
+                "exposures": [], "candidates": [], "n_exposures_read": len(frs), "detectors": config.DETECTORS,
+                "wl_range": wl_range, "wl_window": window}
     raw = {m: stack.group_raw(frs, m, matched) for m in {mode, "epoch", "epoch_detector"} if m == mode or candidates}
     out_frames = stack.encode(raw[mode])
     cands = []
@@ -311,28 +345,10 @@ def frames(
         "query": {"ra": ra, "dec": dec, "pmra": pmra, "pmdec": pmdec, "ref_epoch": ref_epoch, "mode": mode},
         "flag_bits": {str(bit): name for bit, name in config.FLAG_BITS.items()}, "bad_mask": config.BAD_MASK,
         "frames": out_frames, "exposures": phot, "n_exposures_read": len(frs),
+        # is there a star where the target should be? (followed across the grid if it moves)
+        "spot": stack.spot_check(frs, [(f.phot.get("x", (n - 1) / 2), f.phot.get("y", (n - 1) / 2)) for f in frs]),
         "candidates": cands, "detectors": config.DETECTORS, "wl_range": wl_range, "wl_window": window,
     }
-
-
-@app.get("/api/depth")
-def depth(
-    ra: float = Query(..., ge=0, lt=360),
-    dec: float = Query(..., ge=-90, le=90),
-    fov: float = Query(config.DEFAULT_FOV),
-    detectors: str = Query("1,2,3,4,5,6"),
-    pmra: float | None = Query(None),
-    pmdec: float | None = Query(None),
-    ref_epoch: float = Query(2000.0),
-    max_exposures: int = Query(400, ge=1, le=2000),
-):
-    """How the image sharpens as exposures pile up: co-adds of the first 1, 2, 4 ... all exposures in time
-    order (int16, multiply by `scale`), the noise and star count at each step, and how many exposures cover
-    every pixel. Uses the exposures already read for /api/frames with the same parameters."""
-    b = _build(ra, dec, fov, detectors, pmra, pmdec, ref_epoch, max_exposures)
-    if b is None:
-        return {"steps": []}
-    return {"n": b["n"], **stack.depth_series(b["frs"], b["n"])}
 
 
 @app.get("/api/progress")
@@ -361,7 +377,7 @@ def photometry(
         raise HTTPException(404, "no SPHEREx data here")
     if not (0 <= x < b["n"] and 0 <= y < b["n"]):
         raise HTTPException(400, "pixel outside the view")
-    return stack.photometry_at(b["frs"], b["w"], x, y)
+    return {**stack.photometry_at(b["frs"], b["w"], x, y), "spot": stack.spot_check(b["frs"], [(x, y)] * len(b["frs"]))}
 
 
 from pydantic import BaseModel, Field  # noqa: E402
@@ -432,18 +448,9 @@ def sso(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le
     return _external(external.skybot, ra, dec, radius, mjds)
 
 
-@app.get("/api/neossat")
-def neossat(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
-            radius: float = Query(0.25, gt=0, le=2)):
-    """NEOSSat (Canadian Space Agency) observations of this position, from the CADC archive."""
-    return _external(external.neossat, ra, dec, radius)
-
-
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 if FRONTEND.exists():
     app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
-    # the planetarium (Emre Bozkaya's SPHEREx Sky Explorer) is a page of its own
-    app.mount("/planet", StaticFiles(directory=FRONTEND / "planet", html=True), name="planet")
 
     @app.get("/")
     def index():
@@ -473,8 +480,7 @@ def warm(targets=DEMO, fov=240):
             if g:
                 ra, dec, rdeg = r6(g["ra"]), r6(g["dec"]), g["fov"] / 3600 / math.sqrt(2)
                 for fn, args in ((external.gaia, (ra, dec, round(rdeg, 4), 19.0)),
-                                 (external.skybot, (ra, dec, math.ceil(rdeg * 3600), [round(f["mjd"], 3) for f in d["frames"][:40]])),
-                                 (external.neossat, (ra, dec, 0.25))):
+                                 (external.skybot, (ra, dec, math.ceil(rdeg * 3600), [round(f["mjd"], 3) for f in d["frames"][:40]]))):
                     try:
                         fn(*args)
                     except Exception as e:           # an external service being down must not stop the warm-up
@@ -526,16 +532,39 @@ class PeriodPoint(BaseModel):
     mjd: float | None = None
     wavelength: float | None = None
     value: float | None = None
+    err: float | None = None
+    flagged: bool = False
+    saturated: bool = False
 
 
 class PeriodRequest(BaseModel):
     points: list[PeriodPoint] = Field(..., max_length=5000)
+    wings: bool = False            # the values are wing fluxes of a saturated star: saturated points are kept
 
 
 @app.post("/api/curious/period")
 def curious_period(req: PeriodRequest):
-    """Does the light curve have a rhythm? Lomb-Scargle on brightness relative to the usual at each wavelength."""
-    return curious.period_search([p.model_dump() for p in req.points])
+    """Did the brightness change between visits, and does it have a rhythm? Brightness relative to the
+    usual at each wavelength; a rhythm is judged against date-scrambled copies (app/pulse.py)."""
+    return curious.period_search([p.model_dump() for p in req.points], req.wings)
+
+
+@app.get("/api/curious/facts")
+def curious_facts(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+                  gaia_id: str | None = Query(None, max_length=40)):
+    """The star itself: Gaia DR3's distance, speeds, companion hints, radius, luminosity, mass and age,
+    and the planets the NASA Exoplanet Archive lists around it. Each part says when its service is down."""
+    return {"star": _try(curious.star_facts, gaia_id) if gaia_id else {"reachable": True, "found": False},
+            "planets": _try(curious.known_planets, ra, dec)}
+
+
+@app.get("/api/curious/variable")
+def curious_variable(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+                     gaia_id: str | None = Query(None, max_length=40)):
+    """Is this a known variable star? The AAVSO index (VSX, through VizieR) and Gaia DR3's variability
+    classifier, each {"reachable": false} when its service is down."""
+    return {"vsx": _try(curious.vsx_star, ra, dec),
+            "gaia": _try(curious.gaia_variable, gaia_id) if gaia_id else {"reachable": True, "found": False}}
 
 
 @app.get("/api/curious/xmatch")
@@ -545,21 +574,9 @@ def curious_xmatch(ra: float = Query(..., ge=0, lt=360), dec: float = Query(...,
     return {"surveys": curious.cross_match(ra, dec, pmra, pmdec, mjd)}
 
 
-# ---------------------------------------------------------------- planetarium info panel
-from . import objinfo  # noqa: E402
-
-
-@app.get("/api/object")
-def object_info(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
-                id: str | None = Query(None, max_length=40), lang: str = Query("en", max_length=5),
-                kind: str = Query("star", pattern="^(star|dso|target|point)$")):
-    """SIMBAD facts and a Wikipedia summary for the object clicked in the planetarium (each part may fail alone)."""
-    return JSONResponse(objinfo.lookup((id or "").strip() or None, round(ra, 5), round(dec, 5), lang, kind),
-                        headers={"Cache-Control": "public, max-age=86400"})
-
-
 # ---------------------------------------------------------------- sharper than one pixel (drizzle)
 from . import sharp  # noqa: E402
+sharp_views = sharp          # /api/frames has a parameter called "sharp"
 
 
 @app.get("/api/sharp")
@@ -592,6 +609,21 @@ def sharp_view(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=
         threading.Thread(target=stack.prune_cache, daemon=True).start()
         return {**out, "det": det} if out else {"count": 0}
 
-    out = explorer._cached_json("sharp", key, 7 * 86400, run)
+    out = net.cached_json("sharp", key, 7 * 86400, run)
     _report(job, stage="done")
     return JSONResponse(out, headers={"Cache-Control": "public, max-age=3600"})
+
+
+# ---------------------------------------------------------------- the fast engine (merged in from Skyshift)
+# /api/quick (the fast band in the viewer's frame format), /api/views/{id}/lightcurve, /api/pins and
+# /api/search.
+from . import mixtiles, quick  # noqa: E402
+from .engine import main as engine  # noqa: E402
+
+app.include_router(quick.router)        # /api/quick: an engine view in the viewer's frame format
+app.include_router(mixtiles.router)          # /hips/spherex-mix: false-colour mixes of the all-sky cube for the map
+app.include_router(mixtiles.colour_router)   # /hips/spherex-color: the map's Colour theme
+app.include_router(mixtiles.warm_router)     # /hips/warm: opens the tile connections when the Map opens
+app.include_router(mixtiles.blank_router)    # /hips/blank: the empty bottom layer of the Map
+for _router in engine.routers:
+    app.include_router(_router)

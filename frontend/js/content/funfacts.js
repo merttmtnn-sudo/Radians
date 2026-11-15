@@ -1,27 +1,18 @@
-// "Did you know?" card in the side column: SPHEREx facts, facts about the patch of sky being looked at
-// (from the loaded data) and tips for reading the sharpening section. Turns every 8 s, stops while the
+// "Did you know?" card in the side column: SPHEREx facts and facts about the patch of sky being looked at
+// (from the loaded data). Turns every 8 s, stops while the
 // pointer or focus is on it; arrows step by hand.
 import { t } from '../core/i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const el = { card: $('facts'), body: $('factBody'), tag: $('factTag'), text: $('factText'), idx: $('factIdx'),
   prev: $('factPrev'), next: $('factNext') };
-const GENERAL = 14, TIPS = 5;
-const F = { region: [], depth: null, list: [], i: 0, timer: null, hold: false };
+const GENERAL = 14;
+const F = { region: [], list: [], i: 0, timer: null, hold: false };
 
 function build() {
-  const region = [...F.region];
-  if (F.depth) {
-    region.push({ key: 'factRegStars', vars: { a: F.depth.stars1, b: F.depth.starsN, n: F.depth.total } });
-    if (F.depth.gain) region.push({ key: 'factRegNoise', vars: { x: F.depth.gain.toFixed(1), y: F.depth.ideal.toFixed(1), n: F.depth.total } });
-  }
-  // facts about what is on screen first, then SPHEREx facts with a sharpening tip after every third
-  const out = region.map(r => ({ tag: 'factTagReg', ...r }));
-  for (let k = 0; k < GENERAL; k++) {
-    out.push({ tag: 'factTagGen', key: `factG${k + 1}` });
-    const tip = (k - 2) / 3;
-    if (k % 3 === 2 && tip < TIPS) out.push({ tag: 'factTagTip', key: `factT${tip + 1}` });
-  }
+  // facts about what is on screen first, then SPHEREx facts
+  const out = F.region.map(r => ({ tag: 'factTagReg', ...r }));
+  for (let k = 0; k < GENERAL; k++) out.push({ tag: 'factTagGen', key: `factG${k + 1}` });
   F.list = out;
 }
 
@@ -43,9 +34,9 @@ function start() {
   F.timer = setInterval(() => { if (!F.hold && !document.hidden) show(F.i + 1); }, 8000);
 }
 
-document.addEventListener('radians:loaded', (e) => {
-  const d = e.detail;
-  F.region = []; F.depth = null;
+/** Facts about the pictures on screen (d: the viewer's data set). */
+function regionFacts(d) {
+  F.region = [];
   if (d && d.exposures && d.exposures.length) {
     const ex = d.exposures, mjd = ex.map(p => p.mjd), wl = ex.map(p => p.wavelength).filter(Number.isFinite);
     F.region.push({ key: 'factRegExp', vars: { n: ex.length } });
@@ -55,16 +46,15 @@ document.addEventListener('radians:loaded', (e) => {
     if (visits > 1) F.region.push({ key: 'factRegVisits', vars: { k: visits } });
     if (wl.length) F.region.push({ key: 'factRegWl', vars: { min: Math.min(...wl).toFixed(2), max: Math.max(...wl).toFixed(2) } });
   }
+}
+document.addEventListener('radians:loaded', (e) => {
+  regionFacts(e.detail);
   build();
   show(0);
   start();
 });
-document.addEventListener('radians:depth', (e) => {
-  F.depth = e.detail;
-  const cur = F.list[F.i];
-  build();
-  F.i = Math.max(0, F.list.findIndex(f => f.key === cur?.key));
-});
+// a newer set of the same spot (the whole band, all detectors): the same card, new numbers
+document.addEventListener('radians:updated', (e) => { regionFacts(e.detail); build(); show(F.i); });
 document.addEventListener('radians:lang', () => show(F.i));
 
 el.prev.onclick = () => { show(F.i - 1); start(); };

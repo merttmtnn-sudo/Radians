@@ -80,3 +80,41 @@ test('SIMBAD prefixes are dropped', () => {
   assert.equal(cleanId('V* R Dra'), 'R Dra');
   assert.equal(cleanId('OGLE BLG-LPV-256626'), 'OGLE BLG-LPV-256626');
 });
+
+// ---------------------------------------------------------------- two finders, one list
+test('finds of the two finders merge when they are the same thing', async () => {
+  const { mergeFinds, sepArcsec } = await import('../js/blink/finds.js');
+  assert.ok(Math.abs(sepArcsec(10, 0, 10, 1 / 3600) - 1) < 1e-9);
+  assert.ok(Math.abs(sepArcsec(359.9999, 60, 0.0001, 60) - 0.36) < 0.01);          // across RA = 0, cos(dec) applied
+  const as = 1 / 3600;
+  const tracking = [
+    { type: 'moving', id: 'T-mover', sky: [[10, 20], [10, 20 + 6 * as], [10, 20 + 12 * as]] },
+    { type: 'variable', id: 'T-var', sky: [[10.02, 20]] },
+  ];
+  const difference = [
+    { type: 'moving', id: 'D-mover', sky: [[10, 20 + 1 * as], [10, 20 + 13 * as]], rate_arcsec_yr: 10.4 },
+    { type: 'transient', id: 'D-new', sky: [[10.02, 20]] },                       // same place as T-var, other type
+    { type: 'variable', id: 'D-var-far', sky: [[10.05, 20]] },
+  ];
+  const out = mergeFinds(tracking, difference);
+  assert.deepEqual(out.map(c => c.id), ['T-mover', 'T-var', 'D-new', 'D-var-far']);
+  assert.deepEqual(out[0].methods, ['tracking', 'difference']);
+  assert.equal(out[0].also.id, 'D-mover');
+  assert.deepEqual(out[1].methods, ['tracking']);                                 // a type mismatch is not a match
+  assert.equal(out[1].also, null);
+  assert.deepEqual(out[2].methods, ['difference']);
+  assert.deepEqual(mergeFinds([], difference).map(c => c.methods[0]), ['difference', 'difference', 'difference']);
+  assert.deepEqual(mergeFinds(tracking, []).map(c => c.methods.length), [1, 1]);
+});
+
+test('headlines of difference-picture finds', async () => {
+  const { headline } = await import('../js/blink/finds.js');
+  const d = (o) => headline({ method: 'difference', from: 1, to: 3, ...o });
+  assert.deepEqual(d({ type: 'transient', kind: 'appeared' }), { key: 'fAppeared', vars: {}, to: 3 });
+  assert.deepEqual(d({ type: 'transient', kind: 'vanished' }), { key: 'fVanished', vars: {}, from: 1 });
+  assert.deepEqual(d({ type: 'variable', kind: 'faded', ratio: 2 }), { key: 'fFainterBy', vars: { pct: 50 }, from: 1, to: 3 });
+  assert.deepEqual(d({ type: 'variable', kind: 'brightened', ratio: 1.25 }), { key: 'fBrighterBy', vars: { pct: 25 }, from: 1, to: 3 });
+  assert.deepEqual(d({ type: 'variable', kind: 'brightened', ratio: 3 }), { key: 'fBrighterX', vars: { x: '3.0' }, from: 1, to: 3 });
+  assert.equal(d({ type: 'variable', kind: 'faded', ratio: null }).key, 'fFainter');      // saturated: no number claimed
+  assert.equal(d({ type: 'moving', kind: 'mover', rate_arcsec_yr: 4.37, pa_deg: 129 }).key, 'fMover');
+});

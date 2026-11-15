@@ -1,8 +1,11 @@
-# Radians: one container serves the API and the static page (Hugging Face Docker Space, port 7860)
+# Radians: one container serves the API and the static page (port 7860 unless PORT is set).
+# Both caches live under /tmp (the app folder is read-only for the container's user); the five
+# challenge targets ship inside backend/demo and open without them.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
-    CACHE_DIR=/tmp/radians-cache MAX_WORKERS=32 WARM_ON_START=1 PORT=7860
+    CACHE_DIR=/tmp/radians-cache SKYSHIFT_DATA=/tmp/radians-cache/engine IRSA_MAX_INFLIGHT=12 \
+    MAX_WORKERS=32 WARM_ON_START=1 PORT=7860
 
 # Hugging Face runs the container as user 1000
 RUN useradd -m -u 1000 user

@@ -14,4 +14,4 @@ jobs:
       - run: pip install -r backend/requirements.txt pytest httpx
       - run: python -m pytest -q
         working-directory: backend
-      - run: node --test frontend/tests
+      - run: node --test frontend/tests/*.mjs      # the shell expands the list (Node 20 has no patterns of its own)

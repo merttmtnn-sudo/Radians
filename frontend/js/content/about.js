@@ -327,6 +327,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && story.i 
 
 // ---------------------------------------------------------------- wiring
 document.addEventListener('radians:loaded', loadAbout);
+document.addEventListener('radians:updated', () => { if (R()?.state?.target) renderAbout(); });   // the whole band, all detectors: new counts
 document.addEventListener('radians:catalogues', renderAbout);
 document.addEventListener('radians:lang', () => {
   if (R()?.state?.target) renderAbout();

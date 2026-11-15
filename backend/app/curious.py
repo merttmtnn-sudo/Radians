@@ -7,12 +7,11 @@ import math
 
 import numpy as np
 
-from . import explorer, spectype
+from . import net, pulse
 from .external import GAIA_TAP
 
 TTL = 30 * 86400
 TIMEOUT = (6, 25)
-PERIOD_RANGE_DAYS = (20.0, 1000.0)
 VIZIER = "https://vizier.cfa.harvard.edu/viz-bin/asu-tsv"      # the Harvard mirror answers when CDS does not
 SURVEYS = [
     # name, VizieR table, id column, magnitude columns, year its positions are for
@@ -34,17 +33,17 @@ def tangential_speed(rate_arcsec_yr: float, parallax_mas) -> float | None:
 
 
 def _gaia(adql):
-    r = explorer._get(GAIA_TAP, {"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": adql},
+    r = net.get(GAIA_TAP, {"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": adql},
                       timeout=TIMEOUT, tries=1)
     if not r.ok or "source_id" not in r.text.split("\n", 1)[0]:
-        raise explorer.Upstream("Gaia unavailable")
-    return explorer._csv(r.text)
+        raise net.Upstream("Gaia unavailable")
+    return net.rows(r.text)
 
 
 # ---------------------------------------------------------------- one Gaia star: place in the H-R diagram, motion
 def star_summary(row: dict) -> dict:
     """Colour, absolute magnitude, motion and speed of one Gaia row (values as text or numbers)."""
-    n = lambda k: explorer._num(row.get(k))  # noqa: E731
+    n = lambda k: net.num(row.get(k))  # noqa: E731
     plx, g, colour = n("parallax"), n("phot_g_mean_mag"), n("bp_rp")
     good = plx is not None and plx > 0 and (n("parallax_over_error") or 0) >= 5
     pmra, pmdec = n("pmra") or 0.0, n("pmdec") or 0.0
@@ -67,7 +66,7 @@ def gaia_star(source_id) -> dict:
     def run():
         rows = _gaia(adql)
         return star_summary(rows[0]) if rows else {"found": False}
-    return explorer._cached_json("cugaia", adql, TTL, run)
+    return net.cached_json("cugaia", adql, TTL, run)
 
 
 def hr_field(ra: float, dec: float, radius: float = 0.5) -> list:
@@ -79,73 +78,188 @@ def hr_field(ra: float, dec: float, radius: float = 0.5) -> list:
     def run():
         out = []
         for row in _gaia(adql):
-            plx, g, c = (explorer._num(row.get(k)) for k in ("parallax", "phot_g_mean_mag", "bp_rp"))
+            plx, g, c = (net.num(row.get(k)) for k in ("parallax", "phot_g_mean_mag", "bp_rp"))
             if plx and plx > 0 and g is not None and c is not None:
                 out.append([round(c, 3), round(g + 5 * math.log10(plx / 100.0), 3)])
         return out
-    return explorer._cached_json("cuhr", adql, TTL, run)
+    return net.cached_json("cuhr", adql, TTL, run)
 
 
 # ---------------------------------------------------------------- does it pulse?
 def relative_brightness(points: list[dict]):
     """SPHEREx sees a different wavelength in every exposure, so a light curve of raw fluxes mostly shows
     the spectrum. Each point is divided by the usual brightness at its own wavelength (the median of
-    its resolution-sized bin): 1 = usual. Returns arrays (mjd, ratio)."""
-    edges = spectype.bin_edges()
-    ok = [p for p in points if all(isinstance(p.get(k), (int, float)) and math.isfinite(p[k]) for k in ("mjd", "wavelength", "value"))]
-    if not ok:
-        return np.array([]), np.array([])
-    t = np.array([p["mjd"] for p in ok])
-    w = np.array([p["wavelength"] for p in ok])
-    v = np.array([p["value"] for p in ok])
-    which = np.searchsorted(edges, w, side="right") - 1
-    keep, ratio = np.zeros(t.size, bool), np.zeros(t.size)
-    for k in np.unique(which):
-        mine = which == k
-        med = float(np.median(v[mine]))
-        if mine.sum() >= 4 and med > 0:
-            keep |= mine
-            ratio[mine] = v[mine] / med
-    return t[keep], ratio[keep]
+    its resolution-sized bin): 1 = usual. Returns arrays (mjd, ratio) of the usable points (pulse.clean)."""
+    c = pulse.clean(points)
+    return c["t"], c["r"]
 
 
-def period_search(points: list[dict]) -> dict:
-    """Lomb-Scargle period of the relative light curve. {"ok": false, "reason"} if there is too little to go on."""
-    from astropy.timeseries import LombScargle
-    t, y = relative_brightness(points)
-    if t.size < 30 or np.ptp(t) < 60:
-        return {"ok": False, "reason": "too_few"}
-    span = float(np.ptp(t))
-    longest = min(PERIOD_RANGE_DAYS[1], 2 * span)
-    ls = LombScargle(t, y - np.median(y))
-    freq, power = ls.autopower(minimum_frequency=1 / longest, maximum_frequency=1 / PERIOD_RANGE_DAYS[0], samples_per_peak=12)
-    best = int(np.argmax(power))
-    period = float(1 / freq[best])
-    # half-width of the peak at half its height: a rough error on the period
-    above = power >= power[best] / 2
-    lo = hi = best
-    while lo > 0 and above[lo - 1]:
-        lo -= 1
-    while hi < len(power) - 1 and above[hi + 1]:
-        hi += 1
-    err = float(abs(1 / freq[lo] - 1 / freq[hi]) / 2)
-    fap = float(ls.false_alarm_probability(power[best]))
-    cycles = span / period
-    step = max(1, len(freq) // 250)
-    return {"ok": True, "period_d": round(period, 1), "err_d": round(err, 1), "power": round(float(power[best]), 4),
-            "false_alarm": fap, "cycles": round(cycles, 2), "convincing": bool(fap < 0.001 and cycles >= 1.5), "n": int(t.size),
-            "periodogram": [[round(float(1 / f), 2), round(float(p), 4)] for f, p in zip(freq[::step], power[::step])],
-            "folded": [[round(float(((ti - t.min()) / period) % 1), 4), round(float(yi), 4)] for ti, yi in zip(t, y)]}
+def period_search(points: list[dict], wings: bool = False) -> dict:
+    """Did the brightness change between visits, and is there a rhythm? See app/pulse.py."""
+    return pulse.analyse(points, wings)
+
+
+# ---------------------------------------------------------------- is it a known variable star?
+VSX_TABLE = "B/vsx/vsx"                 # AAVSO International Variable Star Index, as mirrored by VizieR
+VSX_RADIUS_ARCSEC = 10.0
+
+
+def vsx_star(ra: float, dec: float) -> dict:
+    """The nearest VSX entry within 10 arcsec: {"found", "name", "type", "period_d", "max", "min", "sep_arcsec"}."""
+    key = f"{VSX_TABLE}:{ra:.5f}:{dec:+.5f}"
+
+    def run():
+        r = net.get(VIZIER, {"-source": VSX_TABLE, "-c": f"{ra:.6f} {dec:+.6f}", "-c.rs": f"{VSX_RADIUS_ARCSEC:.0f}",
+                                   "-out": "Name,RAJ2000,DEJ2000,Type,Period,max,min", "-out.max": "5"},
+                          timeout=TIMEOUT, tries=1)
+        if not r.ok or "#" not in r.text[:200]:
+            raise net.Upstream("VizieR unavailable")
+        return parse_tsv(r.text)
+    rows = net.cached_json("cuvsx", key, TTL, run)
+    cosd = math.cos(math.radians(dec))
+
+    def apart(row):
+        return math.hypot(((net.num(row.get("RAJ2000")) or 0) - ra) * cosd, (net.num(row.get("DEJ2000")) or 0) - dec) * 3600
+    best = min(rows, key=apart, default=None)
+    if best is None:
+        return {"found": False}
+    period = net.num(best.get("Period"))
+    return {"found": True, "name": (best.get("Name") or "").strip(), "type": (best.get("Type") or "").strip() or None,
+            "period_d": round(period, 3) if period and period > 0 else None,
+            "max": net.num(best.get("max")), "min": net.num(best.get("min")), "sep_arcsec": round(apart(best), 1)}
+
+
+GAIA_MAIN, GAIA_CLASSES = "I/355/gaiadr3", "I/358/vclassre"      # Gaia DR3 at VizieR: main table, variability classifier
+
+
+def gaia_variable(source_id) -> dict:
+    """Gaia DR3's own verdict on one source: {"found", "variable", "class", "score"}. `class` is the
+    best class of Gaia's variability classifier (e.g. RR, DSCT|GDOR|SXPHE, LPV, ECL), if it has one.
+    Asked from VizieR's copy of Gaia DR3, the same service as VSX, so the answer does not depend on
+    the Gaia archive being up."""
+    sid = str(source_id or "").replace("Gaia DR3", "").strip()
+    if not sid.isdigit():
+        return {"found": False}
+
+    def table(source, cols):
+        def run():
+            r = net.get(VIZIER, {"-source": source, "Source": sid, "-out": cols, "-out.max": "1"}, timeout=TIMEOUT, tries=1)
+            if not r.ok or "#" not in r.text[:200]:
+                raise net.Upstream("VizieR unavailable")
+            return parse_tsv(r.text)
+        return net.cached_json("cugvar", f"{source}:{sid}", TTL, run)
+    main = table(GAIA_MAIN, "Source,VarFlag")
+    if not main:
+        return {"found": False}
+    classes = table(GAIA_CLASSES, "Source,Class,ClassSc")
+    cls = (classes[0].get("Class") or "").strip() or None if classes else None
+    score = net.num(classes[0].get("ClassSc")) if classes else None
+    return {"found": True, "variable": (main[0].get("VarFlag") or "").strip().upper() == "VARIABLE" or cls is not None,
+            "class": cls, "score": round(score, 2) if score is not None else None}
+
+
+# ---------------------------------------------------------------- the star itself
+GAIA_PARAMS = "I/355/paramp"                # Gaia DR3 astrophysical parameters (FLAME: radius, luminosity, mass, age)
+EXOPLANETS = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
+PLANET_RADIUS_DEG = 0.004                   # 14 arcsec around the star's Gaia position
+NSS = {1: "astrometric", 2: "spectroscopic", 4: "eclipsing"}
+RUWE_DOUBLE = 1.4                           # above this Gaia's single-star fit is poor: often an unseen companion
+
+
+def _vizier_rows(source: str, params: dict, cols: str, kind: str, key: str) -> list[dict]:
+    def run():
+        r = net.get(VIZIER, {"-source": source, **params, "-out": cols, "-out.max": "1"}, timeout=TIMEOUT, tries=1)
+        if not r.ok or "#" not in r.text[:200]:
+            raise net.Upstream("VizieR unavailable")
+        return parse_tsv(r.text)
+    return net.cached_json(kind, f"{source}:{key}", TTL, run)
+
+
+def star_facts(source_id) -> dict:
+    """What Gaia DR3 knows about one star beyond its place in the H-R diagram: distance, speed
+    along the line of sight and in space, where it will be in a thousand years, signs of a
+    companion, and (where Gaia's FLAME module has them) radius, luminosity, mass and age.
+    From VizieR's copy of Gaia DR3. {"found": False} if the source is unknown."""
+    sid = str(source_id or "").replace("Gaia DR3", "").strip()
+    if not sid.isdigit():
+        return {"found": False}
+    rows = _vizier_rows(GAIA_MAIN, {"Source": sid}, "Source,Plx,e_Plx,pmRA,pmDE,RV,e_RV,RUWE,Teff,logg,Dist,NSS,Dup", "cufacts", sid)
+    if not rows:
+        return {"found": False}
+    n = lambda k: net.num(rows[0].get(k))  # noqa: E731
+    plx, e_plx = n("Plx"), n("e_Plx")
+    good = plx is not None and plx > 0 and e_plx and plx / e_plx >= 5
+    dist_pc = 1000.0 / plx if good else n("Dist")
+    pmra, pmdec = n("pmRA") or 0.0, n("pmDE") or 0.0
+    rate = math.hypot(pmra, pmdec) / 1000.0                      # arcsec per year
+    across = tangential_speed(rate, plx) if good else None
+    rv = n("RV")
+    nss = int(n("NSS") or 0)
+    out = {"found": True, "id": sid, "distance_ly": round(dist_pc * 3.2616, 2) if dist_pc else None,
+           "distance_from": "parallax" if good else ("model" if dist_pc else None),
+           "rv_kms": round(rv, 1) if rv is not None else None, "rv_err": n("e_RV"),
+           "across_kms": round(across, 1) if across is not None else None,
+           "space_kms": round(math.hypot(across, rv), 1) if across is not None and rv is not None else None,
+           "rate": round(rate, 4), "direction": compass(math.degrees(math.atan2(pmra, pmdec))) if rate > 0 else None,
+           "in_1000yr_arcmin": round(rate * 1000 / 60, 2),
+           "ruwe": n("RUWE"), "double_hint": bool((n("RUWE") or 0) > RUWE_DOUBLE),
+           "binary": [name for bit, name in NSS.items() if nss & bit], "teff": n("Teff"), "logg": n("logg"),
+           "radius_sun": None, "luminosity_sun": None, "mass_sun": None, "age_gyr": None}
+    try:
+        flame = _vizier_rows(GAIA_PARAMS, {"Source": sid}, "Source,Rad-Flame,Lum-Flame,Mass-Flame,Age-Flame", "cuflame", sid)
+    except Exception:  # noqa: BLE001  (an extra: the facts above stand without it)
+        flame = []
+    if flame:
+        f = lambda k: net.num(flame[0].get(k))  # noqa: E731
+        out.update(radius_sun=f("Rad-Flame"), luminosity_sun=f("Lum-Flame"), mass_sun=f("Mass-Flame"), age_gyr=f("Age-Flame"))
+    return out
+
+
+def known_planets(ra: float, dec: float) -> dict:
+    """Planets the NASA Exoplanet Archive lists around a star within 14 arcsec of (ra, dec):
+    {"host", "planets": [{"name", "period_d", "mass_earth", "radius_earth", "year", "method"}]}."""
+    adql = ("select pl_name,hostname,pl_orbper,pl_bmasse,pl_rade,disc_year,discoverymethod from pscomppars "
+            f"where contains(point('icrs',ra,dec),circle('icrs',{ra:.5f},{dec:.5f},{PLANET_RADIUS_DEG}))=1 order by pl_orbper")
+
+    def run():
+        r = net.get(EXOPLANETS, {"query": adql, "format": "csv"}, timeout=TIMEOUT, tries=1)
+        if not r.ok or not r.text.lstrip().startswith("pl_name"):
+            raise net.Upstream("Exoplanet Archive unavailable")
+        return net.rows(r.text)
+    rows = net.cached_json("cuplanets", adql, TTL, run)
+    planets = [{"name": (row.get("pl_name") or "").strip(), "period_d": net.num(row.get("pl_orbper")),
+                "mass_earth": net.num(row.get("pl_bmasse")), "radius_earth": net.num(row.get("pl_rade")),
+                "year": int(net.num(row.get("disc_year")) or 0) or None, "method": (row.get("discoverymethod") or "").strip() or None}
+               for row in rows]
+    return {"host": (rows[0].get("hostname") or "").strip() if rows else None, "planets": planets}
 
 
 # ---------------------------------------------------------------- other catalogues
+# Flux of a zero-magnitude star (Jy) and the band's wavelength (micron), to put catalogue magnitudes
+# next to the SPHEREx spectrum: 2MASS (Cohen et al. 2003), WISE (Jarrett et al. 2011).
+ZERO_POINTS = {"J": (1594.0, 1.235), "H": (1024.0, 1.662), "K": (666.7, 2.159),
+               "W1": (309.54, 3.353), "W2": (171.787, 4.603), "W3": (31.674, 11.56), "W4": (8.363, 22.09)}
+
+
+def band_fluxes(mags: dict) -> list[dict]:
+    """[{"band", "um", "ujy"}] for the magnitudes of one survey (bands inside SPHEREx's range first)."""
+    out = []
+    for band, mag in (mags or {}).items():
+        if band in ZERO_POINTS and isinstance(mag, (int, float)):
+            f0, um = ZERO_POINTS[band]
+            out.append({"band": band, "um": um, "ujy": f0 * 10 ** (-0.4 * mag) * 1e6})
+    return out
+
+
 def parse_tsv(text: str) -> list[dict]:
     """Rows of a VizieR tab-separated answer (comment lines, then names, units, dashes, data)."""
-    lines = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
-    if len(lines) < 3 or not lines[2].startswith("-"):
+    lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
+    # the names are two lines above the dashes; the units line between is blank when no column has a unit
+    dash = next((i for i, ln in enumerate(lines) if ln.startswith("-")), None)
+    if dash is None or dash < 2:
         return []
-    names = [n.strip() for n in lines[0].split("\t")]
-    return [dict(zip(names, (v.strip() for v in ln.split("\t")))) for ln in lines[3:]]
+    names = [n.strip() for n in lines[dash - 2].split("\t")]
+    return [dict(zip(names, (v.strip() for v in ln.split("\t")))) for ln in lines[dash + 1:] if ln.strip()]
 
 
 def position_at(ra, dec, pmra, pmdec, mjd_from, year_to):
@@ -166,25 +280,26 @@ def cross_match(ra, dec, pmra=0.0, pmdec=0.0, mjd=51544.5, radius_arcsec=6.0) ->
         key = f"{table}:{sra:.5f}:{sdec:+.5f}:{radius_arcsec}"
 
         def run(table=table, idcol=idcol, mags=mags, sra=sra, sdec=sdec):
-            r = explorer._get(VIZIER, {"-source": table, "-c": f"{sra:.6f} {sdec:+.6f}", "-c.rs": f"{radius_arcsec:.1f}",
+            r = net.get(VIZIER, {"-source": table, "-c": f"{sra:.6f} {sdec:+.6f}", "-c.rs": f"{radius_arcsec:.1f}",
                                        "-out": ",".join((idcol, "RAJ2000", "DEJ2000", *mags)), "-out.max": "5"},
                               timeout=TIMEOUT, tries=1)
             if not r.ok or "#" not in r.text[:200]:
-                raise explorer.Upstream("VizieR unavailable")
+                raise net.Upstream("VizieR unavailable")
             return parse_tsv(r.text)
         try:
-            rows = explorer._cached_json("cuxmatch", key, TTL, run)
+            rows = net.cached_json("cuxmatch", key, TTL, run)
         except Exception:  # noqa: BLE001  (optional service)
             out.append({"survey": name, "state": "unreachable"})
             continue
         cosd = math.cos(math.radians(sdec))
 
         def apart(r, sra=sra, sdec=sdec, cosd=cosd):
-            return math.hypot(((explorer._num(r.get("RAJ2000")) or 0) - sra) * cosd, (explorer._num(r.get("DEJ2000")) or 0) - sdec) * 3600
+            return math.hypot(((net.num(r.get("RAJ2000")) or 0) - sra) * cosd, (net.num(r.get("DEJ2000")) or 0) - sdec) * 3600
         best = min(rows, key=apart, default=None)
         if best is None:
             out.append({"survey": name, "state": "none"})
             continue
+        found = {m.replace("mag", ""): net.num(best.get(m)) for m in mags}
         out.append({"survey": name, "state": "found", "id": best.get(idcol, "").strip(), "sep_arcsec": round(apart(best), 2),
-                    "epoch": epoch, "mags": {m.replace("mag", ""): explorer._num(best.get(m)) for m in mags}})
+                    "epoch": epoch, "mags": found, "fluxes": band_fluxes(found)})
     return out

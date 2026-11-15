@@ -120,3 +120,81 @@ def drizzle(exps, ra, dec, fov_arcsec, factor=2, progress=None):
             "filled": round(float((hits >= 0.25).mean()), 3),
             "image": stack.b64(sharp.reshape(n, n).astype(np.float32)),
             "n_native": n_nat, "native_scale": nat, "native": stack.b64(native.reshape(n_nat, n_nat).astype(np.float32))}
+
+
+# ---------------------------------------------------------------- one sharp picture per visit (the Blink viewer)
+MIN_VISIT_EXPOSURES = 12        # fewer dithered exposures leave most fine pixels without a sample of their own
+
+
+def drizzle_onto(exps, ra, dec, n_nat: int, factor: int = 2):
+    """Exposures drizzled onto a grid that covers exactly the n_nat x n_nat native grid centred on
+    (ra, dec), with pixels `factor` times smaller. Returns (image [n, n] float32, filled, used):
+    filled = the share of fine pixels that got samples of their own (the rest come from the smoother
+    bilinear splat); None if no exposure could be used. The cutouts are the ones the all-detector
+    build keeps on disk, so nothing is downloaded."""
+    nat = config.PIXEL_SCALE
+    n = n_nat * factor
+    wfine, wnat = out_wcs(ra, dec, n, nat / factor), out_wcs(ra, dec, n_nat, nat)
+    half = int(math.ceil(n_nat / 2 * math.sqrt(2))) + 2          # the box stack.build_frame cached
+    pt, ptw = np.zeros(n * n), np.zeros(n * n)
+    bl, blw = np.zeros(n * n), np.zeros(n * n)
+    used = 0
+    for e in exps:
+        try:
+            s = _samples(e, ra, dec, half, wfine, wnat)
+        except Exception as ex:  # noqa: BLE001  (one bad file must not sink the picture)
+            print("sharp: skip", repr(ex)[:160])
+            s = None
+        if s is None:
+            continue
+        fx, fy, _, _, v, w = s
+        _point(pt, ptw, fx, fy, v, w, n)
+        _bilinear(bl, blw, fx, fy, v, w, n)
+        used += 1
+    if not used:
+        return None
+    with np.errstate(invalid="ignore", divide="ignore"):
+        smooth = np.where(blw > 0, bl / blw, np.nan)
+        hits = ptw / (np.median(ptw[ptw > 0]) if (ptw > 0).any() else 1)
+        image = np.where(hits >= 0.25, pt / np.where(ptw > 0, ptw, 1), smooth)
+    return image.reshape(n, n).astype(np.float32), round(float((hits >= 0.25).mean()), 3), used
+
+
+def visits(frames, ra, dec, n_nat: int, factor: int = 2) -> dict | None:
+    """One drizzled picture per visit, from every detector band together, in the frame format of
+    /api/frames (stack.group_raw), on a grid `factor` times finer that covers the same sky.
+
+    frames: the stack.Frame list of an all-detector build (their exposures say which cutouts to use).
+    A visit with fewer than MIN_VISIT_EXPOSURES is kept but marked "thin": too few sub-pixel
+    offsets to gain real detail, so its picture is mostly the smooth interpolation."""
+    groups = stack.group_raw(frames, "epoch", matched=False)
+    by_visit: dict[int, list] = {}
+    ordered = sorted(frames, key=lambda f: f.exp.mjd)
+    for f, k in zip(ordered, stack.epochs([f.exp.mjd for f in ordered])):
+        by_visit.setdefault(k + 1, []).append(f)
+    n = n_nat * factor
+    out = []
+    for g in groups:
+        fs = by_visit.get(g["epoch"], [])
+        got = drizzle_onto([f.exp for f in fs], ra, dec, n_nat, factor)
+        if got is None:
+            continue
+        image, filled, used = got
+        fin = np.isfinite(image)
+        sigma = 1.4826 * float(np.median(np.abs(image[fin] - np.median(image[fin])))) if fin.any() else 1.0
+        spots = [(f.phot["x"], f.phot["y"]) for f in fs if "x" in f.phot]
+        frame = {k: v for k, v in g.items() if k not in ("image", "variance", "flags", "match_info")}
+        frame.update(n_exposures=used, filled=filled, thin=used < MIN_VISIT_EXPOSURES, matched=False,
+                     image=image, variance=np.full((n, n), max(sigma, 1e-12) ** 2, np.float32), flags=np.zeros((n, n), np.uint32))
+        if spots:                                   # where the target is in this visit, in picture pixels (y down)
+            x = (float(np.mean([p[0] for p in spots])) + 0.5) * factor - 0.5
+            y = (float(np.mean([p[1] for p in spots])) + 0.5) * factor - 0.5
+            frame["target_px"] = [round(x, 2), round(n - 1 - y, 2)]
+        out.append(frame)
+    if not out:
+        return None
+    scale = config.PIXEL_SCALE / factor
+    return {"grid": {"n": n, "pixel_scale": scale, "ra": ra, "dec": dec, "fov": n * scale,
+                     "wcs": dict(out_wcs(ra, dec, n, scale).to_header())},
+            "frames": stack.encode(out),
+            "sharp": {"factor": factor, "native_scale": config.PIXEL_SCALE, "min_exposures": MIN_VISIT_EXPOSURES}}

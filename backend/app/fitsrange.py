@@ -20,7 +20,7 @@ from astropy.io import fits
 from astropy.io.fits.hdu.compressed._codecs import Rice1
 from astropy.wcs import WCS, FITSFixedWarning
 
-from . import config
+from . import config, irsa
 
 BLOCK = 2880
 MAX_RANGES_PER_REQUEST = 90
@@ -67,8 +67,9 @@ def _parse_multipart(body: bytes, ctype: str):
 
 
 # One cap on IRSA requests for the whole server, however many visitors and worker threads there are
-# (config.IRSA_MAX_INFLIGHT; from Efe's PR #9). The Sky Explorer's cut-outs (explorer.py) share it.
-IRSA_SLOTS = threading.BoundedSemaphore(max(1, config.IRSA_MAX_INFLIGHT))
+# (config.IRSA_MAX_INFLIGHT; from Efe's PR #9). The fast engine and the
+# colour tiles share it (app/irsa.py).
+IRSA_SLOTS = irsa.SLOTS
 
 
 def _get(url, merged, timeout=60):
@@ -76,20 +77,20 @@ def _get(url, merged, timeout=60):
     last = None
     for attempt in range(4):
         try:
-            with IRSA_SLOTS:                  # held for the request and its body, released before any retry wait
+            with IRSA_SLOTS:                      # one of the server-wide IRSA slots, body included
                 r = session().get(url, headers={"Range": "bytes=" + spec}, timeout=timeout, stream=True)
-                busy = r.status_code in (429, 502, 503, 504)
-                if not busy and r.status_code not in (200,):
+                status = r.status_code
+                if status in (200, 429, 502, 503, 504):
+                    r.close()
+                else:
                     r.raise_for_status()
                     body, ctype = r.content, r.headers.get("Content-Type", "")
-            if busy:                          # IRSA busy: wait as asked, then retry
+            if status in (429, 502, 503, 504):            # IRSA busy: wait as asked, then retry
                 wait = r.headers.get("Retry-After", "")
-                r.close()
-                last = IOError(f"HTTP {r.status_code}")
+                last = IOError(f"HTTP {status}")
                 time.sleep(min(30.0, float(wait) if wait.isdigit() else 2.0 ** attempt))
                 continue
-            if r.status_code == 200:          # server ignored the ranges: never download 65 MB
-                r.close()
+            if status == 200:                 # server ignored the ranges: never download 65 MB
                 if len(merged) == 1:
                     raise IOError(f"{url} does not support byte ranges")
                 return [p for rng in merged for p in _get(url, [rng], timeout)]
@@ -187,7 +188,9 @@ def pipeline_version(url: str) -> str:
 
 
 def _template(url):
-    key = pipeline_version(url)
+    # per pipeline version and detector band: in v27 the IMAGE header of bands 1-2 is one block longer
+    band = re.search(r"D(\d)_spx", url) or re.search(r"/(\d)/[^/]+$", url)
+    key = pipeline_version(url) + (f"_D{band.group(1)}" if band else "")
     with _tlock:
         if key in _templates:
             return _templates[key]
@@ -269,17 +272,85 @@ def read_cutout(url: str, ra: float, dec: float, half: int) -> Cutout | None:
     return Cutout(image, var, flags, xa, ya, img.header, x, y)
 
 
-def _read_flags(url, flg: HDUInfo, descriptors, xa, xb):
+def _flag_tiles(url, flg: HDUInfo, descriptors):
+    """Byte ranges of the compressed FLAGS rows whose descriptors (nbytes, heap offset) are given."""
     h = flg.header
     if h.get("ZCMPTYPE", "").strip() != "RICE_1" or h.get("ZTILE2", 1) != 1:
         raise IOError(f"unsupported FLAGS compression in {url}")
     heap = flg.data_start + h.get("THEAP", h["NAXIS1"] * h["NAXIS2"])
-    tiles = [np.frombuffer(d, ">i4") for d in descriptors]          # (nbytes, offset)
-    raw = fetch_ranges(url, [(heap + int(o), heap + int(o) + int(nb)) for nb, o in tiles])
+    tiles = [np.frombuffer(d, ">i4") for d in descriptors]
+    return [(heap + int(o), heap + int(o) + int(nb)) for nb, o in tiles]
+
+
+def _decode_flags(flg: HDUInfo, raw, xa, xb):
+    h = flg.header
     width = h["ZTILE1"]
     codec = Rice1(blocksize=int(h.get("ZVAL1", 32)), bytepix=int(h.get("ZVAL2", 4)), tilesize=width)
     rows = [np.asarray(codec.decode(np.frombuffer(r, np.uint8))).view(np.int32).ravel()[:width][xa:xb] for r in raw]
     return np.array(rows).view(np.uint32)
+
+
+def _read_flags(url, flg: HDUInfo, descriptors, xa, xb):
+    return _decode_flags(flg, fetch_ranges(url, _flag_tiles(url, flg, descriptors)), xa, xb)
+
+
+def read_cutout_fast(url: str, ra: float, dec: float, half: int, region):
+    """read_cutout() in two requests instead of four. The image search says where the exposure sits
+    on the sky (region: its four corners), which predicts the target's pixel to within 8 pixels. So
+    the headers go out together with the image rows and flag descriptors of a box padded by
+    GUESS_PAD pixels; the real header then says which part to keep, and one more request brings the
+    variance rows and the flag bytes. Returns a Cutout, None (not on this detector), or False when
+    the short cut cannot be trusted (no footprint, a guess that missed, an unexpected layout): the
+    caller then uses read_cutout()."""
+    from .engine.fitsread import GUESS_PAD, guess_pixel
+    n = config.DETECTOR_SIZE
+    guess = guess_pixel(region, ra, dec, n, n) if region else None
+    if guess is None:
+        return False
+    t = _template(url)
+    reach = half + GUESS_PAD
+    gx, gy = int(round(guess[0])), int(round(guess[1]))
+    gxa, gxb, gya, gyb = max(0, gx - reach), min(n, gx + reach + 1), max(0, gy - reach), min(n, gy + reach + 1)
+    if gxb - gxa < 3 or gyb - gya < 3:
+        return False
+    img_start = t["image_hdr"]
+    img_data = img_start + t["image_hlen"]
+    flags_start = img_data + _padded(n * n * 4)
+    flags_data = flags_start + t["flags_hlen"]
+    rows = _rows(img_data, range(gya, gyb), gxa, gxb, n)
+    got = fetch_ranges(url, [(img_start, img_data), (flags_start, flags_data)] + rows + [(flags_data + gya * 8, flags_data + gyb * 8)])
+    pi, pf = parse_header(got[0]), parse_header(got[1])
+    if not pi or not pf or pf[0].get("EXTNAME") != "FLAGS" or pf[1] != t["flags_hlen"] or pi[0].get("NAXIS1") != n:
+        return False
+    img = HDUInfo("IMAGE", img_start, img_data, data_size(pi[0]), pi[0])
+    flg = HDUInfo("FLAGS", flags_start, flags_data, data_size(pf[0]), pf[0])
+    x, y = (float(v) for v in WCS(img.header).all_world2pix([[ra, dec]], 0, quiet=True)[0])
+    if not (np.isfinite(x) and np.isfinite(y)):
+        return False
+    xa, xb = max(0, int(round(x)) - half), min(n, int(round(x)) + half + 1)
+    ya, yb = max(0, int(round(y)) - half), min(n, int(round(y)) + half + 1)
+    if xb - xa < 3 or yb - ya < 3:
+        return None
+    if xa < gxa or xb > gxb or ya < gya or yb > gyb:
+        return False                                   # the guess missed
+    k = len(rows)
+    padded = np.frombuffer(b"".join(got[2:2 + k]), ">f4").reshape(gyb - gya, gxb - gxa)
+    image = padded[ya - gya:yb - gya, xa - gxa:xb - gxa].astype(np.float32)
+    desc = got[2 + k]
+    descriptors = [desc[8 * (yy - gya):8 * (yy - gya) + 8] for yy in range(ya, yb)]
+    var_start = flg.end
+    var_data = var_start + t["var_hlen"]
+    var_r = _rows(var_data, range(ya, yb), xa, xb, n)
+    tiles = _flag_tiles(url, flg, descriptors)
+    got2 = fetch_ranges(url, [(var_start, var_data)] + var_r + tiles)
+    var_hdr = parse_header(got2[0])
+    var_raw = got2[1:1 + len(var_r)]
+    if not var_hdr or var_hdr[0].get("EXTNAME") != "VARIANCE" or var_hdr[1] != t["var_hlen"]:
+        info = read_hdu_at(url, var_start)
+        var_raw = fetch_ranges(url, _rows(info.data_start, range(ya, yb), xa, xb, n))
+    var = np.frombuffer(b"".join(var_raw), ">f4").reshape(yb - ya, xb - xa).astype(np.float32)
+    flags = _decode_flags(flg, got2[1 + len(var_r):], xa, xb)
+    return Cutout(image, var, flags, xa, ya, img.header, x, y)
 
 
 # ---------------------------------------------------------------- spectral WCS

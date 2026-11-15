@@ -17,7 +17,6 @@
     if (/[?&]tour=0/.test(location.search)) try { localStorage.setItem('radians-tour', 'done'); } catch (e) { /* private mode */ }
     // a shared link opens straight in the viewer
     if (/[?&]map=1/.test(location.search)) document.documentElement.classList.add('in-map');
-    else if (/[?&]sky=1/.test(location.search)) document.documentElement.classList.add('in-sky');
     else if (/[?&](q|ra)=/.test(location.search)) document.documentElement.classList.add('in-app');
   </script>
 </head>
@@ -32,7 +31,6 @@
     <a class="navl" href="#results" data-i18n="navResults"></a>
     <a class="navl" href="#team" data-i18n="navTeam"></a>
     <a class="navmap" href="?map=1" data-map data-i18n="mapBtn"></a>
-    <a class="navsky" href="?sky=1" data-sky data-i18n="planetBtn"></a>
   </nav>
   <div class="appsearch app-only" id="appSearchSlot"></div>
   <div class="topright">
@@ -67,30 +65,29 @@
       </form>
     </div>
     <p class="hint muted small" data-i18n="searchHint"></p>
-    <p class="qparse small mono" id="qParse" aria-live="polite" hidden></p>
   </section>
 
   <section class="targets" aria-labelledby="tgtTitle">
     <h2 id="tgtTitle" class="sectiontitle" data-i18n="targetsTitle"></h2>
     <div class="cards5" id="examples">
       <button type="button" class="tcard" data-q="Barnard's Star">
-        <img src="static/media/barnard-s-star.gif" alt="" loading="lazy">
+        <img src="static/media/barnard-s-star.webp" alt="" loading="lazy">
         <span class="tname">Barnard's Star</span><span class="tdesc" data-i18n="tBarnard"></span>
       </button>
       <button type="button" class="tcard" data-q="eps Indi B">
-        <img src="static/media/eps-indi-b.gif" alt="" loading="lazy">
+        <img src="static/media/eps-indi-b.webp" alt="" loading="lazy">
         <span class="tname">ε Indi B</span><span class="tdesc" data-i18n="tEpsIndi"></span>
       </button>
       <button type="button" class="tcard" data-q="WISE J085510.83-071442.5" data-det="5,6" data-wl="0">
-        <img src="static/media/wise-0855.gif" alt="" loading="lazy">
+        <img src="static/media/wise-0855.webp" alt="" loading="lazy">
         <span class="tname">WISE 0855−0714</span><span class="tdesc" data-i18n="tWise"></span>
       </button>
       <button type="button" class="tcard" data-q="RW Aur">
-        <img src="static/media/rw-aur.gif" alt="" loading="lazy">
+        <img src="static/media/rw-aur.webp" alt="" loading="lazy">
         <span class="tname">RW Aurigae</span><span class="tdesc" data-i18n="tRwAur"></span>
       </button>
       <button type="button" class="tcard" data-q="R Dra">
-        <img src="static/media/r-dra.gif" alt="" loading="lazy">
+        <img src="static/media/r-dra.webp" alt="" loading="lazy">
         <span class="tname">R Draconis</span><span class="tdesc" data-i18n="tRDra"></span>
       </button>
     </div>
@@ -153,13 +150,12 @@
   </div>
 
   <div class="maptools" role="toolbar" aria-labelledby="mapPalLabel">
-    <span class="maptoolslabel" id="mapPalLabel" data-i18n="mapPal"></span>
-    <div class="palchips" id="mapPals"></div>
+    <span class="maptoolslabel" id="mapPalLabel" data-i18n="mapLevels"></span>
     <label class="palrange"><span data-i18n="mapBright"></span><input type="range" id="mapBright" min="0.5" max="2" step="0.05" value="0.95"></label>
     <label class="palrange"><span data-i18n="mapContrast"></span><input type="range" id="mapContrast" min="0.6" max="2.5" step="0.05" value="1.3"></label>
     <button type="button" class="btn sm ghost" id="mapPalReset" data-i18n="mapPalReset"></button>
   </div>
-  <div class="mapwrap" id="mapWrap" data-pal="gray">
+  <div class="mapwrap" id="mapWrap">
     <div id="skymapAladin"></div>
     <div class="mapdeep" id="mapDeep" role="status" aria-live="polite" hidden>
       <span id="mapDeepText"></span>
@@ -169,7 +165,6 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>
       </button>
     </div>
-    <div class="maptm" id="mapTm" role="note" hidden><b>2MASS</b> <span data-i18n="mapTwoMass"></span></div>
     <div class="maplegend">
       <span><i class="ring c"></i><span data-i18n="mapChallenge"></span></span>
       <span><i class="ring e"></i><span data-i18n="mapExplore"></span></span>
@@ -195,40 +190,30 @@
       </button>
     </div>
   </div>
-  <div class="mapcbar"><span class="muted small" data-i18n="palFaint"></span><i id="mapCbar"></i><span class="muted small" data-i18n="palBright"></span>
-    <span class="small dim" id="mapCbarName"></span></div>
-
-  <section class="mapcard">
-    <div class="mapbar">
-      <button type="button" id="mapPlay" aria-label="Play">
-        <svg class="ic-play" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4l10 6-10 6z"/></svg>
-        <svg class="ic-pause" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h3v12H6zM11 4h3v12h-3z"/></svg>
-      </button>
-      <div class="wlslider">
-        <input type="range" id="mapWl" min="0" max="101" step="1" value="46" aria-label="Wavelength">
-        <div class="wlstrip" id="mapStrip"></div>
-        <div class="wlticks mono" id="mapTicks"></div>
-      </div>
-      <div class="wlread">
-        <i id="mapSwatch"></i>
-        <div><span class="mono wlnum" id="mapWlVal"></span><span class="mono wlband" id="mapWlBand"></span></div>
-      </div>
-    </div>
+  <section class="mapcard" id="mixCard">
     <div class="maprow">
-      <span class="maplabel mono" data-i18n="mapPresets"></span>
-      <div class="chips" id="mapPresets" role="group"></div>
+      <span class="maplabel mono" data-i18n="mixLabel"></span>
+      <div class="chips" id="mixModes" role="group"></div>
+      <span class="tag" id="mixFalse" data-i18n="falseColour" data-i18n-title="falseColourTip" hidden></span>
     </div>
-    <div class="maprow">
-      <span class="maplabel mono" data-i18n="mapMix"></span>
-      <div class="chips" id="mapMixes" role="group"></div>
+    <div class="mapone" id="mapOne">
+      <div class="mapbar">
+        <div class="wlslider">
+          <input type="range" id="mapWl" min="0" max="101" step="1" value="46" aria-label="Wavelength">
+          <div class="wlticks mono" id="mapTicks"></div>
+        </div>
+        <div class="wlread">
+          <div><span class="mono wlnum" id="mapWlVal"></span><span class="mono wlband" id="mapWlBand"></span></div>
+        </div>
+        <button type="button" class="btn primary" id="mapWlGo" data-i18n="mapWlGo" disabled></button>
+      </div>
+      <p class="small dim" id="mapWlNote" role="status" aria-live="polite"></p>
+      <div class="maprow">
+        <span class="maplabel mono" data-i18n="mapPresets"></span>
+        <div class="chips" id="mapPresets" role="group"></div>
+      </div>
     </div>
-    <div class="mapmix" id="mapMixPanel" hidden>
-      <label><i class="mixdot r"></i><span class="mono" id="mapMixRv"></span><input type="range" id="mapMixR" min="0" max="101" step="1"></label>
-      <label><i class="mixdot g"></i><span class="mono" id="mapMixGv"></span><input type="range" id="mapMixG" min="0" max="101" step="1"></label>
-      <label><i class="mixdot b"></i><span class="mono" id="mapMixBv"></span><input type="range" id="mapMixB" min="0" max="101" step="1"></label>
-      <button type="button" class="btn sm" id="mapMixGo" data-i18n="mapMixShow"></button>
-      <p class="small muted" data-i18n="mapMixTip"></p>
-    </div>
+    <div class="mixbody" id="mixBody"></div>
   </section>
 
   <section class="mapcard">
@@ -240,101 +225,43 @@
       <span class="maplabel mono"><i class="ring e"></i><span data-i18n="mapExplore"></span></span>
       <div class="chips" id="mapChipsE"></div>
     </div>
+    <div class="maprow">
+      <span class="maplabel mono"><i class="ring f"></i><span data-i18n="mapFamous"></span></span>
+      <div class="chips" id="mapChipsF"></div>
+    </div>
   </section>
 
   <p class="small dim maphint" data-i18n="mapHint"></p>
   <p class="small dim" id="mapStatus"></p>
 </main>
 
-<!-- ================================================================ planetarium -->
-<main class="mappage sky-only" id="skyPage">
-  <div class="maphead">
-    <div>
-      <p class="eyebrow mono">NASA SPHEREx DR1 · <span data-i18n="skyEyebrow"></span></p>
-      <h1 data-i18n="skyTitle"></h1>
-      <p class="dim" data-i18n="skySub"></p>
-    </div>
-  </div>
-
-  <div class="maptools" role="toolbar">
-    <span class="maptoolslabel" data-i18n="mapPal"></span>
-    <div class="palchips" id="skyPals"></div>
-    <button type="button" class="mapchip togg" id="skyCons" aria-pressed="true"><span data-i18n="skyCons"></span></button>
-    <button type="button" class="mapchip togg" id="skyCine" aria-pressed="false" data-i18n-title="skyCineTip"><span data-i18n="skyCine"></span></button>
-    <button type="button" class="btn sm ghost" id="skyAdv" aria-pressed="false"><span aria-hidden="true">⚙</span> <span data-i18n="skyAdv"></span></button>
-  </div>
-
-  <div class="mapwrap skywrap" id="skyWrap">
-    <div id="skyFrame"></div>
-    <button type="button" class="skyfull" id="skyFull" data-i18n-title="skyFull" aria-label="Full screen">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M17 8V3h-5M3 12v5h5M17 12v5h-5"/></svg>
-    </button>
-  </div>
-
-  <section class="mapcard">
-    <div class="mapbar">
-      <button type="button" id="skyPlay" class="roundplay" data-i18n-title="skyFast" aria-label="Speed up">
-        <svg class="ic-play" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4l10 6-10 6z"/></svg>
-        <svg class="ic-pause" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h3v12H6zM11 4h3v12h-3z"/></svg>
-      </button>
-      <div class="wlslider">
-        <input type="range" id="skyTime" min="0" max="720" step="5" value="180" aria-label="Time">
-        <div class="wlticks skyticks mono" id="skyTicks"></div>
-      </div>
-      <div class="wlread">
-        <div><span class="mono wlnum" id="skyClock">--:--</span><span class="mono wlband" id="skyWhen"></span></div>
-        <button type="button" class="mapchip" id="skyNow"><span data-i18n="skyNow"></span></button>
-      </div>
-    </div>
-    <div class="maprow">
-      <span class="maplabel mono" data-i18n="skyPlace"></span>
-      <div class="chips" id="skyPlaces"></div>
-    </div>
-  </section>
-
-  <section class="mapcard">
-    <div class="maprow">
-      <span class="maplabel mono" data-i18n="skyFamous"></span>
-      <div class="chips" id="skyFamous"></div>
-    </div>
-    <div class="maprow">
-      <span class="maplabel mono"><i class="ring c"></i><span data-i18n="mapChallenge"></span></span>
-      <div class="chips" id="skyChallenge"></div>
-    </div>
-    <div class="maprow">
-      <span class="maplabel mono" data-i18n="skyPlanets"></span>
-      <div class="chips" id="skyPlanets"></div>
-    </div>
-  </section>
-
-  <p class="small dim maphint" data-i18n="skyHint"></p>
-  <p class="small dim" data-i18n="skyCredit"></p>
-</main>
-
 <!-- ================================================================ app -->
 <main class="layout app-only" id="app">
   <section class="viewer" aria-label="Sky viewer">
+    <div class="srcbar" id="srcBar" hidden>
+      <div class="seg" role="group" aria-label="Data" id="srcSeg">
+        <button type="button" data-src="quick" data-i18n="srcQuick" data-i18n-title="srcQuickTitle"></button>
+        <button type="button" data-src="deep" data-i18n="srcDeep" data-i18n-title="srcDeepTitle"></button>
+        <button type="button" data-src="sharp" data-i18n="srcSharp" data-i18n-title="srcSharpTitle"></button>
+      </div>
+      <div class="detchips bandchips" id="bandChips" role="group" aria-label="Detector band"></div>
+      <p class="small muted srcstatus" role="status" aria-live="polite"><span id="srcStatus"></span> <span id="deepStatus"></span></p>
+    </div>
     <div class="viewbar">
       <div class="seg wide" role="group" aria-label="View" id="viewSeg">
         <button type="button" data-view="images" data-i18n="segImages"></button>
         <button type="button" data-view="diff_median" data-i18n="segDiff"></button>
+        <button type="button" data-view="timecolor" data-i18n="segTime" data-i18n-title="viewHelpTime"></button>
         <button type="button" data-view="stack" data-i18n="segStack"></button>
-        <button type="button" data-view="time" data-i18n="segTime"></button>
-      </div>
-      <div class="bandbar" id="bandBar">
-        <div class="seg" role="group" aria-label="Detectors" id="bandSeg">
-          <button type="button" data-band="fast" data-i18n="bandFast"></button>
-          <button type="button" data-band="all" data-i18n="bandAll"></button>
-        </div>
-        <div class="bandchips" id="bandChips" role="group" aria-label="Band"></div>
       </div>
       <select id="view" aria-label="View" class="input sm">
         <option value="images" data-i18n="viewImages"></option>
+        <option value="diff_matched" data-i18n="viewDiffMatched"></option>
         <option value="diff_median" data-i18n="viewDiffMedian"></option>
         <option value="diff_prev" data-i18n="viewDiffPrev"></option>
         <option value="diff_first" data-i18n="viewDiffFirst"></option>
+        <option value="timecolor" data-i18n="viewTime"></option>
         <option value="stack" data-i18n="viewStack"></option>
-        <option value="time" data-i18n="viewTime"></option>
       </select>
     </div>
     <p class="muted small viewhelp" id="viewHelp"></p>
@@ -368,54 +295,9 @@
       <button id="compare" class="btn sm" aria-pressed="false" data-i18n="compare" data-i18n-title="compareTitle"></button>
       <button id="zoom" class="btn sm mono" aria-label="Zoom">1×</button>
       <button id="gif" class="btn sm" data-i18n="gifDl"></button>
-      <button id="fitsDl" class="btn sm" data-i18n="fitsDl"></button>
+      <button id="fitsDl" class="btn sm" data-i18n="fitsDl" data-i18n-title="fitsTitle"></button>
     </div>
     <ol class="timeline" id="timeline"></ol>
-
-    <section class="depth panel" id="depth" hidden aria-labelledby="depthTitle">
-      <header class="depthhead">
-        <div>
-          <h2 id="depthTitle" data-i18n="depthTitle"></h2>
-          <p class="muted small" data-i18n="depthHelp"></p>
-        </div>
-        <span class="depthstatus small" id="depthStatus" role="status" aria-live="polite"></span>
-      </header>
-      <div class="depthgrid">
-        <div class="depthmain">
-          <div class="depthstage">
-            <canvas id="depthSky" width="1" height="1"></canvas>
-            <div class="hud hud-tl mono" id="depthHud"></div>
-          </div>
-          <div class="depthctl">
-            <button type="button" id="depthPlay" class="btn icon sm" aria-label="Play">▶</button>
-            <input id="depthScrub" type="range" min="0" max="0" value="0" data-i18n-title="depthScrub" aria-label="Exposures">
-          </div>
-          <p class="mono small depthn" id="depthN"></p>
-        </div>
-        <div class="depthcards">
-          <figure class="dcard">
-            <figcaption><b data-i18n="depthNoise"></b><span class="muted" data-i18n="depthNoiseSub"></span></figcaption>
-            <div class="dchart" id="depthNoise"></div>
-            <p class="small dnote" id="depthNoiseNote"></p>
-          </figure>
-          <figure class="dcard">
-            <figcaption><b data-i18n="depthStars"></b><span class="muted" data-i18n="depthStarsSub"></span></figcaption>
-            <div class="dchart" id="depthStars"></div>
-            <p class="small dnote" id="depthStarsNote"></p>
-          </figure>
-          <figure class="dcard">
-            <figcaption><b data-i18n="depthDiff"></b><span class="muted" data-i18n="depthDiffSub"></span></figcaption>
-            <canvas class="dimg" id="depthDiff" width="1" height="1"></canvas>
-            <p class="small dnote" id="depthDiffNote"></p>
-          </figure>
-          <figure class="dcard">
-            <figcaption><b data-i18n="depthCov"></b><span class="muted" data-i18n="depthCovSub"></span></figcaption>
-            <canvas class="dimg" id="depthCov" width="1" height="1"></canvas>
-            <p class="small dnote" id="depthCovNote"></p>
-          </figure>
-        </div>
-      </div>
-    </section>
 
     <section class="analysis panel" id="analysis" hidden>
       <div class="tabs" role="tablist">
@@ -429,6 +311,7 @@
           <select id="photMode" class="input sm">
             <option value="aperture" data-i18n="photAperture"></option>
             <option value="wings" data-i18n="photWings"></option>
+            <option value="engine" data-i18n="photEngine"></option>
           </select>
         </label>
         <label class="small check"><input id="photFlagged" type="checkbox" checked> <span data-i18n="photShowFlagged"></span></label>
@@ -447,12 +330,6 @@
       <div class="ctxgrid">
         <div>
           <div class="ctxbar">
-            <select id="ctxSurvey" class="input sm" aria-label="Survey">
-              <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/2MASS/Color">2MASS (J, H, K)</option>
-              <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/AllWISE/RGB-W4-W2-W1">AllWISE (W1, W2, W4)</option>
-              <option value="https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube" selected>SPHEREx DR1</option>
-              <option value="https://irsa.ipac.caltech.edu/data/hips/CDS/DSS2/color">DSS2 (optical)</option>
-            </select>
             <label class="small check"><input id="ctxGaia" type="checkbox" checked> Gaia DR3</label>
             <label class="small check"><input id="ctxCatwise" type="checkbox"> CatWISE2020</label>
           </div>
@@ -464,9 +341,6 @@
           <dl id="frameInfo" class="kv"><dt>—</dt><dd></dd></dl>
           <div id="flagSummary" class="flagsum"></div>
           <details id="expDetails"><summary id="expSummary"></summary><ol id="expList" class="explist"></ol></details>
-          <h3 class="subhead" data-i18n="neossat"></h3>
-          <p class="muted small" data-i18n="neossatHelp"></p>
-          <ul id="neossat" class="neolist"></ul>
         </div>
       </div>
     </details>
@@ -582,9 +456,6 @@
       <select id="cmap" class="input">
         <option value="gray" selected data-i18n="cmGray"></option>
         <option value="invert" data-i18n="cmInvert"></option>
-        <option value="heat" data-i18n="cmHeat"></option>
-        <option value="inferno">Inferno</option>
-        <option value="viridis">Viridis</option>
         <option value="rgb" data-i18n="cmRgb"></option>
       </select>
     </label>
@@ -593,6 +464,7 @@
     <label class="field"><span data-i18n="white"></span><input id="hi" type="range" min="90" max="100" step="0.05" value="99.7"></label>
     <label class="check"><input id="cross" type="checkbox" checked> <span data-i18n="marker"></span></label>
     <label class="check"><input id="flagView" type="checkbox"> <span data-i18n="showFlagged"></span></label>
+    <label class="check" data-i18n-title="smoothTitle"><input id="smooth" type="checkbox"> <span data-i18n="smooth"></span></label>
   </section>
 
   <section>
@@ -637,9 +509,9 @@
 <div class="toast" id="toast" role="status" hidden></div>
 <script src="static/js/blink/app.js" type="module"></script>
 <script src="static/js/core/ui.js" type="module"></script>
+<script src="static/js/core/suggest.js" type="module"></script>
 <script src="static/js/content/about.js" type="module"></script>
 <script src="static/js/map/map.js" type="module"></script>
-<script src="static/js/planetarium/planetsec.js" type="module"></script>
 <script src="static/js/content/funfacts.js" type="module"></script>
 </body>
 </html>

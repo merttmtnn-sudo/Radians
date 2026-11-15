@@ -46,8 +46,9 @@ RATE_LOOKUP = int(os.getenv("RATE_LOOKUP", "60"))           # each catalogue / f
 MAX_COLD_BUILDS = int(os.getenv("MAX_COLD_BUILDS", "2"))    # positions read from IRSA at the same time
 CACHE_MAX_MB = int(os.getenv("CACHE_MAX_MB", "4000"))       # cut-out cache size before oldest files go
 # IRSA throttles parallel requests per client (measured by Efe, PR #9: 12 in flight gave 1.3 exposures/s,
-# 32 gave 0.6/s, 64 gave 0.3/s), so the whole server shares one cap (blink reader + Sky Explorer cut-outs)
-IRSA_MAX_INFLIGHT = int(os.getenv("IRSA_MAX_INFLIGHT", "10"))
+# 32 gave 0.6/s, 64 gave 0.3/s), so the whole server shares one cap: the all-detector reader, the fast
+# engine and the colour tiles (app/irsa.py holds the semaphore)
+IRSA_MAX_INFLIGHT = int(os.getenv("IRSA_MAX_INFLIGHT", "12"))
 
 
 def atomic_write(path, data):
