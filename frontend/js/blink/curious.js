@@ -167,6 +167,7 @@ function el(tag, cls, text) {
  *   { ra, dec, mjd, pmra, pmdec, gaiaId, cand, spot, wings,
  *     points: [{mjd, wavelength, value, err, flagged, saturated}] }.
  *   spot: the "is a star there" check of the photometry ({state: 'star' | 'empty' | 'wing'}) or null.
+ *   gaiaDown: the page could not load the field's Gaia stars, so a missing gaiaId means "unknown".
  * Returns { reset() } to call whenever another spot is measured, and { redraw() } on a language change.
  */
 export function createCurious(host, { t, ctx }) {
@@ -188,14 +189,19 @@ export function createCurious(host, { t, ctx }) {
     }
     if (tool === 'period') {
       // what the catalogues know is worth showing even where we cannot test the star ourselves
-      const known = get('api/curious/variable', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), gaia_id: c.gaiaId }).catch(() => null);
+      const known = get('api/curious/variable', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), gaia_id: c.gaiaId })
+        .then(k => (!c.gaiaId && c.gaiaDown ? { ...k, gaia: { reachable: false } } : k)).catch(() => null);
       if (c.spot && (c.spot.state === 'empty' || c.spot.state === 'wing')) return { ok: false, reason: c.spot.state, known: await known };
       const r = await fetch(new URL('api/curious/period', location.href), { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ points: c.points, wings: !!c.wings }) });
       if (!r.ok) throw new Error(String(r.status));
       return { ...(await r.json()), known: await known };
     }
-    if (tool === 'facts') return get('api/curious/facts', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), gaia_id: c.gaiaId });
+    if (tool === 'facts') {
+      const d = await get('api/curious/facts', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), gaia_id: c.gaiaId });
+      // without the field's Gaia list we do not know which Gaia star this is: say so, not "not in Gaia"
+      return !c.gaiaId && c.gaiaDown ? { ...d, star: { reachable: false } } : d;
+    }
     const [g, x] = await Promise.all([gaia(), get('api/curious/xmatch', { ra: c.ra.toFixed(6), dec: c.dec.toFixed(6), pmra: c.pmra, pmdec: c.pmdec, mjd: c.mjd.toFixed(1) })]);
     return { gaia: g, surveys: x.surveys, flux: fluxRows(x.surveys, c.points) };
   }

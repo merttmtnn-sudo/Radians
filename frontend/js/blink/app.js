@@ -1498,6 +1498,7 @@ function curiousCtx() {
   return { ra: spot.ra, dec: spot.dec, mjd, pmra: pm[0], pmdec: pm[1], gaiaId: g ? String(g.id) : null, fitAt,
     cand: mover ? { ...mover, dir: COMPASS[Math.round((((mover.pa_deg % 360) + 360) % 360) / 45) % 8] } : null,
     spot: ex.spot, wings: e4.photMode.value === 'wings',
+    gaiaDown: ex.gaiaState !== 'ok',          // the field's Gaia list did not load: 'no Gaia star here' is then not known
     points: ex.phot.map(p => ({ mjd: p.mjd, wavelength: p.wavelength, value: valueOf(p),
       err: e4.photMode.value === 'wings' ? null : p.err_ujy, flagged: !!p.flagged, saturated: !!p.saturated })) };
 }
@@ -1557,6 +1558,8 @@ async function loadType() {
   if (!live()) return;
   try {
     const r = await ask({ catalogues: true, gaia_id: gaiaIdAt(spot) });
+    // the field's Gaia list did not load: 'no Gaia star here' is then not known, and the box says so
+    if (ex.gaiaState !== 'ok' && r.catalogue?.gaia && !r.catalogue.gaia.found) r.catalogue.gaia = { ok: false };
     if (live()) { typeState.res = { ...r, spot: ex.spot }; renderAnalysis(); }
   } catch {
     if (live()) { typeState.res = { ...typeState.res, pending: false, catFail: true }; drawType(); }
